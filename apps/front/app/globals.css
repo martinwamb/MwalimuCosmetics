@@ -1,0 +1,156 @@
+:root {
+  --sand: #fdf6f0;
+  --rose: #fda4af;
+  --slate: #1f2937;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--sand);
+  color: var(--slate);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.bg-sand {
+  background: var(--sand);
+}
+
+.text-slate-900 {
+  color: #111827;
+}
+
+.border-rose-200 {
+  border-color: #fecdd3;
+}
+
+.bg-white\/70 {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.backdrop-blur {
+  backdrop-filter: blur(10px);
+}
+
+.flex {
+  display: flex;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.gap-4 {
+  gap: 1rem;
+}
+
+.min-h-screen {
+  min-height: 100vh;
+}
+
+.max-w-6xl {
+  max-width: 72rem;
+}
+
+.mx-auto {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.px-6 {
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.py-4 {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+.py-8 {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+.text-lg {
+  font-size: 1.125rem;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.tracking-tight {
+  letter-spacing: -0.02em;
+}
+
+.text-sm {
+  font-size: 0.875rem;
+}
+
+.hover\:text-rose-600:hover {
+  color: #e11d48;
+}
+
+.grid {
+  display: grid;
+}
+
+.grid-cols-3 {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.gap-6 {
+  gap: 1.5rem;
+}
+
+.card {
+  background: white;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+}
+
+.card h3 {
+  margin: 0 0 0.35rem;
+}
+
+.muted {
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.button {
+  display: inline-block;
+  background: linear-gradient(135deg, #f472b6, #fb7185);
+  color: white;
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #fce7f3;
+  color: #db2777;
+  font-weight: 600;
+  font-size: 0.75rem;
+}

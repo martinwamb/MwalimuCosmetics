@@ -1,0 +1,22 @@
+{
+  "name": "mwalimu-cosmetics",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mwalimu Cosmetics commerce platform monorepo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:front": "npm run dev --workspace=@mwalimu/front",
+    "dev:back": "npm run dev --workspace=@mwalimu/back",
+    "dev:worker": "npm run dev --workspace=@mwalimu/worker",
+    "dev:pos": "npm run dev --workspace=@mwalimu/pos",
+    "build": "npm run build --workspace=@mwalimu/front",
+    "format": "npm run format --workspaces",
+    "lint": "npm run lint --workspaces"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

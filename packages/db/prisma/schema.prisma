@@ -1,0 +1,249 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  role          Role
+  passwordHash  String
+  biometricRef  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  salesOrders   SalesOrder[] @relation("SalesUser")
+  clockings     Clocking[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  sku         String   @unique
+  description String?
+  category    Category @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  price       Decimal  @db.Decimal(12, 2)
+  cost        Decimal  @db.Decimal(12, 2)
+  stockQty    Int      @default(0)
+  status      ProductStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  items       SalesOrderItem[]
+  priceWatch  PriceWatch[]
+  recommendations AiRecommendation[] @relation("ProductRecommendations")
+  inventoryMovements InventoryMovement[]
+}
+
+model Category {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  products Product[]
+}
+
+model Customer {
+  id        String     @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  loyalty   Int        @default(0)
+  orders    SalesOrder[]
+  createdAt DateTime   @default(now())
+}
+
+model SalesOrder {
+  id             String          @id @default(cuid())
+  channel        OrderChannel
+  status         OrderStatus     @default(PENDING)
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  customerId     String?
+  createdBy      User?           @relation("SalesUser", fields: [createdById], references: [id])
+  createdById    String?
+  paymentStatus  PaymentStatus   @default(UNPAID)
+  paymentMethod  PaymentMethod?
+  subtotal       Decimal         @db.Decimal(12, 2)
+  tax            Decimal         @db.Decimal(12, 2) @default(0)
+  discount       Decimal         @db.Decimal(12, 2) @default(0)
+  total          Decimal         @db.Decimal(12, 2)
+  createdAt      DateTime        @default(now())
+  items          SalesOrderItem[]
+  payments       Payment[]
+}
+
+model SalesOrderItem {
+  id        String   @id @default(cuid())
+  order     SalesOrder @relation(fields: [orderId], references: [id])
+  orderId   String
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
+  qty       Int
+  unitPrice Decimal  @db.Decimal(12, 2)
+  discount  Decimal  @db.Decimal(12, 2) @default(0)
+  tax       Decimal  @db.Decimal(12, 2) @default(0)
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  order       SalesOrder    @relation(fields: [orderId], references: [id])
+  orderId     String
+  amount      Decimal       @db.Decimal(12, 2)
+  method      PaymentMethod
+  reference   String?
+  txnTime     DateTime      @default(now())
+  reconciled  Boolean       @default(false)
+  gatewayMeta Json?
+}
+
+model Purchase {
+  id          String     @id @default(cuid())
+  supplier    Supplier   @relation(fields: [supplierId], references: [id])
+  supplierId  String
+  totalCost   Decimal    @db.Decimal(12, 2)
+  notes       String?
+  createdAt   DateTime   @default(now())
+  items       PurchaseItem[]
+}
+
+model PurchaseItem {
+  id         String    @id @default(cuid())
+  purchase   Purchase  @relation(fields: [purchaseId], references: [id])
+  purchaseId String
+  product    Product   @relation(fields: [productId], references: [id])
+  productId  String
+  qty        Int
+  cost       Decimal   @db.Decimal(12, 2)
+}
+
+model Supplier {
+  id        String    @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  purchases Purchase[]
+}
+
+model InventoryMovement {
+  id         String   @id @default(cuid())
+  product    Product  @relation(fields: [productId], references: [id])
+  productId  String
+  delta      Int
+  reason     String
+  createdAt  DateTime @default(now())
+}
+
+model BankAccount {
+  id        String    @id @default(cuid())
+  name      String
+  balance   Decimal   @db.Decimal(14, 2)
+  statements BankStatement[]
+}
+
+model BankStatement {
+  id            String    @id @default(cuid())
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+  bankAccountId String
+  description   String
+  amount        Decimal   @db.Decimal(12, 2)
+  txnDate       DateTime
+  reconciliations BankReconciliation[]
+}
+
+model BankReconciliation {
+  id             String       @id @default(cuid())
+  statementLine  BankStatement @relation(fields: [statementId], references: [id])
+  statementId    String
+  payment        Payment?     @relation(fields: [paymentId], references: [id])
+  paymentId      String?
+  status         ReconciliationStatus @default(UNMATCHED)
+  notes          String?
+  createdAt      DateTime @default(now())
+}
+
+model PriceWatch {
+  id         String    @id @default(cuid())
+  product    Product   @relation(fields: [productId], references: [id])
+  productId  String
+  marketPrice Decimal  @db.Decimal(12, 2)
+  source     String
+  checkedAt  DateTime  @default(now())
+}
+
+model AiRecommendation {
+  id         String    @id @default(cuid())
+  type       RecommendationType
+  payload    Json
+  status     RecommendationStatus @default(PENDING)
+  createdAt  DateTime  @default(now())
+  product    Product?  @relation("ProductRecommendations", fields: [productId], references: [id])
+  productId  String?
+}
+
+model Clocking {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  timeIn    DateTime
+  timeOut   DateTime?
+  deviceRef String?
+}
+
+enum Role {
+  CUSTOMER
+  SALES
+  ACCOUNTS
+  ADMIN
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum OrderChannel {
+  ONLINE
+  COUNTER
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FULFILLED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum PaymentMethod {
+  CARD
+  CASH
+  MOBILE_MONEY
+  BANK_TRANSFER
+}
+
+enum ReconciliationStatus {
+  UNMATCHED
+  MATCHED
+  REVIEW
+}
+
+enum RecommendationType {
+  PRICE_GAP
+  SLOW_MOVER_DISCOUNT
+  SEASONAL_STOCK
+}
+
+enum RecommendationStatus {
+  PENDING
+  APPROVED
+  APPLIED
+  DISMISSED
+}
