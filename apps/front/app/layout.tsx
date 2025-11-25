@@ -10,23 +10,38 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-screen bg-sand text-slate-900">
-        <header className="border-b border-rose-200 bg-white/70 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-            <div className="text-lg font-semibold tracking-tight">Mwalimu Cosmetics</div>
-            <nav className="flex gap-4 text-sm">
-              <a href="/" className="hover:text-rose-600">
-                Shop
-              </a>
-              <a href="/dashboard" className="hover:text-rose-600">
-                Admin
-              </a>
-              <a href="/pos" className="hover:text-rose-600">
-                POS
-              </a>
+        <header className="header">
+          <div className="nav-primary">
+            <a href="/" className="brand">
+              Mwalimu Cosmetics
+            </a>
+            <div className="search">
+              <select aria-label="Category">
+                <option>All beauty</option>
+                <option>Skin care</option>
+                <option>Hair</option>
+                <option>Makeup</option>
+              </select>
+              <input placeholder="Search Mwalimu like you do on Amazon..." aria-label="Search" />
+              <button aria-label="Search products">Search</button>
+            </div>
+            <nav className="nav-links">
+              <a href="/dashboard">Admin</a>
+              <a href="/pos">POS</a>
+              <a href="/">Orders</a>
             </nav>
           </div>
+          <div className="nav-sub">
+            <div className="nav-sub-inner">
+              <span>Today's Deals</span>
+              <span>Bundles</span>
+              <span>Prime-style Delivery</span>
+              <span>Customer Favorites</span>
+              <span>Gifts & Kits</span>
+            </div>
+          </div>
         </header>
-        <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+        <main className="page-shell">{children}</main>
       </body>
     </html>
   );

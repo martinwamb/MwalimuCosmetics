@@ -1,0 +1,65 @@
+name: Deploy to Contabo
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+      APP_PORT: 3001
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Add SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ env.DEPLOY_KEY }}
+
+      - name: Sync files to server
+        run: |
+          rsync -az --delete \
+            -e "ssh -o StrictHostKeyChecking=no" \
+            --exclude ".git" \
+            --exclude "node_modules/" \
+            --exclude ".next/" \
+            --exclude "apps/front/.next/" \
+            --exclude "apps/front/out/" \
+            --exclude "apps/back/dist/" \
+            --filter 'P .env' \
+            --filter 'P .env.*' \
+            ./ $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/
+
+      - name: Post-deploy (install, build, restart)
+        run: |
+          ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "DEPLOY_DIR='$DEPLOY_DIR' APP_PORT='$APP_PORT' bash -s" <<'EOF'
+          set -e
+          cd "$DEPLOY_DIR"
+
+          # Ensure backend PORT is set
+          mkdir -p apps/back
+          env_file="apps/back/.env"
+          if [ -f "$env_file" ]; then
+            if grep -q '^PORT=' "$env_file"; then
+              sed -i "s|^PORT=.*|PORT=${APP_PORT:-3001}|" "$env_file"
+            else
+              printf '\nPORT=%s\n' "${APP_PORT:-3001}" >> "$env_file"
+            fi
+          else
+            printf 'PORT=%s\n' "${APP_PORT:-3001}" > "$env_file"
+          fi
+
+          npm ci
+          npm run build --workspace=@mwalimu/back
+
+          pushd apps/back >/dev/null
+          PORT=${APP_PORT:-3001} pm2 restart mwalimu-back || PORT=${APP_PORT:-3001} pm2 start npm --name "mwalimu-back" -- run start
+          pm2 save
+          popd >/dev/null
+          EOF
