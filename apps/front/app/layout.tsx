@@ -22,21 +22,27 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <option>Hair</option>
                 <option>Makeup</option>
               </select>
-              <input placeholder="Search Mwalimu like you do on Amazon..." aria-label="Search" />
+              <input placeholder="Search Mwalimu favorites..." aria-label="Search" />
               <button aria-label="Search products">Search</button>
             </div>
-            <nav className="nav-links">
-              <a href="/dashboard">Admin</a>
-              <a href="/pos">POS</a>
-              <a href="/">Orders</a>
+            <nav className="nav-links nav-actions">
+              <a href="/">Home</a>
+              <div className="language-switch" aria-label="Language">
+                <span>EN</span>
+                <span className="divider">|</span>
+                <span>KE</span>
+              </div>
+              <a href="/sign-in">Sign in</a>
+              <a href="/orders">Orders</a>
+              <a href="/cart">Cart</a>
             </nav>
           </div>
           <div className="nav-sub">
             <div className="nav-sub-inner">
-              <span>Today's Deals</span>
-              <span>Bundles</span>
-              <span>Prime-style Delivery</span>
-              <span>Customer Favorites</span>
+              <span>Skin care</span>
+              <span>Makeup</span>
+              <span>Hair</span>
+              <span>Fragrance</span>
               <span>Gifts & Kits</span>
             </div>
           </div>

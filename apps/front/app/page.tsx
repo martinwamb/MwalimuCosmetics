@@ -40,7 +40,7 @@ const catalog: Product[] = [
     price: 18.0,
     rating: 4.6,
     reviews: 129,
-    delivery: "Prime-style same-day",
+    delivery: "Same-day delivery",
     tagline: "All-day color"
   },
   {
@@ -81,33 +81,39 @@ export default function Page() {
     <div>
       <section className="hero">
         <div className="hero-card">
-          <div className="hero-eyebrow">Amazon-inspired shopping</div>
-          <h1>Shop Mwalimu like you would on Amazon</h1>
+          <div className="hero-eyebrow">Holiday-ready glow</div>
+          <h1>Glow-worthy picks from Mwalimu Cosmetics</h1>
           <p className="muted">
-            Familiar navigation, crisp product tiles, Prime-style delivery cues, and a bright add-to-cart flow crafted
-            for fast decisions.
+            Rich butters, brightening serums, long-wear pigments, and thoughtful bundles that keep skin soft and color
+            bold all season.
           </p>
           <div className="hero-actions">
             <button className="button">Shop bestsellers</button>
-            <button className="button ghost">View bundles</button>
+            <button className="button ghost">Build your kit</button>
           </div>
           <div className="hero-pill-row">
-            <span className="mini-pill">✓ Prime-style shipping</span>
-            <span className="mini-pill">✓ 30-day returns</span>
-            <span className="mini-pill">✓ Secure checkout</span>
+            <span className="mini-pill">Fast local delivery</span>
+            <span className="mini-pill">Fresh stock, sealed</span>
+            <span className="mini-pill">Easy returns</span>
           </div>
         </div>
         <div className="deal-card">
-          <strong style={{ fontSize: "1.05rem" }}>Beauty & wellness dashboard</strong>
+          <strong style={{ fontSize: "1.05rem" }}>Why shoppers sign in</strong>
           <p className="muted" style={{ marginTop: "0.3rem" }}>
-            Keep tabs on delivery promises, restocks, and impulse-friendly offers that mirror the Amazon feel.
+            Save favorites, reorder in one tap, check delivery statuses, and unlock staff consoles when you log in as
+            team.
           </p>
           <div className="deal-grid">
-            {["Same-day delivery", "Add-on deals", "Subscribe & save", "Bundles & gifts"].map((tile) => (
-              <div key={tile} className="deal-tile">
-                <strong>{tile}</strong>
+            {[
+              { title: "Track deliveries", hint: "Live status for every parcel" },
+              { title: "See past orders", hint: "Buy again from your routine" },
+              { title: "Staff workspace", hint: "Accounts, sales, store, delivery" },
+              { title: "Clock in/out", hint: "Staff attendance after sign-in" }
+            ].map((tile) => (
+              <div key={tile.title} className="deal-tile">
+                <strong>{tile.title}</strong>
                 <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-                  Manage spotlight promos.
+                  {tile.hint}
                 </p>
               </div>
             ))}
@@ -120,10 +126,10 @@ export default function Page() {
           <div className="hero-eyebrow" style={{ marginBottom: "0.25rem" }}>
             Products
           </div>
-          <h2 style={{ margin: 0 }}>Bestsellers with an Amazon-style shell</h2>
+          <h2 style={{ margin: 0 }}>Bestsellers to soften skin and brighten color</h2>
         </div>
         <div className="filter-row">
-          {["Prime-style", "Bestsellers", "New arrivals", "Bundles", "Under $25"].map((filter) => (
+          {["Hydration", "Brightening", "Long-wear color", "Bundles", "Under $25"].map((filter) => (
             <button key={filter} className="filter-chip">
               {filter}
             </button>
@@ -141,7 +147,7 @@ export default function Page() {
               {product.description}
             </p>
             <div className="rating">
-              <span>{"★".repeat(5)}</span>
+              <span>{"*".repeat(5)}</span>
               <span>{product.rating.toFixed(1)}</span>
               <span className="muted">({product.reviews})</span>
             </div>
@@ -150,7 +156,7 @@ export default function Page() {
             </p>
             <div className="delivery">{product.delivery}</div>
             <p className="muted" style={{ margin: 0 }}>
-              Eligible for Prime-style perks & easy returns.
+              Eligible for express delivery and easy returns.
             </p>
             <div className="actions">
               <button className="button full">Add to Cart</button>
@@ -159,6 +165,45 @@ export default function Page() {
           </article>
         ))}
       </div>
+
+      <section className="signin-preview">
+        <article className="card">
+          <div className="hero-eyebrow" style={{ marginBottom: "0.4rem" }}>
+            Customers
+          </div>
+          <h3 style={{ margin: 0 }}>Sign in to pick up where you left off</h3>
+          <p className="muted" style={{ marginTop: "0.35rem" }}>
+            See past orders, reorder routines, and follow every delivery without leaving the store.
+          </p>
+          <div className="tag-list">
+            <span className="mini-pill">Past orders</span>
+            <span className="mini-pill">Delivery updates</span>
+            <span className="mini-pill">Saved routines</span>
+          </div>
+          <a className="text-link" href="/sign-in">
+            Sign in to view your history
+          </a>
+        </article>
+        <article className="card">
+          <div className="hero-eyebrow" style={{ marginBottom: "0.4rem" }}>
+            Staff
+          </div>
+          <h3 style={{ margin: 0 }}>Team console unlocks after sign-in</h3>
+          <p className="muted" style={{ marginTop: "0.35rem" }}>
+            Accounts, sales, admin, store, and delivery teams each get their own workspace plus a clock-in station.
+          </p>
+          <div className="tag-list">
+            <span className="mini-pill">Accounts receivables</span>
+            <span className="mini-pill">Sales dashboards</span>
+            <span className="mini-pill">Store inventory</span>
+            <span className="mini-pill">Delivery routing</span>
+            <span className="mini-pill">Clock in/out</span>
+          </div>
+          <a className="text-link" href="/sign-in">
+            Sign in as staff to continue
+          </a>
+        </article>
+      </section>
     </div>
   );
 }

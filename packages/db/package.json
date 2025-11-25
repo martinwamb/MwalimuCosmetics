@@ -6,7 +6,8 @@
   "scripts": {
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "lint": "echo \"lint not configured for @mwalimu/db yet\""
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
