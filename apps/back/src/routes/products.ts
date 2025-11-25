@@ -28,6 +28,6 @@ router.post("/", (req, res) => {
   }
 
   const product = parsed.data;
-  mockProducts.push(product);
+  mockProducts.push({ ...product, description: product.description ?? "" });
   res.status(201).json({ data: product });
 });
