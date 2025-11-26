@@ -34,6 +34,7 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   items       SalesOrderItem[]
+  purchaseItems PurchaseItem[]
   priceWatch  PriceWatch[]
   recommendations AiRecommendation[] @relation("ProductRecommendations")
   inventoryMovements InventoryMovement[]
@@ -96,6 +97,7 @@ model Payment {
   txnTime     DateTime      @default(now())
   reconciled  Boolean       @default(false)
   gatewayMeta Json?
+  bankReconciliations BankReconciliation[]
 }
 
 model Purchase {
