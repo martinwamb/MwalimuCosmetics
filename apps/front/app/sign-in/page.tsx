@@ -2,230 +2,338 @@
 
 import { useMemo, useState } from "react";
 
-const staffRoles = ["Accounts", "Sales", "Admin", "Store", "Delivery"];
+type Phase = "identifier" | "password" | "clock";
 
-const customerTiles = [
-  { title: "Orders and delivery", detail: "See past orders, live delivery statuses, and start returns." },
-  { title: "Reorder fast", detail: "Buy again from saved routines and recent carts." },
-  { title: "Language and region", detail: "Switch language, currency notes, and delivery windows." }
-];
+const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-const staffTiles = [
-  { title: "Accounts", detail: "Invoices, receivables, payouts, and statements." },
-  { title: "Sales", detail: "Targets, funnels, and counter sales performance." },
-  { title: "Admin", detail: "Permissions, staff invites, and locations." },
-  { title: "Store", detail: "Inventory, counts, put-aways, and price labels." },
-  { title: "Delivery", detail: "Routes, drop confirmations, and POD uploads." }
-];
+function isStaffRole(role: string | null) {
+  return Boolean(role && role !== "CUSTOMER");
+}
 
-const clockSteps = [
-  { title: "Clock in", detail: "Secure tap with WebAuthn, OTP, or staff PIN." },
-  { title: "Add context", detail: "Shift note, location, and counter or route selected." },
-  { title: "Clock out", detail: "Capture break time, route completion, or handover." }
-];
+function friendlyRole(role: string | null) {
+  if (!role) return "Role will load after lookup";
+  switch (role) {
+    case "ADMIN":
+      return "Admin";
+    case "ACCOUNTS":
+      return "Accounts";
+    case "SALES":
+      return "Sales";
+    case "CUSTOMER":
+      return "Customer";
+    default:
+      return role;
+  }
+}
 
 export default function SignInPage() {
-  const [role, setRole] = useState<"customer" | "staff">("customer");
-  const [staffRole, setStaffRole] = useState<string>(staffRoles[0]);
+  const [phase, setPhase] = useState<Phase>("identifier");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [exists, setExists] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [clockStatus, setClockStatus] = useState<string | null>(null);
+  const [clockedIn, setClockedIn] = useState(false);
+  const [forgotStatus, setForgotStatus] = useState<string | null>(null);
 
-  const staffHeadline = useMemo(() => {
-    switch (staffRole) {
-      case "Accounts":
-        return "Accounts sees receivables, payouts, and approvals.";
-      case "Sales":
-        return "Sales sees counters, top SKUs, and discounts ready to apply.";
-      case "Admin":
-        return "Admin manages locations, access, and security.";
-      case "Store":
-        return "Store tracks stock, counts, and pick-pack updates.";
-      case "Delivery":
-        return "Delivery views routes, POD, and cash on delivery totals.";
-      default:
-        return "Staff workspaces adapt to the role you select.";
+  const heading = useMemo(() => {
+    if (phase === "identifier") return "Sign in or create account";
+    if (phase === "clock") return "Verify identity to clock in";
+    return exists ? "Enter your password" : "Create a password to finish";
+  }, [phase, exists]);
+
+  const subhead = useMemo(() => {
+    if (phase === "identifier") {
+      return "Enter your email to continue. New customers will create an account; staff are matched to their admin-created profile.";
     }
-  }, [staffRole]);
+    if (phase === "clock") {
+      return "Take a selfie or fingerprint scan to confirm it is you. This counts as your clock-in/out event.";
+    }
+    if (exists) return "Staff sign-ins unlock the workspace and biometric clock-in.";
+    return "Create your customer account to track orders and delivery status.";
+  }, [phase, exists]);
+
+  function resetFlow() {
+    setPhase("identifier");
+    setPassword("");
+    setError(null);
+    setMessage(null);
+    setRole(null);
+    setExists(false);
+    setClockStatus(null);
+    setClockedIn(false);
+    setForgotStatus(null);
+  }
+
+  async function handleLookup(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    setClockStatus(null);
+    setForgotStatus(null);
+
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setError("Enter your email to continue.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/auth/identify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data?.error as string) ?? "Could not look up that email.");
+      }
+
+      setExists(Boolean(data.exists));
+      setRole(data.role ?? null);
+      setPhase("password");
+      setMessage(data.exists ? `We found your ${friendlyRole(data.role ?? null)} account.` : "New customer account. Set a password to continue.");
+    } catch (err: any) {
+      setError(err?.message ?? "Unable to continue. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handlePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    setClockStatus(null);
+    setForgotStatus(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError("Email is missing. Go back and enter it again.");
+      return;
+    }
+    if (!password) {
+      setError("Enter your password to continue.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const path = exists ? "/auth/login" : "/auth/register";
+      const res = await fetch(`${apiBase}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail, password })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = (data?.error?.message as string) ?? (data?.error as string) ?? "Unable to sign in.";
+        throw new Error(detail);
+      }
+
+      const nextRole = (data?.user?.role as string | undefined) ?? role ?? (exists ? null : "CUSTOMER");
+      setRole(nextRole ?? null);
+      setExists(true);
+      if (data?.token) {
+        try {
+          localStorage.setItem("mwalimu_token", data.token as string);
+        } catch {
+          // best-effort only
+        }
+      }
+
+      setMessage(exists ? "Signed in successfully." : "Account created and signed in.");
+
+      if (isStaffRole(nextRole ?? null)) {
+        setPhase("clock");
+        setClockStatus("Ready for biometric verification.");
+      }
+    } catch (err: any) {
+      setError(err?.message ?? "Unable to sign in. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleBiometricCapture(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    setClockStatus("Capturing selfie / fingerprint...");
+    // Placeholder for biometric SDK integration; simulate success.
+    setTimeout(() => {
+      if (!clockedIn) {
+        setClockedIn(true);
+        setClockStatus("Biometric match confirmed. Clocked in.");
+        setMessage("Clock-in event recorded.");
+      } else {
+        setClockedIn(false);
+        setClockStatus("Biometric match confirmed. Clocked out.");
+        setMessage("Clock-out event recorded.");
+      }
+    }, 600);
+  }
+
+  async function handleForgot(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setError(null);
+    setForgotStatus(null);
+    setMessage(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError("Enter your email first so we can send reset instructions.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/auth/forgot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data?.error as string) ?? "Could not start password reset.");
+      }
+      setForgotStatus(data?.message ?? "If that account exists, reset instructions are on the way.");
+    } catch (err: any) {
+      setError(err?.message ?? "Could not start password reset. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const staffBadge = isStaffRole(role);
 
   return (
-    <div className="signin-shell">
-      <div className="signin-panel">
-        <div className="hero-eyebrow" style={{ marginBottom: "0.45rem" }}>
-          Sign in
-        </div>
-        <h2 style={{ margin: "0 0 0.35rem" }}>Welcome back to Mwalimu</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Choose whether you are shopping or working today. Everyone keeps Home, language, sign in, orders, and cart at
-          the top bar.
+    <div className="signin-stack">
+      <div className="signin-card">
+        <div className="brand-lockup">Mwalimu Cosmetics</div>
+        <h1 className="signin-title">{heading}</h1>
+        <p className="muted" style={{ margin: "0 0 0.5rem" }}>
+          {subhead}
         </p>
 
-        <div className="role-tabs">
-          <button
-            className={`role-tab ${role === "customer" ? "active" : ""}`}
-            onClick={() => setRole("customer")}
-            type="button"
-          >
-            Customer
-          </button>
-          <button
-            className={`role-tab ${role === "staff" ? "active" : ""}`}
-            onClick={() => setRole("staff")}
-            type="button"
-          >
-            Staff
-          </button>
-        </div>
+        <form onSubmit={phase === "identifier" ? handleLookup : handlePassword} className="signin-form">
+          {phase !== "identifier" && (
+            <div className="signin-identity">
+              <div>
+                <strong>{email}</strong>
+                <div className="pill subtle">{friendlyRole(role)}</div>
+              </div>
+              <button type="button" className="link-button" onClick={resetFlow}>
+                Change
+              </button>
+            </div>
+          )}
 
-        <div className="form-grid">
-          <label className="input-group">
-            <span>Email</span>
-            <input type="email" placeholder="you@example.com" />
-          </label>
-          <label className="input-group">
-            <span>Password</span>
-            <input type="password" placeholder="********" />
-          </label>
-          <label className="input-group">
-            <span>Language</span>
-            <select defaultValue="EN">
-              <option>EN</option>
-              <option>SW</option>
-              <option>FR</option>
-            </select>
-          </label>
-          {role === "staff" && (
+          {phase === "identifier" ? (
             <label className="input-group">
-              <span>Team</span>
-              <select value={staffRole} onChange={(event) => setStaffRole(event.target.value)}>
-                {staffRoles.map((item) => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
+              <span>Enter email</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </label>
+          ) : (
+            <label className="input-group">
+              <span>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="********"
+                autoComplete={exists ? "current-password" : "new-password"}
+              />
+              <button className="link-button" type="button" onClick={handleForgot}>
+                Forgot password?
+              </button>
             </label>
           )}
-        </div>
 
-        <button className="button full" style={{ marginTop: "0.75rem" }}>
-          Continue
-        </button>
-        <p className="muted" style={{ marginTop: "0.65rem" }}>
-          Customers will see past orders and delivery statuses. Staff will land on their workspace and clock-in flow.
-        </p>
-      </div>
+          <button className="button full" type="submit" disabled={loading}>
+            {loading ? "Working..." : phase === "identifier" ? "Continue" : exists ? "Sign in" : "Create account"}
+          </button>
+        </form>
 
-      <div className="signin-right">
-        {role === "customer" ? (
-          <div className="card highlight-card">
-            <div className="hero-eyebrow" style={{ marginBottom: "0.4rem" }}>
-              Customer view
-            </div>
-            <h3 style={{ margin: 0 }}>Shopping with your history in view</h3>
-            <p className="muted" style={{ marginTop: "0.35rem" }}>
-              See every past order, delivery promise, and reorder option alongside the storefront.
-            </p>
-            <div className="feature-grid">
-              {customerTiles.map((tile) => (
-                <div key={tile.title} className="feature-chip">
-                  <strong>{tile.title}</strong>
-                  <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-                    {tile.detail}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <div className="timeline">
-              <div className="timeline-row">
-                <span className="dot" />
-                <div>
-                  <strong>Order #MC-2041</strong>
-                  <p className="muted" style={{ margin: 0 }}>
-                    Out for delivery · Today 3:30 PM
-                  </p>
-                </div>
-                <span className="status-chip">Live</span>
-              </div>
-              <div className="timeline-row">
-                <span className="dot" />
-                <div>
-                  <strong>Order #MC-1987</strong>
-                  <p className="muted" style={{ margin: 0 }}>
-                    Delivered · 2 days ago
-                  </p>
-                </div>
-                <span className="status-chip ghost">Reorder</span>
-              </div>
-            </div>
+        {error && <div className="signin-error">{error}</div>}
+        {message && <div className="signin-success">{message}</div>}
+        {forgotStatus && <div className="signin-success">{forgotStatus}</div>}
+
+        {phase === "identifier" && (
+          <div className="signin-foot">
+            <p className="muted small">By continuing, you agree to the workspace terms for staff and store terms for shoppers.</p>
           </div>
-        ) : (
-          <>
-            <div className="card highlight-card">
-              <div className="hero-eyebrow" style={{ marginBottom: "0.4rem" }}>
-                Staff workspace
-              </div>
-              <h3 style={{ margin: 0 }}>Role-based console after sign-in</h3>
-              <p className="muted" style={{ marginTop: "0.35rem" }}>
-                {staffHeadline}
-              </p>
-              <div className="feature-grid">
-                {staffTiles.map((tile) => (
-                  <div key={tile.title} className="feature-chip">
-                    <strong>{tile.title}</strong>
-                    <p className="muted" style={{ margin: "0.25rem 0 0" }}>
-                      {tile.detail}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="card clock-card">
-              <div className="hero-eyebrow" style={{ marginBottom: "0.4rem" }}>
-                Staff clock-in (hidden from customers)
-              </div>
-              <h3 style={{ margin: "0 0 0.35rem" }}>Clock in like you would on Jibble</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                After staff sign-in, the platform prompts for clock-in before opening the workspace.
-              </p>
-              <div className="clock-steps">
-                {clockSteps.map((step) => (
-                  <div key={step.title} className="clock-step">
-                    <strong>{step.title}</strong>
-                    <p className="muted" style={{ margin: 0 }}>
-                      {step.detail}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <div className="clock-status">
-                <div>
-                  <strong>Next action</strong>
-                  <p className="muted" style={{ margin: 0 }}>
-                    Clock in · Store floor · 09:02 AM
-                  </p>
-                </div>
-                <button className="button">Clock in</button>
-              </div>
-              <div className="clock-log">
-                <div className="clock-log-row">
-                  <span className="dot" />
-                  <div>
-                    <strong>08:51 AM</strong>
-                    <p className="muted" style={{ margin: 0 }}>
-                      Arrived · Location verified
-                    </p>
-                  </div>
-                </div>
-                <div className="clock-log-row">
-                  <span className="dot" />
-                  <div>
-                    <strong>Yesterday</strong>
-                    <p className="muted" style={{ margin: 0 }}>
-                      Clocked out · Delivery route KE-04
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
         )}
       </div>
+
+      <div className="card signin-sidecard">
+        <div className="hero-eyebrow" style={{ marginBottom: "0.3rem" }}>
+          What happens after sign-in
+        </div>
+        <p className="muted" style={{ margin: 0 }}>
+          Customers land on orders and delivery history. Staff land on their workspace and will be prompted to clock in with a selfie
+          or fingerprint before work begins.
+        </p>
+        <div className="sidecard-grid">
+          <div>
+            <strong>Role from database</strong>
+            <p className="muted" style={{ margin: "0.15rem 0 0" }}>
+              {friendlyRole(role)}
+            </p>
+          </div>
+          <div>
+            <strong>Account type</strong>
+            <p className="muted" style={{ margin: "0.15rem 0 0" }}>
+              {exists ? "Existing profile" : "New customer will be created"}
+            </p>
+          </div>
+          <div>
+            <strong>Biometric clock-in</strong>
+            <p className="muted" style={{ margin: "0.15rem 0 0" }}>
+              {staffBadge ? "Shown after password for staff" : "Hidden for customers"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {phase === "clock" && staffBadge && (
+        <div className="signin-card">
+          <div className="hero-eyebrow" style={{ marginBottom: "0.25rem" }}>
+            Staff clock-in (biometric)
+          </div>
+          <h2 style={{ margin: "0 0 0.3rem" }}>Finish with biometric check</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            You are signed in as {friendlyRole(role)}. Capture a selfie or fingerprint to clock in before opening the workspace.
+          </p>
+          <div className="signin-identity" style={{ margin: "0.5rem 0" }}>
+            <div>
+              <strong>{email}</strong>
+              <div className="pill subtle">Staff</div>
+            </div>
+            <button type="button" className="link-button" onClick={resetFlow}>
+              Use another account
+            </button>
+          </div>
+          <button className="button full" type="button" onClick={handleBiometricCapture} disabled={loading}>
+            {clockedIn ? "Clock out with selfie / fingerprint" : "Clock in with selfie / fingerprint"}
+          </button>
+          {clockStatus && (
+            <p className="muted" style={{ marginTop: "0.5rem" }}>
+              {clockStatus}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

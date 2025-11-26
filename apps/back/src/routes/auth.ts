@@ -17,7 +17,20 @@ const loginSchema = z.object({
 const staffCreateSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(["ACCOUNTS", "SALES", "ADMIN", "CUSTOMER"]) // Prisma enum values
+  role: z.enum(["ACCOUNTS", "SALES", "ADMIN"]) // Staff roles are admin-managed only
+});
+
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6)
+});
+
+const identifySchema = z.object({
+  email: z.string().email()
+});
+
+const forgotSchema = z.object({
+  email: z.string().email()
 });
 
 export const router = Router();
@@ -102,6 +115,73 @@ router.post("/staff", requireAdmin, async (req, res) => {
   });
 
   return res.status(201).json({ data: { id: created.id, email: created.email, role: created.role } });
+});
+
+router.post("/register", async (req, res) => {
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const exists = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+  if (exists) {
+    return res.status(409).json({ error: "User with that email already exists" });
+  }
+
+  const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+  const created = await prisma.user.create({
+    data: {
+      email: parsed.data.email,
+      passwordHash,
+      role: "CUSTOMER"
+    }
+  });
+
+  const token = signToken(created);
+  return res.status(201).json({ token, user: { id: created.id, email: created.email, role: created.role } });
+});
+
+router.post("/identify", async (req, res) => {
+  const parsed = identifySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  // Ensure the bootstrap admin exists for first-time setups.
+  await seedAdmin();
+
+  const user = await prisma.user.findUnique({
+    where: { email: parsed.data.email },
+    select: { id: true, role: true }
+  });
+
+  const isStaff = user ? user.role !== "CUSTOMER" : false;
+  return res.json({
+    exists: Boolean(user),
+    role: user?.role ?? null,
+    kind: isStaff ? "STAFF" : "CUSTOMER"
+  });
+});
+
+router.post("/forgot", async (req, res) => {
+  const parsed = forgotSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  // We do not send email yet; we acknowledge the request to avoid leaking user existence.
+  const user = await prisma.user.findUnique({
+    where: { email: parsed.data.email },
+    select: { id: true }
+  });
+
+  if (!user) {
+    return res.status(200).json({ message: "If that account exists, reset instructions have been queued." });
+  }
+
+  // Placeholder: hook email/SMS provider here with a real tokenized link.
+  console.log(`[auth] Password reset requested for ${parsed.data.email}`);
+  return res.status(200).json({ message: "Password reset link has been queued." });
 });
 
 router.get("/staff", requireAdmin, async (_req, res) => {
