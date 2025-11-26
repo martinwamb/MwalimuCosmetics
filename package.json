@@ -16,6 +16,14 @@
     "format": "npm run format --workspaces",
     "lint": "npm run lint --workspaces"
   },
+  "overrides": {
+    "form-data": "4.0.4",
+    "tough-cookie": "4.1.3",
+    "request": {
+      "form-data": "4.0.4",
+      "tough-cookie": "4.1.3"
+    }
+  },
   "engines": {
     "node": ">=20"
   }
