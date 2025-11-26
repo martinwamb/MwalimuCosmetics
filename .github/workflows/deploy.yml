@@ -42,6 +42,9 @@ jobs:
           set -e
           cd "$DEPLOY_DIR"
 
+          # Clean stale artifacts to avoid partial deploys
+          rm -rf node_modules apps/front/.next apps/back/node_modules apps/back/dist
+
           # Ensure backend PORT is set
           mkdir -p apps/back
           env_file="apps/back/.env"
