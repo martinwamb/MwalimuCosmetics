@@ -10,10 +10,10 @@
     "lint": "echo \"lint not configured for @mwalimu/db yet\""
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0",
+    "@prisma/client": "5.22.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "prisma": "^5.20.0"
+    "prisma": "5.22.0"
   }
 }

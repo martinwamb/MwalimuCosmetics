@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@mwalimu/db": "^0.1.0",
-    "@prisma/client": "^5.20.0",
-    "prisma": "5.20.0",
+    "@prisma/client": "5.22.0",
+    "prisma": "5.22.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
     "bcryptjs": "^2.4.3",
