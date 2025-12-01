@@ -18,6 +18,7 @@ model User {
   updatedAt     DateTime  @updatedAt
   salesOrders   SalesOrder[] @relation("SalesUser")
   clockings     Clocking[]
+  mailMessages  MailMessage[]
 }
 
 model Product {
