@@ -9,6 +9,7 @@ import { router as orderRouter } from "./routes/orders.js";
 import { router as bankRouter } from "./routes/banking.js";
 import { router as aiRouter } from "./routes/ai.js";
 import { router as authRouter } from "./routes/auth.js";
+import { router as mailRouter } from "./routes/mail.js";
 import { prisma } from "./lib/prisma.js";
 import bcrypt from "bcryptjs";
 
@@ -26,6 +27,7 @@ app.use("/orders", orderRouter);
 app.use("/bank", bankRouter);
 app.use("/ai", aiRouter);
 app.use("/auth", authRouter);
+app.use("/mail", mailRouter);
 
 async function seedAdmin() {
   const adminEmail = process.env.ADMIN_EMAIL ?? "admin@mwalimu.com";

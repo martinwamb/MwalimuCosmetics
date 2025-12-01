@@ -193,6 +193,19 @@ model Clocking {
   deviceRef String?
 }
 
+model MailMessage {
+  id        String        @id @default(cuid())
+  to        String
+  from      String
+  subject   String?
+  body      String?
+  direction MailDirection @default(OUTBOUND)
+  status    MailStatus    @default(SENT)
+  user      User?         @relation(fields: [userId], references: [id])
+  userId    String?
+  createdAt DateTime      @default(now())
+}
+
 enum Role {
   CUSTOMER
   SALES
@@ -248,4 +261,15 @@ enum RecommendationStatus {
   APPROVED
   APPLIED
   DISMISSED
+}
+
+enum MailDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MailStatus {
+  QUEUED
+  SENT
+  FAILED
 }

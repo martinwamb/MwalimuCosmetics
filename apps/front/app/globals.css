@@ -759,6 +759,31 @@ a {
   font-size: 0.85rem;
 }
 
+.mail-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.mail-meta {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.mail-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
 @media (max-width: 900px) {
   .signin-stack {
     grid-template-columns: 1fr;

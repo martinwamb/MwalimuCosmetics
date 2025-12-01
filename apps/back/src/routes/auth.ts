@@ -4,10 +4,12 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma.js";
+import { sendAppMail } from "../lib/mailer.js";
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@mwalimu.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "change-me-now";
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret";
+const PASSWORD_RESET_URL = process.env.PASSWORD_RESET_URL ?? "https://mwalimucosmetics.com/reset-password";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -179,8 +181,18 @@ router.post("/forgot", async (req, res) => {
     return res.status(200).json({ message: "If that account exists, reset instructions have been queued." });
   }
 
-  // Placeholder: hook email/SMS provider here with a real tokenized link.
-  console.log(`[auth] Password reset requested for ${parsed.data.email}`);
+  const resetLink = `${PASSWORD_RESET_URL}?email=${encodeURIComponent(parsed.data.email)}`;
+  try {
+    await sendAppMail({
+      to: parsed.data.email,
+      subject: "Reset your Mwalimu Cosmetics password",
+      text: `We received a password reset request for this account. If this was you, use this link: ${resetLink}\n\nIf you did not request this, you can ignore this email.`,
+      html: `<p>We received a password reset request for this account.</p><p>If this was you, use this link:</p><p><a href="${resetLink}">${resetLink}</a></p><p>If you did not request this, you can ignore this email.</p>`
+    });
+  } catch (err: any) {
+    console.error("[auth] Failed to send reset email", err?.message ?? err);
+  }
+
   return res.status(200).json({ message: "Password reset link has been queued." });
 });
 
