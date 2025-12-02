@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import SMTPTransport from "nodemailer/lib/smtp-transport/index.js";
 import { MailStatus } from "@prisma/client";
 import { prisma } from "./prisma.js";
 
@@ -19,16 +20,21 @@ function buildTransport() {
   const pass = process.env.SMTP_PASS;
   const secure = (process.env.SMTP_SECURE ?? "false").toLowerCase() === "true";
 
-  if (!host || !port || !user || !pass) {
+  if (!host || !port) {
     return null;
   }
 
-  return nodemailer.createTransport({
+  const options: SMTPTransport.Options = {
     host,
     port,
-    secure,
-    auth: { user, pass }
-  });
+    secure
+  };
+
+  if (user && pass) {
+    options.auth = { user, pass };
+  }
+
+  return nodemailer.createTransport(options);
 }
 
 const transport = buildTransport();
