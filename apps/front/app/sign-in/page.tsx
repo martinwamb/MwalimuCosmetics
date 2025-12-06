@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Phase = "identifier" | "password" | "clock";
 
@@ -38,6 +38,7 @@ export default function SignInPage() {
   const [clockStatus, setClockStatus] = useState<string | null>(null);
   const [clockedIn, setClockedIn] = useState(false);
   const [forgotStatus, setForgotStatus] = useState<string | null>(null);
+  const [remembered, setRemembered] = useState<{ email: string; role: string | null; token: string | null } | null>(null);
 
   const heading = useMemo(() => {
     if (phase === "identifier") return "Sign in or create account";
@@ -67,6 +68,24 @@ export default function SignInPage() {
     setClockedIn(false);
     setForgotStatus(null);
   }
+
+  useEffect(() => {
+    try {
+      const savedToken = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null;
+      const savedEmail = typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null;
+      const savedRole = typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null;
+      if (savedToken && savedEmail) {
+        setRemembered({ email: savedEmail, role: savedRole, token: savedToken });
+        setEmail(savedEmail);
+        setExists(true);
+        setRole(savedRole);
+        setPhase("password");
+        setMessage("You are already signed in. Continue to dashboard or switch account.");
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   async function handleLookup(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -151,6 +170,12 @@ export default function SignInPage() {
       if (isStaffRole(nextRole ?? null)) {
         setPhase("clock");
         setClockStatus("Ready for biometric verification.");
+      }
+      try {
+        localStorage.setItem("mwalimu_email", trimmedEmail);
+        localStorage.setItem("mwalimu_role", nextRole ?? "");
+      } catch {
+        // ignore
       }
     } catch (err: any) {
       setError(err?.message ?? "Unable to sign in. Try again.");
@@ -272,6 +297,14 @@ export default function SignInPage() {
         {phase === "identifier" && (
           <div className="signin-foot">
             <p className="muted small">By continuing, you agree to the workspace terms for staff and store terms for shoppers.</p>
+            {remembered && (
+              <p className="muted small" style={{ marginTop: "0.35rem" }}>
+                Already signed in as {remembered.email}. <a className="text-link" href="/dashboard/admin">Open admin</a> or{" "}
+                <button className="link-button" type="button" onClick={resetFlow}>
+                  switch account
+                </button>
+              </p>
+            )}
           </div>
         )}
       </div>

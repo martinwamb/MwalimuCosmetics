@@ -1,3 +1,5 @@
+"use client";
+
 type Product = {
   id: string;
   name: string;
@@ -14,34 +16,6 @@ type Product = {
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export const dynamic = "force-dynamic";
-
-async function fetchCatalog(): Promise<Product[]> {
-  try {
-    const res = await fetch(`${apiBase}/products?status=ACTIVE&take=50`, {
-      cache: "no-store"
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error((data?.error as string) ?? "Could not load products");
-    }
-    const items = (data?.data as any[]) ?? [];
-    return items.map((item) => ({
-      id: item.id,
-      name: item.name,
-      description: item.description,
-      price: item.price,
-      sku: item.sku,
-      imageUrl: item.imageUrl,
-      category: item.category,
-      stockQty: item.stockQty,
-      tagline: item.category ?? "New arrival",
-      badge: item.stockQty === 0 ? "Out of stock" : item.category ?? undefined
-    }));
-  } catch (err) {
-    console.error("[front] Failed to load products", err);
-    return [];
-  }
-}
 
 const fallbackCatalog: Product[] = [
   {
@@ -70,10 +44,91 @@ const fallbackCatalog: Product[] = [
   }
 ];
 
-export default async function Page() {
-  const products = await fetchCatalog();
-  const usingFallback = products.length === 0;
-  const catalog = usingFallback ? fallbackCatalog : products;
+import { useEffect, useMemo, useState } from "react";
+
+export default function Page() {
+  const [catalog, setCatalog] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [cart, setCart] = useState<Record<string, any>[]>([]);
+  const [saved, setSaved] = useState<Record<string, any>[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`${apiBase}/products?status=ACTIVE&take=50`, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error((data?.error as string) ?? "Could not load products");
+        const items = (data?.data as any[]) ?? [];
+        setCatalog(
+          items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            price: item.price,
+            sku: item.sku,
+            imageUrl: item.imageUrl,
+            category: item.category,
+            stockQty: item.stockQty,
+            tagline: item.category ?? "New arrival",
+            badge: item.stockQty === 0 ? "Out of stock" : item.category ?? undefined
+          }))
+        );
+      } catch (err: any) {
+        console.error("[front] Failed to load products", err);
+        setError(err?.message ?? "Unable to load products.");
+        setCatalog(fallbackCatalog);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    load();
+
+    try {
+      const storedCart = localStorage.getItem("mwalimu_cart");
+      const storedSaved = localStorage.getItem("mwalimu_saved");
+      if (storedCart) setCart(JSON.parse(storedCart));
+      if (storedSaved) setSaved(JSON.parse(storedSaved));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  function persist(key: string, value: any) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // ignore
+    }
+  }
+
+  function handleAddToCart(product: Product) {
+    const next = [...cart, { id: product.id, name: product.name, price: product.price, qty: 1 }];
+    setCart(next);
+    persist("mwalimu_cart", next);
+    setNotice(`Added ${product.name} to cart.`);
+    setTimeout(() => setNotice(null), 2000);
+  }
+
+  function handleSave(product: Product) {
+    if (saved.find((item) => item.id === product.id)) {
+      setNotice("Already saved.");
+      setTimeout(() => setNotice(null), 1500);
+      return;
+    }
+    const next = [...saved, { id: product.id, name: product.name, price: product.price }];
+    setSaved(next);
+    persist("mwalimu_saved", next);
+    setNotice(`Saved ${product.name}.`);
+    setTimeout(() => setNotice(null), 2000);
+  }
+
+  const usingFallback = useMemo(() => catalog.length === 0, [catalog]);
+  const productsToShow = usingFallback ? fallbackCatalog : catalog;
 
   return (
     <div>
@@ -82,8 +137,7 @@ export default async function Page() {
           <div className="hero-eyebrow">Holiday-ready glow</div>
           <h1>Glow-worthy picks from Mwalimu Cosmetics</h1>
           <p className="muted">
-            Rich butters, brightening serums, long-wear pigments, and thoughtful bundles that keep skin soft and color
-            bold all season.
+            Rich butters, brightening serums, long-wear pigments, and thoughtful bundles that keep skin soft and color bold all season.
           </p>
           <div className="hero-actions">
             <button className="button">Shop bestsellers</button>
@@ -98,8 +152,7 @@ export default async function Page() {
         <div className="deal-card">
           <strong style={{ fontSize: "1.05rem" }}>Why shoppers sign in</strong>
           <p className="muted" style={{ marginTop: "0.3rem" }}>
-            Save favorites, reorder in one tap, check delivery statuses, and unlock staff consoles when you log in as
-            team.
+            Save favorites, reorder in one tap, check delivery statuses, and unlock staff consoles when you log in as team.
           </p>
           <div className="deal-grid">
             {[
@@ -140,9 +193,11 @@ export default async function Page() {
           Live products will appear here once the catalog is set up. You are seeing sample items for now.
         </p>
       )}
+      {error && <p className="signin-error">{error}</p>}
+      {notice && <p className="signin-success">{notice}</p>}
 
       <div className="catalog-grid">
-        {catalog.map((product) => (
+        {productsToShow.map((product) => (
           <article className="product-card" key={product.id}>
             {product.badge && <div className="badge">{product.badge}</div>}
             <div
@@ -167,8 +222,12 @@ export default async function Page() {
               {typeof product.stockQty === "number" ? ` • ${product.stockQty} in stock` : ""}
             </p>
             <div className="actions">
-              <button className="button full">Add to Cart</button>
-              <button className="button ghost full">Save</button>
+              <button className="button full" onClick={() => handleAddToCart(product)}>
+                Add to Cart
+              </button>
+              <button className="button ghost full" onClick={() => handleSave(product)}>
+                Save
+              </button>
             </div>
           </article>
         ))}
