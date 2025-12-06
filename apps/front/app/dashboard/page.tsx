@@ -26,6 +26,12 @@ const cards = [
     href: "/dashboard/products"
   },
   {
+    title: "Admin Workspace",
+    body: "Reports, dashboards, and quick actions for admins.",
+    action: "Open admin",
+    href: "/dashboard/admin"
+  },
+  {
     title: "Staff Clocking",
     body: "Biometric or WebAuthn clock-ins for attendance and payroll exports.",
     action: "Open timesheets"
