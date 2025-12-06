@@ -3,80 +3,78 @@ type Product = {
   name: string;
   description: string;
   price: number;
-  rating: number;
-  reviews: number;
+  sku?: string;
+  imageUrl?: string | null;
+  category?: string | null;
+  stockQty?: number;
+  tagline?: string;
   badge?: string;
-  delivery: string;
-  tagline: string;
 };
 
-const catalog: Product[] = [
+const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+export const dynamic = "force-dynamic";
+
+async function fetchCatalog(): Promise<Product[]> {
+  try {
+    const res = await fetch(`${apiBase}/products?status=ACTIVE&take=50`, {
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error((data?.error as string) ?? "Could not load products");
+    }
+    const items = (data?.data as any[]) ?? [];
+    return items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      price: item.price,
+      sku: item.sku,
+      imageUrl: item.imageUrl,
+      category: item.category,
+      stockQty: item.stockQty,
+      tagline: item.category ?? "New arrival",
+      badge: item.stockQty === 0 ? "Out of stock" : item.category ?? undefined
+    }));
+  } catch (err) {
+    console.error("[front] Failed to load products", err);
+    return [];
+  }
+}
+
+const fallbackCatalog: Product[] = [
   {
     id: "p-1",
     name: "Shea Body Butter",
     description: "Whipped, ultra-rich butter that leaves a soft, dewy finish without greasiness.",
     price: 15.5,
-    rating: 4.7,
-    reviews: 241,
-    badge: "Bestseller",
-    delivery: "FREE next-day delivery",
-    tagline: "Deep moisture"
+    tagline: "Deep moisture",
+    badge: "Sample"
   },
   {
     id: "p-2",
     name: "Vitamin C Serum",
     description: "High-potency 15% C + hyaluronic acid serum for bright, even-toned skin.",
     price: 25.0,
-    rating: 4.8,
-    reviews: 184,
-    badge: "Choice",
-    delivery: "Arrives Thursday",
-    tagline: "Glow booster"
+    tagline: "Glow booster",
+    badge: "Sample"
   },
   {
     id: "p-3",
     name: "Matte Lipstick Duo",
     description: "Two-piece long-wear matte lipstick kit with bold, conditioning pigment.",
     price: 18.0,
-    rating: 4.6,
-    reviews: 129,
-    delivery: "Same-day delivery",
-    tagline: "All-day color"
-  },
-  {
-    id: "p-4",
-    name: "Hydrating Cleanser",
-    description: "Creamy, pH-balanced cleanser that removes makeup while keeping moisture in.",
-    price: 13.5,
-    rating: 4.5,
-    reviews: 92,
-    delivery: "FREE delivery Tuesday",
-    tagline: "Gentle cleanse"
-  },
-  {
-    id: "p-5",
-    name: "Restorative Hair Oil",
-    description: "Lightweight hair oil with argan + baobab for shine, slip, and scalp comfort.",
-    price: 22.0,
-    rating: 4.7,
-    reviews: 167,
-    delivery: "Tomorrow by 10pm",
-    tagline: "Frizz control"
-  },
-  {
-    id: "p-6",
-    name: "Overnight Renewal Mask",
-    description: "Ceramide sleep mask that seals in hydration and wakes skin up plump.",
-    price: 28.0,
-    rating: 4.9,
-    reviews: 73,
-    badge: "New",
-    delivery: "FREE delivery Friday",
-    tagline: "Skin reset"
+    tagline: "All-day color",
+    badge: "Sample"
   }
 ];
 
-export default function Page() {
+export default async function Page() {
+  const products = await fetchCatalog();
+  const usingFallback = products.length === 0;
+  const catalog = usingFallback ? fallbackCatalog : products;
+
   return (
     <div>
       <section className="hero">
@@ -137,26 +135,36 @@ export default function Page() {
         </div>
       </div>
 
+      {usingFallback && (
+        <p className="muted" style={{ marginTop: 0 }}>
+          Live products will appear here once the catalog is set up. You are seeing sample items for now.
+        </p>
+      )}
+
       <div className="catalog-grid">
         {catalog.map((product) => (
           <article className="product-card" key={product.id}>
             {product.badge && <div className="badge">{product.badge}</div>}
-            <div className="product-thumb">{product.tagline}</div>
+            <div
+              className="product-thumb"
+              style={
+                product.imageUrl
+                  ? { backgroundImage: `url(${product.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
+                  : undefined
+              }
+            >
+              {!product.imageUrl && (product.tagline ?? "New arrival")}
+            </div>
             <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
             <p className="muted" style={{ margin: 0 }}>
               {product.description}
             </p>
-            <div className="rating">
-              <span>{"*".repeat(5)}</span>
-              <span>{product.rating.toFixed(1)}</span>
-              <span className="muted">({product.reviews})</span>
-            </div>
             <p className="price">
               USD <span style={{ fontSize: "1.1rem" }}>{product.price.toFixed(2)}</span>
             </p>
-            <div className="delivery">{product.delivery}</div>
-            <p className="muted" style={{ margin: 0 }}>
-              Eligible for express delivery and easy returns.
+            <p className="muted small" style={{ margin: "0 0 0.35rem" }}>
+              {product.category ? `Category: ${product.category}` : "Fresh stock ready"}
+              {typeof product.stockQty === "number" ? ` • ${product.stockQty} in stock` : ""}
             </p>
             <div className="actions">
               <button className="button full">Add to Cart</button>

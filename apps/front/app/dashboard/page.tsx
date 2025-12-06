@@ -22,7 +22,8 @@ const cards = [
   {
     title: "Catalog Management",
     body: "Add/update products, pricing, cost, and visibility for the storefront and POS.",
-    action: "Manage products"
+    action: "Manage products",
+    href: "/dashboard/products"
   },
   {
     title: "Staff Clocking",

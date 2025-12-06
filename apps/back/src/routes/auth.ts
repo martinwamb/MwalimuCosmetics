@@ -3,11 +3,10 @@ import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 
-import { prisma } from "../lib/prisma.js";
 import { sendAppMail } from "../lib/mailer.js";
+import { prisma } from "../lib/prisma.js";
+import { seedAdmin } from "../lib/admin.js";
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "admin@mwalimu.com";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "change-me-now";
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret";
 const PASSWORD_RESET_URL = process.env.PASSWORD_RESET_URL ?? "https://mwalimucosmetics.com/reset-password";
 
@@ -39,17 +38,6 @@ export const router = Router();
 
 function signToken(user: { id: string; email: string; role: string }) {
   return jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
-}
-
-async function seedAdmin() {
-  const existing = await prisma.user.findUnique({ where: { email: ADMIN_EMAIL } });
-  if (existing) return existing;
-
-  const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
-  const admin = await prisma.user.create({
-    data: { email: ADMIN_EMAIL, passwordHash, role: "ADMIN" }
-  });
-  return admin;
 }
 
 async function authenticate(email: string, password: string) {
