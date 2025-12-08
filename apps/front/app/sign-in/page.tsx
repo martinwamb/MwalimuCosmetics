@@ -160,6 +160,8 @@ export default function SignInPage() {
       if (data?.token) {
         try {
           localStorage.setItem("mwalimu_token", data.token as string);
+          localStorage.setItem("mwalimu_email", trimmedEmail);
+          if (nextRole) localStorage.setItem("mwalimu_role", nextRole);
         } catch {
           // best-effort only
         }
@@ -170,6 +172,10 @@ export default function SignInPage() {
       if (isStaffRole(nextRole ?? null)) {
         setPhase("clock");
         setClockStatus("Ready for biometric verification.");
+        // Redirect admins to workspace after a short delay
+        setTimeout(() => {
+          window.location.href = "/dashboard/admin";
+        }, 400);
       }
       try {
         localStorage.setItem("mwalimu_email", trimmedEmail);
@@ -299,7 +305,11 @@ export default function SignInPage() {
             <p className="muted small">By continuing, you agree to the workspace terms for staff and store terms for shoppers.</p>
             {remembered && (
               <p className="muted small" style={{ marginTop: "0.35rem" }}>
-                Already signed in as {remembered.email}. <a className="text-link" href="/dashboard/admin">Open admin</a> or{" "}
+                Already signed in as {remembered.email}.{" "}
+                <a className="text-link" href="/dashboard/admin">
+                  Open admin
+                </a>{" "}
+                or{" "}
                 <button className="link-button" type="button" onClick={resetFlow}>
                   switch account
                 </button>

@@ -192,7 +192,7 @@ export default function AdminDashboardPage() {
                     <p className="muted small" style={{ margin: 0 }}>
                       {product.status ?? "ACTIVE"} • Stock: {typeof product.stockQty === "number" ? product.stockQty : "—"}
                     </p>
-                    <p className="price">USD {product.price ? product.price.toFixed(2) : "0.00"}</p>
+                    <p className="price">KES {product.price ? product.price.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}</p>
                   </article>
                 ))}
               </div>
@@ -217,7 +217,9 @@ export default function AdminDashboardPage() {
               <div className="hero-eyebrow" style={{ marginBottom: "0.15rem" }}>
                 Revenue (mock)
               </div>
-              <h3 style={{ margin: "0 0 0.15rem" }}>USD {stats.revenue.toFixed(2)}</h3>
+              <h3 style={{ margin: "0 0 0.15rem" }}>
+                KES {stats.revenue.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h3>
               <p className="muted small" style={{ margin: 0 }}>
                 Based on current order data
               </p>

@@ -31,8 +31,19 @@ export default function ProductDashboardPage() {
     cost: "",
     stockQty: "0",
     imageUrl: "",
-    description: ""
+    description: "",
+    imageFile: null as File | null,
+    featured: false,
+    variants: [] as {
+      name: string;
+      price: string;
+      imageUrl: string;
+      imageFile: File | null;
+      preview: string | null;
+    }[]
   });
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [variantPreviews, setVariantPreviews] = useState<Record<number, string | null>>({});
 
   const loadProducts = useCallback(async (authToken?: string | null) => {
     setFetching(true);
@@ -106,6 +117,56 @@ export default function ProductDashboardPage() {
 
     setLoading(true);
     try {
+      let uploadedUrl: string | undefined;
+      if (form.imageFile && imagePreview) {
+        const uploadRes = await fetch(`${apiBase}/uploads`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            filename: form.imageFile.name,
+            data: imagePreview
+          })
+        });
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) {
+          throw new Error((uploadData?.error as string) ?? "Image upload failed");
+        }
+        uploadedUrl = uploadData?.url as string;
+      }
+
+      const variantPayload = [];
+      for (let i = 0; i < form.variants.length; i++) {
+        const v = form.variants[i];
+        let vUrl = v.imageUrl.trim() || undefined;
+        const preview = variantPreviews[i];
+        if (!vUrl && v.imageFile && preview) {
+          const uploadRes = await fetch(`${apiBase}/uploads`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              filename: v.imageFile.name,
+              data: preview
+            })
+          });
+          const uploadData = await uploadRes.json().catch(() => ({}));
+          if (!uploadRes.ok) {
+            throw new Error((uploadData?.error as string) ?? "Variant image upload failed");
+          }
+          vUrl = uploadData?.url as string;
+        }
+        variantPayload.push({
+          name: v.name.trim(),
+          price: v.price ? parseFloat(v.price) : undefined,
+          imageUrl: vUrl
+        });
+      }
+
       const res = await fetch(`${apiBase}/products`, {
         method: "POST",
         headers: {
@@ -119,8 +180,10 @@ export default function ProductDashboardPage() {
           price,
           cost,
           stockQty,
-          imageUrl: form.imageUrl.trim() || undefined,
-          description: form.description.trim() || undefined
+          featured: form.featured,
+          imageUrl: form.imageUrl.trim() || uploadedUrl || imagePreview || undefined,
+          description: form.description.trim() || undefined,
+          variants: variantPayload
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -137,8 +200,13 @@ export default function ProductDashboardPage() {
         cost: "",
         stockQty: "0",
         imageUrl: "",
-        description: ""
+        description: "",
+        imageFile: null,
+        featured: false,
+        variants: []
       });
+      setImagePreview(null);
+      setVariantPreviews({});
       await loadProducts(token);
     } catch (err: any) {
       setError(err?.message ?? "Could not create product");
@@ -189,8 +257,16 @@ export default function ProductDashboardPage() {
                 placeholder="Serums"
               />
             </label>
+            <label className="input-group" style={{ alignSelf: "flex-end" }}>
+              <span>Featured</span>
+              <input
+                type="checkbox"
+                checked={form.featured}
+                onChange={(e) => setForm((prev) => ({ ...prev, featured: e.target.checked }))}
+              />
+            </label>
             <label className="input-group">
-              <span>Price (USD)</span>
+            <span>Price (KES)</span>
               <input
                 type="number"
                 step="0.01"
@@ -202,7 +278,7 @@ export default function ProductDashboardPage() {
               />
             </label>
             <label className="input-group">
-              <span>Cost (USD)</span>
+            <span>Cost (KES)</span>
               <input
                 type="number"
                 step="0.01"
@@ -233,6 +309,157 @@ export default function ProductDashboardPage() {
               placeholder="https://..."
             />
           </label>
+          <label className="input-group">
+            <span>Or upload image</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                setForm((prev) => ({ ...prev, imageFile: file }));
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    setImagePreview(ev.target?.result as string);
+                  };
+                  reader.readAsDataURL(file);
+                } else {
+                  setImagePreview(null);
+                }
+              }}
+            />
+            {imagePreview && (
+              <div style={{ marginTop: "0.5rem" }}>
+                <div className="product-thumb" style={{ backgroundImage: `url(${imagePreview})`, backgroundSize: "cover", backgroundPosition: "center" }}>
+                  &nbsp;
+                </div>
+              </div>
+            )}
+          </label>
+
+          <div className="card" style={{ padding: "0.75rem", background: "#f8fafc" }}>
+            <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
+              Variants (flavours / options)
+            </div>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  variants: [
+                    ...prev.variants,
+                    { name: "", price: "", imageUrl: "", imageFile: null, preview: null }
+                  ]
+                }))
+              }
+            >
+              Add variant
+            </button>
+            <div style={{ display: "grid", gap: "0.5rem", marginTop: "0.5rem" }}>
+              {form.variants.map((variant, idx) => (
+                <div key={idx} className="card" style={{ padding: "0.65rem" }}>
+                  <div className="input-row">
+                    <label className="input-group">
+                      <span>Name</span>
+                      <input
+                        value={variant.name}
+                        onChange={(e) =>
+                          setForm((prev) => {
+                            const copy = [...prev.variants];
+                            copy[idx] = { ...copy[idx], name: e.target.value };
+                            return { ...prev, variants: copy };
+                          })
+                        }
+                        placeholder="e.g. Vanilla, Citrus"
+                      />
+                    </label>
+                    <label className="input-group">
+                      <span>Price (KES)</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={variant.price}
+                        onChange={(e) =>
+                          setForm((prev) => {
+                            const copy = [...prev.variants];
+                            copy[idx] = { ...copy[idx], price: e.target.value };
+                            return { ...prev, variants: copy };
+                          })
+                        }
+                        placeholder="Optional"
+                      />
+                    </label>
+                  </div>
+                  <label className="input-group">
+                    <span>Variant image URL</span>
+                    <input
+                      value={variant.imageUrl}
+                      onChange={(e) =>
+                        setForm((prev) => {
+                          const copy = [...prev.variants];
+                          copy[idx] = { ...copy[idx], imageUrl: e.target.value };
+                          return { ...prev, variants: copy };
+                        })
+                      }
+                      placeholder="https://..."
+                    />
+                  </label>
+                  <label className="input-group">
+                    <span>Or upload variant image</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        setForm((prev) => {
+                          const copy = [...prev.variants];
+                          copy[idx] = { ...copy[idx], imageFile: file };
+                          return { ...prev, variants: copy };
+                        });
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            setVariantPreviews((prev) => ({ ...prev, [idx]: ev.target?.result as string }));
+                          };
+                          reader.readAsDataURL(file);
+                        } else {
+                          setVariantPreviews((prev) => ({ ...prev, [idx]: null }));
+                        }
+                      }}
+                    />
+                    {(variantPreviews[idx] || variant.imageUrl) && (
+                      <div style={{ marginTop: "0.5rem" }}>
+                        <div
+                          className="product-thumb"
+                          style={{
+                            backgroundImage: `url(${variantPreviews[idx] || variant.imageUrl})`,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center"
+                          }}
+                        >
+                          &nbsp;
+                        </div>
+                      </div>
+                    )}
+                  </label>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        variants: prev.variants.filter((_, i) => i !== idx)
+                      }))
+                    }
+                  >
+                    Remove variant
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
 
           <label className="input-group">
             <span>Description</span>
@@ -285,9 +512,7 @@ export default function ProductDashboardPage() {
               <p className="muted" style={{ margin: 0 }}>
                 {product.description ?? "No description yet."}
               </p>
-              <p className="price">
-                USD <span style={{ fontSize: "1.1rem" }}>{product.price.toFixed(2)}</span>
-              </p>
+                <p className="price">KES {product.price.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p className="muted small" style={{ margin: 0 }}>
                 Cost: {product.cost.toFixed(2)} • Stock: {product.stockQty}
               </p>

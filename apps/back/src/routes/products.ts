@@ -11,10 +11,20 @@ const productCreateSchema = z.object({
   price: z.number().positive(),
   cost: z.number().nonnegative(),
   description: z.string().optional(),
-  imageUrl: z.string().url().optional(),
+  imageUrl: z.string().min(1).optional(),
+  featured: z.boolean().optional(),
   stockQty: z.number().int().nonnegative().default(0),
   category: z.string().min(1).default("General"),
-  status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]).optional()
+  status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]).optional(),
+  variants: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        imageUrl: z.string().min(1).optional(),
+        price: z.number().positive().optional()
+      })
+    )
+    .optional()
 });
 
 const productUpdateSchema = productCreateSchema.partial();
@@ -27,13 +37,21 @@ function formatProduct(product: any, includeCost = false) {
     name: product.name,
     sku: product.sku,
     description: product.description,
+    featured: product.featured,
     imageUrl: product.imageUrl,
     price: parseFloat(product.price.toString()),
     stockQty: product.stockQty,
     status: product.status,
     category: product.category?.name ?? null,
     createdAt: product.createdAt,
-    updatedAt: product.updatedAt
+    updatedAt: product.updatedAt,
+    variants:
+      product.variants?.map((v: any) => ({
+        id: v.id,
+        name: v.name,
+        imageUrl: v.imageUrl,
+        price: v.price ? parseFloat(v.price.toString()) : null
+      })) ?? []
   };
   if (includeCost) {
     base.cost = parseFloat(product.cost.toString());
@@ -73,7 +91,7 @@ router.get("/", async (req, res) => {
 
   const products = await prisma.product.findMany({
     where,
-    include: { category: true },
+    include: { category: true, variants: true },
     orderBy: { createdAt: "desc" },
     take,
     skip
@@ -88,7 +106,7 @@ router.get("/:id", async (req, res) => {
 
   const product = await prisma.product.findUnique({
     where: { id: req.params.id },
-    include: { category: true }
+    include: { category: true, variants: true }
   });
   if (!product) return res.status(404).json({ error: "Not found" });
   res.json({ data: formatProduct(product, includeCost) });
@@ -108,14 +126,24 @@ router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
         name: parsed.data.name,
         sku: parsed.data.sku,
         description: parsed.data.description,
+        featured: Boolean(parsed.data.featured),
         imageUrl: parsed.data.imageUrl,
         categoryId: category.id,
         price: new Prisma.Decimal(parsed.data.price),
         cost: new Prisma.Decimal(parsed.data.cost),
         stockQty: parsed.data.stockQty ?? 0,
-        status: parsed.data.status ?? "ACTIVE"
+        status: parsed.data.status ?? "ACTIVE",
+        variants: parsed.data.variants
+          ? {
+              create: parsed.data.variants.map((v) => ({
+                name: v.name,
+                imageUrl: v.imageUrl,
+                price: typeof v.price === "number" ? new Prisma.Decimal(v.price) : undefined
+              }))
+            }
+          : undefined
       },
-      include: { category: true }
+      include: { category: true, variants: true }
     });
 
     res.status(201).json({ data: formatProduct(created, true) });
@@ -138,6 +166,7 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
     name: parsed.data.name,
     sku: parsed.data.sku,
     description: parsed.data.description,
+    featured: parsed.data.featured,
     imageUrl: parsed.data.imageUrl,
     stockQty: parsed.data.stockQty,
     status: parsed.data.status
@@ -150,18 +179,18 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
     updates.cost = new Prisma.Decimal(parsed.data.cost);
   }
 
-  if (parsed.data.category) {
-    const category = await ensureCategory(parsed.data.category);
-    updates.categoryId = category.id;
-  }
+    if (parsed.data.category) {
+      const category = await ensureCategory(parsed.data.category);
+      updates.categoryId = category.id;
+    }
 
-  try {
-    const updated = await prisma.product.update({
-      where: { id: req.params.id },
-      data: updates,
-      include: { category: true }
-    });
-    res.json({ data: formatProduct(updated, true) });
+    try {
+      const updated = await prisma.product.update({
+        where: { id: req.params.id },
+        data: updates,
+        include: { category: true, variants: true }
+      });
+      res.json({ data: formatProduct(updated, true) });
   } catch (err: any) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return res.status(409).json({ error: "SKU must be unique" });

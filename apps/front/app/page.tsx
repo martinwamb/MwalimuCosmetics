@@ -11,6 +11,7 @@ type Product = {
   stockQty?: number;
   tagline?: string;
   badge?: string;
+  featured?: boolean;
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -74,7 +75,8 @@ export default function Page() {
             category: item.category,
             stockQty: item.stockQty,
             tagline: item.category ?? "New arrival",
-            badge: item.stockQty === 0 ? "Out of stock" : item.category ?? undefined
+            badge: item.stockQty === 0 ? "Out of stock" : item.category ?? undefined,
+            featured: item.featured
           }))
         );
       } catch (err: any) {
@@ -129,6 +131,15 @@ export default function Page() {
 
   const usingFallback = useMemo(() => catalog.length === 0, [catalog]);
   const productsToShow = usingFallback ? fallbackCatalog : catalog;
+  const featured = productsToShow.filter((p) => p.featured);
+  const featuredRow = featured.length ? featured.slice(0, 3) : productsToShow.slice(0, 3);
+  const categories = Array.from(
+    new Set(productsToShow.map((p) => p.category).filter(Boolean) as string[])
+  ).slice(0, 8);
+
+  function formatKES(value: number) {
+    return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(value);
+  }
 
   return (
     <div>
@@ -150,22 +161,18 @@ export default function Page() {
           </div>
         </div>
         <div className="deal-card">
-          <strong style={{ fontSize: "1.05rem" }}>Why shoppers sign in</strong>
+          <strong style={{ fontSize: "1.05rem" }}>Featured by admin</strong>
           <p className="muted" style={{ marginTop: "0.3rem" }}>
-            Save favorites, reorder in one tap, check delivery statuses, and unlock staff consoles when you log in as team.
+            Admin-selected products appear here. Update the product form to mark items as featured.
           </p>
           <div className="deal-grid">
-            {[
-              { title: "Track deliveries", hint: "Live status for every parcel" },
-              { title: "See past orders", hint: "Buy again from your routine" },
-              { title: "Staff workspace", hint: "Accounts, sales, store, delivery" },
-              { title: "Clock in/out", hint: "Staff attendance after sign-in" }
-            ].map((tile) => (
-              <div key={tile.title} className="deal-tile">
-                <strong>{tile.title}</strong>
+            {featuredRow.map((product) => (
+              <div key={product.id} className="deal-tile" style={{ alignItems: "flex-start" }}>
+                <strong>{product.name}</strong>
                 <p className="muted" style={{ margin: "0.35rem 0 0" }}>
-                  {tile.hint}
+                  {product.description}
                 </p>
+                <div className="muted small">{formatKES(product.price)}</div>
               </div>
             ))}
           </div>
@@ -180,7 +187,7 @@ export default function Page() {
           <h2 style={{ margin: 0 }}>Bestsellers to soften skin and brighten color</h2>
         </div>
         <div className="filter-row">
-          {["Hydration", "Brightening", "Long-wear color", "Bundles", "Under $25"].map((filter) => (
+          {(categories.length ? categories : ["Hydration", "Brightening", "Long-wear color"]).map((filter) => (
             <button key={filter} className="filter-chip">
               {filter}
             </button>
@@ -215,7 +222,7 @@ export default function Page() {
               {product.description}
             </p>
             <p className="price">
-              USD <span style={{ fontSize: "1.1rem" }}>{product.price.toFixed(2)}</span>
+              {formatKES(product.price)}
             </p>
             <p className="muted small" style={{ margin: "0 0 0.35rem" }}>
               {product.category ? `Category: ${product.category}` : "Fresh stock ready"}

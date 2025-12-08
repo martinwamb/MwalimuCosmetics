@@ -10,6 +10,7 @@ import { router as bankRouter } from "./routes/banking.js";
 import { router as aiRouter } from "./routes/ai.js";
 import { router as authRouter } from "./routes/auth.js";
 import { router as mailRouter } from "./routes/mail.js";
+import { router as uploadRouter } from "./routes/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
+app.use("/uploads", express.static("uploads"));
 
 app.use("/health", healthRouter);
 app.use("/products", productRouter);
@@ -27,6 +29,7 @@ app.use("/bank", bankRouter);
 app.use("/ai", aiRouter);
 app.use("/auth", authRouter);
 app.use("/mail", mailRouter);
+app.use("/uploads", uploadRouter);
 
 seedAdmin()
   .catch((err) => {
