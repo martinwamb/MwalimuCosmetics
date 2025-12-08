@@ -12,6 +12,7 @@ type Product = {
   stockQty: number;
   imageUrl?: string | null;
   description?: string | null;
+  variants?: { id: string; name: string; price?: number | null; imageUrl?: string | null }[];
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -23,6 +24,7 @@ export default function ProductDashboardPage() {
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     sku: "",
@@ -71,7 +73,14 @@ export default function ProductDashboardPage() {
           cost: Number.isFinite(cost) ? cost : 0,
           stockQty: Number.isFinite(stockQty) ? stockQty : 0,
           imageUrl: item.imageUrl,
-          description: item.description
+          description: item.description,
+          variants:
+            item.variants?.map((v: any) => ({
+              id: v.id,
+              name: v.name,
+              price: v.price ?? null,
+              imageUrl: v.imageUrl
+            })) ?? []
         };
       });
       setProducts(mapped);
@@ -167,8 +176,10 @@ export default function ProductDashboardPage() {
         });
       }
 
-      const res = await fetch(`${apiBase}/products`, {
-        method: "POST",
+      const method = editingId ? "PUT" : "POST";
+      const url = editingId ? `${apiBase}/products/${editingId}` : `${apiBase}/products`;
+      const res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
@@ -191,7 +202,7 @@ export default function ProductDashboardPage() {
         throw new Error((data?.error as string) ?? "Could not create product");
       }
 
-      setStatus("Product added to catalog.");
+      setStatus(editingId ? "Product updated." : "Product added to catalog.");
       setForm({
         name: "",
         sku: "",
@@ -205,6 +216,7 @@ export default function ProductDashboardPage() {
         featured: false,
         variants: []
       });
+      setEditingId(null);
       setImagePreview(null);
       setVariantPreviews({});
       await loadProducts(token);
@@ -483,6 +495,14 @@ export default function ProductDashboardPage() {
             Sign in as an admin to submit. Viewing the catalog list is open.
           </p>
         )}
+        {editingId && (
+          <p className="muted small" style={{ marginTop: "0.35rem" }}>
+            Editing product.{" "}
+            <button className="link-button" type="button" onClick={() => setEditingId(null)}>
+              Cancel
+            </button>
+          </p>
+        )}
       </section>
 
       <section>
@@ -512,10 +532,41 @@ export default function ProductDashboardPage() {
               <p className="muted" style={{ margin: 0 }}>
                 {product.description ?? "No description yet."}
               </p>
-                <p className="price">KES {product.price.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="price">KES {product.price.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
               <p className="muted small" style={{ margin: 0 }}>
                 Cost: {product.cost.toFixed(2)} • Stock: {product.stockQty}
               </p>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => {
+                  setEditingId(product.id);
+                  setForm({
+                    name: product.name,
+                    sku: product.sku,
+                    category: product.category ?? "General",
+                    price: product.price.toString(),
+                    cost: product.cost.toString(),
+                    stockQty: product.stockQty.toString(),
+                    imageUrl: product.imageUrl ?? "",
+                    description: product.description ?? "",
+                    imageFile: null,
+                    featured: false,
+                    variants:
+                      product.variants?.map((v) => ({
+                        name: v.name,
+                        price: v.price ? v.price.toString() : "",
+                        imageUrl: v.imageUrl ?? "",
+                        imageFile: null,
+                        preview: null
+                      })) ?? []
+                  });
+                  setImagePreview(product.imageUrl ?? null);
+                  setVariantPreviews({});
+                }}
+              >
+                Edit
+              </button>
             </article>
           ))}
         </div>
