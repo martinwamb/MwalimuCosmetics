@@ -48,11 +48,16 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     async function load() {
+      if (!token) {
+        setError("Sign in as admin to view the workspace.");
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
         const headers: Record<string, string> = {};
-        if (token) headers.Authorization = `Bearer ${token}`;
+        headers.Authorization = `Bearer ${token}`;
         const [productsRes, ordersRes, staffRes] = await Promise.all([
           fetch(`${apiBase}/products?status=ACTIVE&take=200`, { cache: "no-store" }),
           fetch(`${apiBase}/orders`, { cache: "no-store" }),
