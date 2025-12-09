@@ -5,13 +5,13 @@ import path from "path";
 import crypto from "crypto";
 
 import { requireRoles } from "../lib/authz.js";
+import { uploadsDir } from "../lib/uploads.js";
 
 const uploadSchema = z.object({
   filename: z.string().optional(),
   data: z.string().min(10) // expect base64 data URL or raw base64
 });
 
-const uploadsDir = path.resolve("uploads");
 function ensureDir() {
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });

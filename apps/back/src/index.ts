@@ -11,6 +11,7 @@ import { router as aiRouter } from "./routes/ai.js";
 import { router as authRouter } from "./routes/auth.js";
 import { router as mailRouter } from "./routes/mail.js";
 import { router as uploadRouter } from "./routes/uploads.js";
+import { uploadsDir } from "./lib/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
 const app = express();
@@ -21,7 +22,8 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use(morgan("dev"));
-app.use("/uploads", express.static("uploads"));
+// Serve uploaded assets from a deterministic absolute directory so they load in production.
+app.use("/uploads", express.static(uploadsDir));
 
 app.use("/health", healthRouter);
 app.use("/products", productRouter);

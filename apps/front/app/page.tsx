@@ -143,10 +143,18 @@ export default function Page() {
 
   function normalizeImageUrl(url?: string | null) {
     if (!url) return null;
-    if (url.startsWith("http://api.mwalimucosmetics.com")) {
-      return url.replace("http://", "https://");
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+    // Allow data URLs straight through for previews/safe fallbacks.
+    if (trimmed.startsWith("data:")) return trimmed;
+    // Handle protocol-relative or relative paths from the API.
+    if (trimmed.startsWith("//")) return `https:${trimmed}`;
+    if (trimmed.startsWith("/")) return `${apiBase.replace(/\/$/, "")}${trimmed}`;
+    // Force HTTPS for API host to avoid mixed-content blocks.
+    if (trimmed.startsWith("http://api.mwalimucosmetics.com")) {
+      return trimmed.replace("http://", "https://");
     }
-    return url;
+    return trimmed;
   }
 
   return (

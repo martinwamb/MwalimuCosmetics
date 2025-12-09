@@ -18,6 +18,19 @@ type Product = {
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export default function ProductDashboardPage() {
+  function normalizeImageUrl(url?: string | null) {
+    if (!url) return null;
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("data:")) return trimmed;
+    if (trimmed.startsWith("//")) return `https:${trimmed}`;
+    if (trimmed.startsWith("/")) return `${apiBase.replace(/\/$/, "")}${trimmed}`;
+    if (trimmed.startsWith("http://api.mwalimucosmetics.com")) {
+      return trimmed.replace("http://", "https://");
+    }
+    return trimmed;
+  }
+
   const [products, setProducts] = useState<Product[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -548,8 +561,12 @@ export default function ProductDashboardPage() {
               <div
                 className="product-thumb"
                 style={
-                  product.imageUrl
-                    ? { backgroundImage: `url(${product.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
+                  normalizeImageUrl(product.imageUrl)
+                    ? {
+                        backgroundImage: `url(${normalizeImageUrl(product.imageUrl)})`,
+                        backgroundSize: "cover",
+                        backgroundPosition: "center"
+                      }
                     : undefined
                 }
               >

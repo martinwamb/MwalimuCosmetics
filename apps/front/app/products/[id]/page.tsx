@@ -67,10 +67,15 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
 
   function normalizeImageUrl(url?: string | null) {
     if (!url) return null;
-    if (url.startsWith("http://api.mwalimucosmetics.com")) {
-      return url.replace("http://", "https://");
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("data:")) return trimmed;
+    if (trimmed.startsWith("//")) return `https:${trimmed}`;
+    if (trimmed.startsWith("/")) return `${apiBase.replace(/\/$/, "")}${trimmed}`;
+    if (trimmed.startsWith("http://api.mwalimucosmetics.com")) {
+      return trimmed.replace("http://", "https://");
     }
-    return url;
+    return trimmed;
   }
 
   if (loading) return <p className="muted">Loading product...</p>;
