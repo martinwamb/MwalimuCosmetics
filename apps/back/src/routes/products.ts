@@ -199,3 +199,16 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
     res.status(500).json({ error: "Could not update product" });
   }
 });
+
+router.delete("/:id", requireRoles(["ADMIN"]), async (req, res) => {
+  try {
+    await prisma.product.delete({ where: { id: req.params.id } });
+    res.status(204).send();
+  } catch (err: any) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      return res.status(404).json({ error: "Not found" });
+    }
+    console.error("[products] delete failed", err);
+    res.status(500).json({ error: "Could not delete product" });
+  }
+});

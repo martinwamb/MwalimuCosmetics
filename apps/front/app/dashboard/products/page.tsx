@@ -25,6 +25,7 @@ export default function ProductDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
     sku: "",
@@ -224,6 +225,32 @@ export default function ProductDashboardPage() {
       setError(err?.message ?? "Could not create product");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!token) {
+      setError("Sign in as an admin to delete products.");
+      return;
+    }
+    setDeletingId(id);
+    setError(null);
+    setStatus(null);
+    try {
+      const res = await fetch(`${apiBase}/products/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok && res.status !== 204) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data?.error as string) ?? "Could not delete product");
+      }
+      setStatus("Product deleted.");
+      await loadProducts(token);
+    } catch (err: any) {
+      setError(err?.message ?? "Could not delete product");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -536,37 +563,47 @@ export default function ProductDashboardPage() {
               <p className="muted small" style={{ margin: 0 }}>
                 Cost: {product.cost.toFixed(2)} • Stock: {product.stockQty}
               </p>
-              <button
-                className="button ghost"
-                type="button"
-                onClick={() => {
-                  setEditingId(product.id);
-                  setForm({
-                    name: product.name,
-                    sku: product.sku,
-                    category: product.category ?? "General",
-                    price: product.price.toString(),
-                    cost: product.cost.toString(),
-                    stockQty: product.stockQty.toString(),
-                    imageUrl: product.imageUrl ?? "",
-                    description: product.description ?? "",
-                    imageFile: null,
-                    featured: false,
-                    variants:
-                      product.variants?.map((v) => ({
-                        name: v.name,
-                        price: v.price ? v.price.toString() : "",
-                        imageUrl: v.imageUrl ?? "",
-                        imageFile: null,
-                        preview: null
-                      })) ?? []
-                  });
-                  setImagePreview(product.imageUrl ?? null);
-                  setVariantPreviews({});
-                }}
-              >
-                Edit
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => {
+                    setEditingId(product.id);
+                    setForm({
+                      name: product.name,
+                      sku: product.sku,
+                      category: product.category ?? "General",
+                      price: product.price.toString(),
+                      cost: product.cost.toString(),
+                      stockQty: product.stockQty.toString(),
+                      imageUrl: product.imageUrl ?? "",
+                      description: product.description ?? "",
+                      imageFile: null,
+                      featured: false,
+                      variants:
+                        product.variants?.map((v) => ({
+                          name: v.name,
+                          price: v.price ? v.price.toString() : "",
+                          imageUrl: v.imageUrl ?? "",
+                          imageFile: null,
+                          preview: null
+                        })) ?? []
+                    });
+                    setImagePreview(product.imageUrl ?? null);
+                    setVariantPreviews({});
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => handleDelete(product.id)}
+                  disabled={deletingId === product.id}
+                >
+                  {deletingId === product.id ? "Deleting..." : "Delete"}
+                </button>
+              </div>
             </article>
           ))}
         </div>
