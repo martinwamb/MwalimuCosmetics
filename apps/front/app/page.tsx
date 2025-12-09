@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+
 type Product = {
   id: string;
   name: string;
@@ -45,8 +47,6 @@ const fallbackCatalog: Product[] = [
   }
 ];
 
-import { useEffect, useMemo, useState } from "react";
-
 export default function Page() {
   const [catalog, setCatalog] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,7 +62,9 @@ export default function Page() {
       try {
         const res = await fetch(`${apiBase}/products?status=ACTIVE&take=50`, { cache: "no-store" });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error((data?.error as string) ?? "Could not load products");
+        if (!res.ok) {
+          throw new Error((data?.error as string) ?? "Could not load products");
+        }
         const items = (data?.data as any[]) ?? [];
         setCatalog(
           items.map((item) => ({
@@ -133,12 +135,18 @@ export default function Page() {
   const productsToShow = usingFallback ? fallbackCatalog : catalog;
   const featured = productsToShow.filter((p) => p.featured);
   const featuredRow = featured.length ? featured.slice(0, 3) : productsToShow.slice(0, 3);
-  const categories = Array.from(
-    new Set(productsToShow.map((p) => p.category).filter(Boolean) as string[])
-  ).slice(0, 8);
+  const categories = Array.from(new Set(productsToShow.map((p) => p.category).filter(Boolean) as string[])).slice(0, 8);
 
   function formatKES(value: number) {
     return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(value);
+  }
+
+  function normalizeImageUrl(url?: string | null) {
+    if (!url) return null;
+    if (url.startsWith("http://api.mwalimucosmetics.com")) {
+      return url.replace("http://", "https://");
+    }
+    return url;
   }
 
   return (
@@ -167,13 +175,13 @@ export default function Page() {
           </p>
           <div className="deal-grid">
             {featuredRow.map((product) => (
-              <div key={product.id} className="deal-tile" style={{ alignItems: "flex-start" }}>
+              <a key={product.id} className="deal-tile" style={{ alignItems: "flex-start", textDecoration: "none" }} href={`/products/${product.id}`}>
                 <strong>{product.name}</strong>
                 <p className="muted" style={{ margin: "0.35rem 0 0" }}>
                   {product.description}
                 </p>
                 <div className="muted small">{formatKES(product.price)}</div>
-              </div>
+              </a>
             ))}
           </div>
         </div>
@@ -204,40 +212,56 @@ export default function Page() {
       {notice && <p className="signin-success">{notice}</p>}
 
       <div className="catalog-grid">
-        {productsToShow.map((product) => (
-          <article className="product-card" key={product.id}>
-            {product.badge && <div className="badge">{product.badge}</div>}
-            <div
-              className="product-thumb"
-              style={
-                product.imageUrl
-                  ? { backgroundImage: `url(${product.imageUrl})`, backgroundSize: "cover", backgroundPosition: "center" }
-                  : undefined
-              }
+        {productsToShow.map((product) => {
+          const img = normalizeImageUrl(product.imageUrl);
+          return (
+            <a
+              className="product-card"
+              key={product.id}
+              href={`/products/${product.id}`}
+              style={{ textDecoration: "none", color: "inherit" }}
             >
-              {!product.imageUrl && (product.tagline ?? "New arrival")}
-            </div>
-            <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
-            <p className="muted" style={{ margin: 0 }}>
-              {product.description}
-            </p>
-            <p className="price">
-              {formatKES(product.price)}
-            </p>
-            <p className="muted small" style={{ margin: "0 0 0.35rem" }}>
-              {product.category ? `Category: ${product.category}` : "Fresh stock ready"}
-              {typeof product.stockQty === "number" ? ` • ${product.stockQty} in stock` : ""}
-            </p>
-            <div className="actions">
-              <button className="button full" onClick={() => handleAddToCart(product)}>
-                Add to Cart
-              </button>
-              <button className="button ghost full" onClick={() => handleSave(product)}>
-                Save
-              </button>
-            </div>
-          </article>
-        ))}
+              {product.badge && <div className="badge">{product.badge}</div>}
+              <div
+                className="product-thumb"
+                style={img ? { backgroundImage: `url(${img})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+              >
+                {!img && (product.tagline ?? "New arrival")}
+              </div>
+              <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
+              <p className="muted" style={{ margin: 0 }}>
+                {product.description}
+              </p>
+              <p className="price">{formatKES(product.price)}</p>
+              <p className="muted small" style={{ margin: "0 0 0.35rem" }}>
+                {product.category ? `Category: ${product.category}` : "Fresh stock ready"}
+                {typeof product.stockQty === "number" ? ` • ${product.stockQty} in stock` : ""}
+              </p>
+              <div className="actions">
+                <button
+                  className="button full"
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleAddToCart(product);
+                  }}
+                >
+                  Add to Cart
+                </button>
+                <button
+                  className="button ghost full"
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleSave(product);
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </a>
+          );
+        })}
       </div>
 
       <section className="signin-preview">
