@@ -38,11 +38,11 @@ router.post("/", requireRoles(["ADMIN"]), (req, res) => {
 
   try {
     fs.writeFileSync(filePath, buffer);
-    const publicUrl = `/uploads/${name}`;
+    const publicPath = `/uploads/${name}`;
     const proto = (req.headers["x-forwarded-proto"] as string) ?? req.protocol ?? "http";
     const host = req.headers.host ?? req.get("host") ?? "";
-    const absolute = `${proto}://${host}${publicUrl}`;
-    return res.status(201).json({ url: absolute, path: publicUrl });
+    const absolute = `${proto}://${host}${publicPath}`;
+    return res.status(201).json({ url: absolute, path: publicPath });
   } catch (err: any) {
     console.error("[uploads] failed", err);
     return res.status(500).json({ error: "Failed to save file" });
