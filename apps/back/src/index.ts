@@ -18,7 +18,12 @@ const app = express();
 const port = process.env.PORT || 4000;
 
 app.set("trust proxy", true);
-app.use(helmet());
+app.use(
+  helmet({
+    // Allow assets (like uploaded images) to be consumed from other subdomains/frontends.
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+  })
+);
 app.use(cors());
 app.use(express.json({ limit: "20mb" }));
 app.use(morgan("dev"));
