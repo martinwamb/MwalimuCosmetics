@@ -784,6 +784,134 @@ a {
   margin-top: 0.75rem;
 }
 
+.product-page {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.05fr) minmax(320px, 1.2fr) minmax(240px, 0.9fr);
+  gap: 1rem;
+  align-items: start;
+  margin: 1.2rem 0;
+}
+
+.product-gallery {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.thumb-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.thumb {
+  width: 100%;
+  height: 70px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.thumb.active {
+  outline: 2px solid var(--gold);
+}
+
+.main-image {
+  min-height: 360px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: radial-gradient(circle at 30% 30%, #fff6d4, #eef2ff);
+  display: grid;
+  place-items: center;
+}
+
+.product-main {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.price-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.detail-list {
+  list-style: disc;
+  padding-left: 1.2rem;
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  display: grid;
+  gap: 0.2rem;
+}
+
+.variant-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.variant-chip {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.9rem;
+  background: #f8fafc;
+  display: grid;
+  gap: 0.15rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.variant-chip.active {
+  border-color: #b18a43;
+  box-shadow: var(--shadow);
+}
+
+.buy-card {
+  position: sticky;
+  top: 90px;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.qty-row {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+}
+
+.buy-card select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 1100px) {
+  .product-page {
+    grid-template-columns: 1fr;
+  }
+
+  .product-gallery {
+    grid-template-columns: 1fr;
+  }
+
+  .thumb-rail {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .buy-card {
+    position: static;
+  }
+}
+
 @media (max-width: 900px) {
   .signin-stack {
     grid-template-columns: 1fr;
