@@ -135,6 +135,7 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
   }
 
   function handleAddToCart(message?: string) {
+    if (!product) return;
     const next = [...cart];
     const existing = next.findIndex((item) => item.id === product.id && item.price === displayPrice);
     if (existing >= 0) {
@@ -291,4 +292,3 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
     </div>
   );
 }
-
