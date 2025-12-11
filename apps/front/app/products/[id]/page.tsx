@@ -252,10 +252,18 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
               ))}
             </select>
           </div>
-          <button className="button full" type="button" onClick={handleAddToCart}>
+          <button
+            className="button full"
+            type="button"
+            onClick={() => handleAddToCart()}
+          >
             Add to Cart
           </button>
-          <button className="button ghost full" type="button" onClick={handleBuyNow}>
+          <button
+            className="button ghost full"
+            type="button"
+            onClick={() => handleBuyNow()}
+          >
             Buy Now
           </button>
           <p className="muted small" style={{ margin: "0.6rem 0 0" }}>
