@@ -100,31 +100,33 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
     return trimmed;
   }
 
-  if (loading) return <p className="muted">Loading product...</p>;
-  if (error) return <p className="signin-error">{error}</p>;
-  if (!product) return <p className="muted">Product not found.</p>;
-
-  const primaryImage = normalizeImageUrl(
-    product.variants.find((v) => v.id === selectedVariantId)?.imageUrl ?? product.imageUrl
-  );
+  const primaryImage = useMemo(() => {
+    if (!product) return null;
+    return normalizeImageUrl(product.variants.find((v) => v.id === selectedVariantId)?.imageUrl ?? product.imageUrl);
+  }, [product, selectedVariantId]);
   const galleryImages = useMemo(
     () =>
-      Array.from(
-        new Set(
-          [product.imageUrl, ...product.variants.map((v) => v.imageUrl)]
-            .map((url) => normalizeImageUrl(url))
-            .filter(Boolean) as string[]
-        )
-      ),
-    [product.imageUrl, product.variants]
+      product
+        ? Array.from(
+            new Set(
+              [product.imageUrl, ...product.variants.map((v) => v.imageUrl)]
+                .map((url) => normalizeImageUrl(url))
+                .filter(Boolean) as string[]
+            )
+          )
+        : [],
+    [product]
   );
 
   useEffect(() => {
     setActiveImage(primaryImage ?? galleryImages[0] ?? null);
-  }, [product.id, primaryImage, galleryImages]);
+  }, [primaryImage, galleryImages, product?.id]);
 
-  const activeVariant = product.variants.find((v) => v.id === selectedVariantId) ?? null;
-  const displayPrice = activeVariant?.price ?? product.price;
+  const activeVariant = useMemo(
+    () => product?.variants.find((v) => v.id === selectedVariantId) ?? null,
+    [product, selectedVariantId]
+  );
+  const displayPrice = activeVariant?.price ?? product?.price ?? 0;
 
   function persistCart(next: typeof cart) {
     try {
@@ -152,6 +154,10 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
   function handleBuyNow() {
     handleAddToCart("Buy Now is coming soon. Added to cart so you can check out.");
   }
+
+  if (loading) return <p className="muted">Loading product...</p>;
+  if (error) return <p className="signin-error">{error}</p>;
+  if (!product) return <p className="muted">Product not found.</p>;
 
   return (
     <div>
