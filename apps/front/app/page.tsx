@@ -111,7 +111,13 @@ export default function Page() {
   }
 
   function handleAddToCart(product: Product) {
-    const next = [...cart, { id: product.id, name: product.name, price: product.price, qty: 1 }];
+    const next = [...cart];
+    const existing = next.findIndex((item) => item.id === product.id && item.price === product.price);
+    if (existing >= 0) {
+      next[existing].qty += 1;
+    } else {
+      next.push({ id: product.id, name: product.name, price: product.price, qty: 1 });
+    }
     setCart(next);
     persist("mwalimu_cart", next);
     setNotice(`Added ${product.name} to cart.`);
