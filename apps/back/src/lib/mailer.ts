@@ -1,7 +1,8 @@
 import nodemailer from "nodemailer";
 import SMTPTransport from "nodemailer/lib/smtp-transport/index.js";
-import { MailStatus } from "@prisma/client";
 import { prisma } from "./prisma.js";
+
+type MailStatus = "QUEUED" | "SENT" | "FAILED";
 
 type SendInput = {
   to: string;

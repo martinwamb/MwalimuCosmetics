@@ -59,7 +59,7 @@ router.post("/", async (req, res) => {
 
   let persistedOrder: Awaited<ReturnType<typeof prisma.salesOrder.create>> | null = null;
   try {
-    persistedOrder = await prisma.$transaction(async (tx) => {
+    persistedOrder = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       let customerId: string | null = null;
       if (parsed.data.customer && (parsed.data.customer.email || parsed.data.customer.phone || parsed.data.customer.name)) {
         const contactWhere = parsed.data.customer.email
@@ -94,16 +94,16 @@ router.post("/", async (req, res) => {
           channel: parsed.data.channel,
           paymentMethod: parsed.data.paymentMethod ?? null,
           paymentStatus: parsed.data.paymentMethod ? "PAID" : "UNPAID",
-          subtotal: new Prisma.Decimal(subtotal),
-          tax: new Prisma.Decimal(0),
-          discount: new Prisma.Decimal(0),
-          total: new Prisma.Decimal(subtotal),
+          subtotal: subtotal,
+          tax: 0,
+          discount: 0,
+          total: subtotal,
           customerId,
           items: {
             create: parsed.data.items.map((item) => ({
               productId: item.productId,
               qty: item.qty,
-              unitPrice: new Prisma.Decimal(item.unitPrice)
+              unitPrice: item.unitPrice
             }))
           }
         },

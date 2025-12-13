@@ -97,7 +97,7 @@ router.get("/", async (req, res) => {
     skip
   });
 
-  res.json({ data: products.map((product) => formatProduct(product, includeCost)) });
+  res.json({ data: products.map((product: any) => formatProduct(product, includeCost)) });
 });
 
 router.get("/:id", async (req, res) => {
@@ -129,8 +129,8 @@ router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
         featured: Boolean(parsed.data.featured),
         imageUrl: parsed.data.imageUrl,
         categoryId: category.id,
-        price: new Prisma.Decimal(parsed.data.price),
-        cost: new Prisma.Decimal(parsed.data.cost),
+        price: parsed.data.price,
+        cost: parsed.data.cost,
         stockQty: parsed.data.stockQty ?? 0,
         status: parsed.data.status ?? "ACTIVE",
         variants: parsed.data.variants
@@ -138,7 +138,7 @@ router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
               create: parsed.data.variants.map((v) => ({
                 name: v.name,
                 imageUrl: v.imageUrl,
-                price: typeof v.price === "number" ? new Prisma.Decimal(v.price) : undefined
+                price: typeof v.price === "number" ? v.price : undefined
               }))
             }
           : undefined
@@ -148,7 +148,7 @@ router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
 
     res.status(201).json({ data: formatProduct(created, true) });
   } catch (err: any) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+    if ((err as any)?.code === "P2002") {
       return res.status(409).json({ error: "SKU must be unique" });
     }
     console.error("[products] create failed", err);
@@ -173,26 +173,26 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
   };
 
   if (typeof parsed.data.price === "number") {
-    updates.price = new Prisma.Decimal(parsed.data.price);
+    updates.price = parsed.data.price;
   }
   if (typeof parsed.data.cost === "number") {
-    updates.cost = new Prisma.Decimal(parsed.data.cost);
+    updates.cost = parsed.data.cost;
   }
 
-    if (parsed.data.category) {
-      const category = await ensureCategory(parsed.data.category);
-      updates.categoryId = category.id;
-    }
+  if (parsed.data.category) {
+    const category = await ensureCategory(parsed.data.category);
+    updates.categoryId = category.id;
+  }
 
-    try {
-      const updated = await prisma.product.update({
-        where: { id: req.params.id },
-        data: updates,
-        include: { category: true, variants: true }
-      });
-      res.json({ data: formatProduct(updated, true) });
+  try {
+    const updated = await prisma.product.update({
+      where: { id: req.params.id },
+      data: updates,
+      include: { category: true, variants: true }
+    });
+    res.json({ data: formatProduct(updated, true) });
   } catch (err: any) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+    if ((err as any)?.code === "P2002") {
       return res.status(409).json({ error: "SKU must be unique" });
     }
     console.error("[products] update failed", err);
@@ -205,7 +205,7 @@ router.delete("/:id", requireRoles(["ADMIN"]), async (req, res) => {
     await prisma.product.delete({ where: { id: req.params.id } });
     res.status(204).send();
   } catch (err: any) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+    if ((err as any)?.code === "P2025") {
       return res.status(404).json({ error: "Not found" });
     }
     console.error("[products] delete failed", err);
