@@ -7,6 +7,7 @@ type CartItem = { id: string; name: string; price: number; qty: number };
 const orderEmail = process.env.NEXT_PUBLIC_ORDER_EMAIL;
 const orderWhatsApp = process.env.NEXT_PUBLIC_ORDER_WHATSAPP;
 const orderTelegram = process.env.NEXT_PUBLIC_ORDER_TELEGRAM;
+const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 function formatKES(value: number) {
   return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(value);
@@ -42,6 +43,15 @@ export default function CartPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [customer, setCustomer] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    address: "",
+    marketingOptIn: false
+  });
 
   useEffect(() => {
     try {
@@ -124,6 +134,47 @@ export default function CartPage() {
       ? `https://t.me/share/url?url=${encodeURIComponent("https://mwalimucosmetics.com/cart")}&text=${encodeURIComponent(orderMessage)}`
       : null;
 
+  async function placeOrder() {
+    if (cart.length === 0) return;
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`${apiBase}/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: "ONLINE",
+          items: cart.map((item) => ({
+            productId: item.id,
+            name: item.name,
+            qty: item.qty,
+            unitPrice: item.price
+          })),
+          customer: {
+            name: customer.name || undefined,
+            email: customer.email || undefined,
+            phone: customer.phone || undefined,
+            address: customer.address || undefined,
+            marketingOptIn: customer.marketingOptIn
+          }
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data?.error as string) ?? "Order failed");
+      }
+      setNotice("Order placed. We will follow up shortly.");
+      persist([]);
+      setCustomer((prev) => ({ ...prev, address: "", phone: "", name: "", email: "" }));
+    } catch (err: any) {
+      setError(err?.message ?? "Could not place order.");
+    } finally {
+      setSubmitting(false);
+      setTimeout(() => setNotice(null), 2200);
+    }
+  }
+
   return (
     <div className="card">
       <h2 style={{ marginTop: 0 }}>Cart</h2>
@@ -202,12 +253,12 @@ export default function CartPage() {
                   </div>
                 </div>
               ))}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
-                <div className="muted small">Items: {totalItems}</div>
-                <button className="text-link" type="button" onClick={() => clearCart()}>
-                  Clear cart
-                </button>
-              </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
+                  <div className="muted small">Items: {totalItems}</div>
+                  <button className="text-link" type="button" onClick={() => clearCart()}>
+                    Clear cart
+                  </button>
+                </div>
             </div>
           </section>
 
@@ -221,6 +272,59 @@ export default function CartPage() {
             <p className="muted small" style={{ marginTop: 0 }}>
               Choose where to send your order details. We prefill the message with the items above.
             </p>
+            <div style={{ display: "grid", gap: "0.35rem", marginTop: "0.35rem" }}>
+              <label className="muted small">
+                Name
+                <input
+                  style={{ width: "100%", marginTop: "0.2rem" }}
+                  value={customer.name}
+                  onChange={(e) => setCustomer((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="Your name"
+                />
+              </label>
+              <label className="muted small">
+                Email
+                <input
+                  style={{ width: "100%", marginTop: "0.2rem" }}
+                  value={customer.email}
+                  onChange={(e) => setCustomer((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="you@example.com"
+                  type="email"
+                />
+              </label>
+              <label className="muted small">
+                Phone
+                <input
+                  style={{ width: "100%", marginTop: "0.2rem" }}
+                  value={customer.phone}
+                  onChange={(e) => setCustomer((prev) => ({ ...prev, phone: e.target.value }))}
+                  placeholder="+2547..."
+                />
+              </label>
+              <label className="muted small">
+                Address / delivery notes
+                <textarea
+                  style={{ width: "100%", marginTop: "0.2rem" }}
+                  value={customer.address}
+                  onChange={(e) => setCustomer((prev) => ({ ...prev, address: e.target.value }))}
+                  placeholder="Estate, street, house/office, instructions"
+                  rows={3}
+                />
+              </label>
+              <label className="muted small" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <input
+                  type="checkbox"
+                  checked={customer.marketingOptIn}
+                  onChange={(e) => setCustomer((prev) => ({ ...prev, marketingOptIn: e.target.checked }))}
+                />
+                Subscribe to offers and product news
+              </label>
+            </div>
+            {error && (
+              <p className="signin-error" style={{ marginTop: "0.4rem" }}>
+                {error}
+              </p>
+            )}
             <div className="actions" style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.5rem" }}>
               {mailtoHref && (
                 <a className="button full" href={mailtoHref}>
@@ -237,6 +341,9 @@ export default function CartPage() {
                   Send via Telegram
                 </a>
               )}
+              <button className="button full" type="button" onClick={placeOrder} disabled={submitting}>
+                {submitting ? "Placing..." : "Place order"}
+              </button>
               <button className="button ghost full" type="button" onClick={() => copyOrderDetails(orderMessage)}>
                 Copy order details
               </button>

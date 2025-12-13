@@ -65,6 +65,8 @@ model Customer {
   name      String
   email     String?
   phone     String?
+  address   String?
+  marketingOptIn Boolean @default(false)
   loyalty   Int        @default(0)
   orders    SalesOrder[]
   createdAt DateTime   @default(now())
