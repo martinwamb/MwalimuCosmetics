@@ -61,6 +61,7 @@ router.post("/", async (req, res) => {
   let persistedOrder: Awaited<ReturnType<typeof prisma.salesOrder.create>> | null = null;
   try {
     persistedOrder = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const humanOrderId = `ORD-${Math.random().toString(36).slice(2, 6).toUpperCase()}-${Date.now().toString().slice(-4)}`;
       let customerId: string | null = null;
       if (parsed.data.customer && (parsed.data.customer.email || parsed.data.customer.phone || parsed.data.customer.name)) {
         const contactWhere = parsed.data.customer.email
@@ -92,6 +93,7 @@ router.post("/", async (req, res) => {
 
       const order = await tx.salesOrder.create({
         data: {
+          id: humanOrderId,
           channel: parsed.data.channel,
           paymentMethod: parsed.data.paymentMethod ?? null,
           paymentStatus: parsed.data.paymentMethod ? "PAID" : "UNPAID",
@@ -130,6 +132,7 @@ router.post("/", async (req, res) => {
   try {
     await Promise.allSettled([
       sendOrderEmail(summary),
+      sendCustomerEmail(summary, parsed.data.customer?.email),
       sendOrderWhatsApp(summary),
       sendOrderTelegram(summary)
     ]);
@@ -199,6 +202,19 @@ async function sendOrderEmail(summary: { subject: string; text: string }) {
     subject: summary.subject,
     text: summary.text
   });
+}
+
+async function sendCustomerEmail(summary: { subject: string; text: string }, customerEmail?: string | null) {
+  if (!customerEmail) return;
+  try {
+    await sendAppMail({
+      to: customerEmail,
+      subject: summary.subject,
+      text: summary.text
+    });
+  } catch (err: any) {
+    console.error("[orders] Failed to notify customer", err?.message ?? err);
+  }
 }
 
 async function sendOrderWhatsApp(summary: { text: string }) {
