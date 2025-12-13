@@ -11,6 +11,7 @@ type Variant = {
 
 type Product = {
   id: string;
+  slug?: string | null;
   name: string;
   description?: string | null;
   price: number;
@@ -31,7 +32,7 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [notice, setNotice] = useState<string | null>(null);
-  const [cart, setCart] = useState<{ id: string; name: string; price: number; qty: number }[]>([]);
+  const [cart, setCart] = useState<{ id: string; slug?: string | null; name: string; price: number; qty: number }[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -44,6 +45,7 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
         const p = data?.data;
         setProduct({
           id: p.id,
+          slug: p.slug,
           name: p.name,
           description: p.description,
           price: Number(p.price),
@@ -143,7 +145,7 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
     if (existing >= 0) {
       next[existing].qty += quantity;
     } else {
-      next.push({ id: product.id, name: product.name, price: displayPrice, qty: quantity });
+      next.push({ id: product.id, slug: product.slug, name: product.name, price: displayPrice, qty: quantity });
     }
     setCart(next);
     persistCart(next);

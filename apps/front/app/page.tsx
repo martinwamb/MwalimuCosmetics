@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type Product = {
   id: string;
+  slug?: string | null;
   name: string;
   description: string;
   price: number;
@@ -69,6 +70,7 @@ export default function Page() {
         setCatalog(
           items.map((item) => ({
             id: item.id,
+            slug: item.slug,
             name: item.name,
             description: item.description,
             price: item.price,
@@ -116,7 +118,7 @@ export default function Page() {
     if (existing >= 0) {
       next[existing].qty += 1;
     } else {
-      next.push({ id: product.id, name: product.name, price: product.price, qty: 1 });
+      next.push({ id: product.id, slug: product.slug, name: product.name, price: product.price, qty: 1 });
     }
     setCart(next);
     persist("mwalimu_cart", next);
@@ -189,7 +191,12 @@ export default function Page() {
           </p>
           <div className="deal-grid">
             {featuredRow.map((product) => (
-              <a key={product.id} className="deal-tile" style={{ alignItems: "flex-start", textDecoration: "none" }} href={`/products/${product.id}`}>
+              <a
+                key={product.id}
+                className="deal-tile"
+                style={{ alignItems: "flex-start", textDecoration: "none" }}
+                href={`/products/${product.slug ?? product.id}`}
+              >
                 <strong>{product.name}</strong>
                 <p className="muted" style={{ margin: "0.35rem 0 0" }}>
                   {product.description}
@@ -232,7 +239,7 @@ export default function Page() {
             <a
               className="product-card"
               key={product.id}
-              href={`/products/${product.id}`}
+              href={`/products/${product.slug ?? product.id}`}
               style={{ textDecoration: "none", color: "inherit" }}
             >
               {product.badge && <div className="badge">{product.badge}</div>}

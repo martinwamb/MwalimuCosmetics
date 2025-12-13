@@ -19,6 +19,7 @@ const orderSchema = z.object({
     z.object({
       productId: z.string(),
       name: z.string().optional(),
+      slug: z.string().optional(),
       qty: z.number().int().positive(),
       unitPrice: z.number()
     })
@@ -154,13 +155,13 @@ function buildOrderSummary(order: {
     address?: string;
     marketingOptIn?: boolean;
   };
-  items: { productId: string; name?: string | null; qty: number; unitPrice: number }[];
+  items: { productId: string; slug?: string | null; name?: string | null; qty: number; unitPrice: number }[];
   subtotal: number;
 }) {
   const items = order.items
     .map((item: any, idx: number) => {
       const trimmedBase = STORE_BASE_URL ? STORE_BASE_URL.replace(/\/+$/, "") : null;
-      const link = trimmedBase ? `${trimmedBase}/${item.productId}` : null;
+      const link = trimmedBase ? `${trimmedBase}/${item.slug ?? item.productId}` : null;
       const line = `${idx + 1}. ${item.name ?? item.productId} x${item.qty} @ ${formatCurrency(item.unitPrice)} = ${formatCurrency(
         item.unitPrice * item.qty
       )}`;

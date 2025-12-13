@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type CartItem = { id: string; name: string; price: number; qty: number };
+type CartItem = { id: string; slug?: string | null; name: string; price: number; qty: number };
 
 const orderEmail = process.env.NEXT_PUBLIC_ORDER_EMAIL;
 const orderWhatsApp = process.env.NEXT_PUBLIC_ORDER_WHATSAPP;
@@ -22,13 +22,14 @@ function normalizeCart(raw: unknown): CartItem[] {
     const name = (entry as any).name;
     const price = Number((entry as any).price);
     const qty = Number((entry as any).qty ?? 1);
+    const slug = (entry as any).slug ?? null;
     if (!id || !name || Number.isNaN(price) || Number.isNaN(qty)) continue;
     const key = `${id}-${price}`;
     const existing = merged.findIndex((item) => `${item.id}-${item.price}` === key);
     if (existing >= 0) {
       merged[existing].qty += Math.max(1, Math.round(qty));
     } else {
-      merged.push({ id, name, price, qty: Math.max(1, Math.round(qty)) });
+      merged.push({ id, slug, name, price, qty: Math.max(1, Math.round(qty)) });
     }
   }
   return merged;
@@ -147,6 +148,7 @@ export default function CartPage() {
           channel: "ONLINE",
           items: cart.map((item) => ({
             productId: item.id,
+            slug: item.slug,
             name: item.name,
             qty: item.qty,
             unitPrice: item.price

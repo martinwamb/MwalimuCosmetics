@@ -8,6 +8,7 @@ import { prisma } from "../lib/prisma.js";
 const productCreateSchema = z.object({
   name: z.string().min(1),
   sku: z.string().min(1),
+  slug: z.string().min(1).optional(),
   price: z.number().positive(),
   cost: z.number().nonnegative(),
   description: z.string().optional(),
@@ -36,6 +37,7 @@ function formatProduct(product: any, includeCost = false) {
     id: product.id,
     name: product.name,
     sku: product.sku,
+    slug: product.slug ?? null,
     description: product.description,
     featured: product.featured,
     imageUrl: product.imageUrl,
@@ -64,6 +66,33 @@ async function ensureCategory(name: string) {
   const existing = await prisma.category.findUnique({ where: { name: trimmed } });
   if (existing) return existing;
   return prisma.category.create({ data: { name: trimmed } });
+}
+
+function slugify(input: string) {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-");
+}
+
+async function generateUniqueSlug(base: string | undefined, fallback: string | undefined, skipId?: string) {
+  const candidateSource = base?.trim() || fallback?.trim() || "product";
+  let slug = slugify(candidateSource);
+  if (!slug) slug = `product-${Date.now()}`;
+
+  let attempt = 0;
+  // Ensure uniqueness; skip current record if updating
+  // Add short suffix when colliding
+  while (true) {
+    const suffix = attempt === 0 ? "" : `-${attempt}`;
+    const candidate = `${slug}${suffix}`;
+    const existing = await prisma.product.findUnique({ where: { slug: candidate } });
+    if (!existing || (skipId && existing.id === skipId)) {
+      return candidate;
+    }
+    attempt += 1;
+  }
 }
 
 router.get("/", async (req, res) => {
@@ -119,12 +148,14 @@ router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
   }
 
   const category = await ensureCategory(parsed.data.category);
+  const slug = await generateUniqueSlug(parsed.data.slug ?? parsed.data.name, parsed.data.sku);
 
   try {
     const created = await prisma.product.create({
       data: {
         name: parsed.data.name,
         sku: parsed.data.sku,
+        slug,
         description: parsed.data.description,
         featured: Boolean(parsed.data.featured),
         imageUrl: parsed.data.imageUrl,
@@ -165,6 +196,7 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
   const updates: any = {
     name: parsed.data.name,
     sku: parsed.data.sku,
+    slug: parsed.data.slug,
     description: parsed.data.description,
     featured: parsed.data.featured,
     imageUrl: parsed.data.imageUrl,
@@ -185,6 +217,10 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
   }
 
   try {
+    if (updates.slug) {
+      updates.slug = await generateUniqueSlug(updates.slug, parsed.data.sku, req.params.id);
+    }
+
     const updated = await prisma.product.update({
       where: { id: req.params.id },
       data: updates,

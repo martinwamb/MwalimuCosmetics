@@ -25,6 +25,7 @@ model Product {
   id          String   @id @default(cuid())
   name        String
   sku         String   @unique
+  slug        String?  @unique
   description String?
   featured    Boolean  @default(false)
   imageUrl    String?
