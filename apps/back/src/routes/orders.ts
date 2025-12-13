@@ -121,13 +121,16 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: err?.message ?? "Unable to save order" });
   }
 
+  const upsell = await fetchUpsellProducts(parsed.data.items.map((i) => i.productId));
+
   const summary = buildOrderSummary({
     id: persistedOrder.id,
     channel: persistedOrder.channel,
     paymentMethod: persistedOrder.paymentMethod,
     customer: parsed.data.customer,
     items: parsed.data.items,
-    subtotal
+    subtotal,
+    upsell
   });
 
   try {
@@ -144,6 +147,42 @@ router.post("/", async (req, res) => {
   res.status(201).json({ data: persistedOrder });
 });
 
+async function fetchUpsellProducts(productIds: string[]) {
+  if (!productIds.length) return [];
+  try {
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      include: { category: true }
+    });
+    const categoryIds = Array.from(
+      new Set(
+        products
+          .map((p) => p.categoryId)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+    const candidates = await prisma.product.findMany({
+      where: {
+        status: { in: ["ACTIVE", "INACTIVE"] },
+        id: { notIn: productIds },
+        ...(categoryIds.length ? { categoryId: { in: categoryIds } } : {})
+      },
+      orderBy: { createdAt: "desc" },
+      take: 5
+    });
+    return candidates.slice(0, 3).map((p) => ({
+      id: p.id,
+      slug: p.slug,
+      name: p.name,
+      price: parseFloat(p.price.toString()),
+      imageUrl: p.imageUrl
+    }));
+  } catch (err: any) {
+    console.error("[orders] upsell fetch failed", err?.message ?? err);
+    return [];
+  }
+}
+
 function buildOrderSummary(order: {
   id: string;
   channel: string;
@@ -157,6 +196,7 @@ function buildOrderSummary(order: {
   };
   items: { productId: string; slug?: string | null; name?: string | null; qty: number; unitPrice: number }[];
   subtotal: number;
+  upsell?: { id: string; slug?: string | null; name: string; price: number; imageUrl?: string | null }[];
 }) {
   const items = order.items
     .map((item: any, idx: number) => {
@@ -178,22 +218,82 @@ function buildOrderSummary(order: {
         typeof order.customer.marketingOptIn === "boolean"
           ? `Marketing opt-in: ${order.customer.marketingOptIn ? "Yes" : "No"}`
           : null
-      ].filter(Boolean)
+      ].filter((line): line is string => Boolean(line))
     : [];
 
   return {
     subject: `New order ${order.id} via ${order.channel}`,
     text: `New order ${order.id} via ${order.channel}\n\nItems:\n${items}\n\nSubtotal: ${formatCurrency(
       order.subtotal
-    )}\nPayment: ${order.paymentMethod ?? "Unpaid"}\n${customerLines.length ? "\nCustomer:\n" + customerLines.join("\n") : ""}`
+    )}\nPayment: ${order.paymentMethod ?? "Unpaid"}\n${customerLines.length ? "\nCustomer:\n" + customerLines.join("\n") : ""}${
+      order.upsell?.length
+        ? `\n\nYou may also like:\n${order.upsell
+            .map((p) => {
+              const base = STORE_BASE_URL ? STORE_BASE_URL.replace(/\/+$/, "") : null;
+              const link = base ? `${base}/${p.slug ?? p.id}` : null;
+              return link ? `- ${p.name} (${link})` : `- ${p.name}`;
+            })
+            .join("\n")}`
+        : ""
+    }`,
+    html: buildHtmlSummary({ items, customerLines, order, upsell: order.upsell ?? [] })
   };
+}
+
+function buildHtmlSummary({
+  items,
+  customerLines,
+  order,
+  upsell
+}: {
+  items: string;
+  customerLines: string[];
+  order: any;
+  upsell: { id: string; slug?: string | null; name: string; price: number; imageUrl?: string | null }[];
+}) {
+  const base = STORE_BASE_URL ? STORE_BASE_URL.replace(/\/+$/, "") : null;
+  const upsellHtml = upsell
+    .map((p) => {
+      const link = base ? `${base}/${p.slug ?? p.id}` : "#";
+      const img = p.imageUrl ? `<div style="margin-bottom:6px;"><img src="${p.imageUrl}" alt="${p.name}" width="120" style="border-radius:8px;border:1px solid #eee;"/></div>` : "";
+      return `<td style="width:180px;padding:8px;vertical-align:top;border:1px solid #eee;border-radius:8px;">
+        ${img}
+        <div style="font-weight:600;margin-bottom:4px;">${p.name}</div>
+        <div style="color:#555;font-size:13px;">${formatCurrency(p.price)}</div>
+        <div style="margin-top:6px;">
+          <a href="${link}" style="color:#0b5ed7;text-decoration:none;">View</a>
+        </div>
+      </td>`;
+    })
+    .join("");
+
+  const customerHtml = customerLines.length
+    ? `<p style="margin:0 0 8px 0;font-weight:600;">Customer</p><p style="margin:0 0 12px 0;color:#444;font-size:14px;">${customerLines.join("<br/>")}</p>`
+    : "";
+
+  return `
+  <div style="font-family:Arial, sans-serif;color:#222;line-height:1.5;">
+    <p style="margin:0 0 12px 0;">New order <strong>${order.id}</strong> via <strong>${order.channel}</strong></p>
+    <p style="margin:0 0 8px 0;font-weight:600;">Items</p>
+    <pre style="background:#f7f7f7;padding:10px;border-radius:8px;border:1px solid #eee;font-size:14px;margin:0 0 12px 0;">${items}</pre>
+    <p style="margin:0 0 6px 0;">Subtotal: <strong>${formatCurrency(order.subtotal)}</strong></p>
+    <p style="margin:0 0 12px 0;">Payment: <strong>${order.paymentMethod ?? "Unpaid"}</strong></p>
+    ${customerHtml}
+    ${
+      upsellHtml
+        ? `<p style="margin:16px 0 8px 0;font-weight:600;">You may also like</p>
+           <table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:8px 8px;"><tr>${upsellHtml}</tr></table>`
+        : ""
+    }
+  </div>
+  `;
 }
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(value);
 }
 
-async function sendOrderEmail(summary: { subject: string; text: string }) {
+async function sendOrderEmail(summary: { subject: string; text: string; html?: string }) {
   if (!ORDER_EMAIL) {
     console.warn("[orders] ORDER_EMAIL not set. Skipping email send.");
     return;
@@ -201,17 +301,19 @@ async function sendOrderEmail(summary: { subject: string; text: string }) {
   await sendAppMail({
     to: ORDER_EMAIL,
     subject: summary.subject,
-    text: summary.text
+    text: summary.text,
+    html: summary.html
   });
 }
 
-async function sendCustomerEmail(summary: { subject: string; text: string }, customerEmail?: string | null) {
+async function sendCustomerEmail(summary: { subject: string; text: string; html?: string }, customerEmail?: string | null) {
   if (!customerEmail) return;
   try {
     await sendAppMail({
       to: customerEmail,
       subject: summary.subject,
-      text: summary.text
+      text: summary.text,
+      html: summary.html
     });
   } catch (err: any) {
     console.error("[orders] Failed to notify customer", err?.message ?? err);
