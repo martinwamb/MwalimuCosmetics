@@ -10,6 +10,7 @@ const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 const WHATSAPP_TO = process.env.ORDER_WHATSAPP_TO;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const STORE_BASE_URL = process.env.STORE_BASE_URL ?? "https://mwalimucosmetics.com/products";
 
 const orderSchema = z.object({
   id: z.string().optional(),
@@ -154,12 +155,13 @@ function buildOrderSummary(order: {
   subtotal: number;
 }) {
   const items = order.items
-    .map(
-      (item: any, idx: number) =>
-        `${idx + 1}. ${item.name ?? item.productId} x${item.qty} @ ${formatCurrency(item.unitPrice)} = ${formatCurrency(
-          item.unitPrice * item.qty
-        )}`
-    )
+    .map((item: any, idx: number) => {
+      const link = STORE_BASE_URL ? `${STORE_BASE_URL.replace(/\\/+$/, "")}/${item.productId}` : null;
+      const line = `${idx + 1}. ${item.name ?? item.productId} x${item.qty} @ ${formatCurrency(item.unitPrice)} = ${formatCurrency(
+        item.unitPrice * item.qty
+      )}`;
+      return link ? `${line} (${link})` : line;
+    })
     .join("\n");
 
   const customerLines = order.customer
