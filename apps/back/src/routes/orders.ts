@@ -156,7 +156,8 @@ function buildOrderSummary(order: {
 }) {
   const items = order.items
     .map((item: any, idx: number) => {
-      const link = STORE_BASE_URL ? `${STORE_BASE_URL.replace(/\\/+$/, "")}/${item.productId}` : null;
+      const trimmedBase = STORE_BASE_URL ? STORE_BASE_URL.replace(/\/+$/, "") : null;
+      const link = trimmedBase ? `${trimmedBase}/${item.productId}` : null;
       const line = `${idx + 1}. ${item.name ?? item.productId} x${item.qty} @ ${formatCurrency(item.unitPrice)} = ${formatCurrency(
         item.unitPrice * item.qty
       )}`;
