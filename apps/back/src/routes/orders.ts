@@ -67,7 +67,7 @@ router.post("/", async (req, res) => {
       const products = await tx.product.findMany({ where: { id: { in: productIds } } });
       const outOfStock: string[] = [];
       for (const item of parsed.data.items) {
-        const p = products.find((prod) => prod.id === item.productId);
+        const p = products.find((prod: any) => prod.id === item.productId);
         if (!p) {
           outOfStock.push(`${item.name ?? item.productId} (missing)`);
           continue;
@@ -179,7 +179,7 @@ router.post("/", async (req, res) => {
 router.post("/:id/cancel", async (req, res) => {
   const orderId = req.params.id;
   try {
-    const updated = await prisma.$transaction(async (tx) => {
+    const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const order = await tx.salesOrder.findUnique({
         where: { id: orderId },
         include: { items: true }
@@ -193,7 +193,7 @@ router.post("/:id/cancel", async (req, res) => {
 
       // Restock
       await Promise.all(
-        order.items.map((item) =>
+        order.items.map((item: any) =>
           tx.product.update({
             where: { id: item.productId },
             data: { stockQty: { increment: item.qty } }
@@ -224,8 +224,8 @@ async function fetchUpsellProducts(productIds: string[]) {
     const categoryIds = Array.from(
       new Set(
         products
-          .map((p) => p.categoryId)
-          .filter((id): id is string => Boolean(id))
+          .map((p: any) => p.categoryId)
+          .filter((id: any): id is string => Boolean(id))
       )
     );
     const candidates = await prisma.product.findMany({
@@ -237,7 +237,7 @@ async function fetchUpsellProducts(productIds: string[]) {
       orderBy: { createdAt: "desc" },
       take: 5
     });
-    return candidates.slice(0, 3).map((p) => ({
+    return candidates.slice(0, 3).map((p: any) => ({
       id: p.id,
       slug: p.slug,
       name: p.name,
