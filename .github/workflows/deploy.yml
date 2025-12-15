@@ -13,6 +13,7 @@ jobs:
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
       APP_PORT: 3001
+      FRONT_PORT: 3000
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -38,7 +39,7 @@ jobs:
 
       - name: Post-deploy (install, build, restart)
         run: |
-          ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "DEPLOY_DIR='$DEPLOY_DIR' APP_PORT='$APP_PORT' bash -s" <<'EOF'
+          ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "DEPLOY_DIR='$DEPLOY_DIR' APP_PORT='$APP_PORT' FRONT_PORT='$FRONT_PORT' bash -s" <<'EOF'
           set -e
           cd "$DEPLOY_DIR"
 
@@ -59,8 +60,17 @@ jobs:
           fi
 
           npm ci
+          npm run build --workspace=@mwalimu/front
           npx prisma generate --schema packages/db/prisma/schema.prisma
           npm run build --workspace=@mwalimu/back
+
+          # Ensure standalone build serves static assets
+          rsync -a apps/front/.next/static/ apps/front/.next/standalone/.next/static/ || true
+
+          pushd apps/front >/dev/null
+          PORT=${FRONT_PORT:-3000} pm2 restart mwalimu-front || PORT=${FRONT_PORT:-3000} pm2 start npm --name "mwalimu-front" -- run start
+          pm2 save
+          popd >/dev/null
 
           pushd apps/back >/dev/null
           PORT=${APP_PORT:-3001} pm2 restart mwalimu-back || PORT=${APP_PORT:-3001} pm2 start npm --name "mwalimu-back" -- run start
