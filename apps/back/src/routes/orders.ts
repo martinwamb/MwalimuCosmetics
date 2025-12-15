@@ -62,6 +62,24 @@ router.post("/", async (req, res) => {
   let persistedOrder: Awaited<ReturnType<typeof prisma.salesOrder.create>> | null = null;
   try {
     persistedOrder = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Validate stock
+      const productIds = parsed.data.items.map((i) => i.productId);
+      const products = await tx.product.findMany({ where: { id: { in: productIds } } });
+      const outOfStock: string[] = [];
+      for (const item of parsed.data.items) {
+        const p = products.find((prod) => prod.id === item.productId);
+        if (!p) {
+          outOfStock.push(`${item.name ?? item.productId} (missing)`);
+          continue;
+        }
+        if (typeof p.stockQty === "number" && p.stockQty < item.qty) {
+          outOfStock.push(`${p.name} (only ${p.stockQty} left)`);
+        }
+      }
+      if (outOfStock.length) {
+        throw new Error(`Insufficient stock for: ${outOfStock.join(", ")}`);
+      }
+
       const humanOrderId = `ORD-${Math.random().toString(36).slice(2, 6).toUpperCase()}-${Date.now().toString().slice(-4)}`;
       let customerId: string | null = null;
       if (parsed.data.customer && (parsed.data.customer.email || parsed.data.customer.phone || parsed.data.customer.name)) {
@@ -114,6 +132,16 @@ router.post("/", async (req, res) => {
         include: { items: true, customer: true }
       });
 
+      // Deduct stock
+      await Promise.all(
+        parsed.data.items.map((item) =>
+          tx.product.update({
+            where: { id: item.productId },
+            data: { stockQty: { decrement: item.qty } }
+          })
+        )
+      );
+
       return order;
     });
   } catch (err: any) {
@@ -145,6 +173,45 @@ router.post("/", async (req, res) => {
   }
 
   res.status(201).json({ data: persistedOrder });
+});
+
+// Cancel an order and restock items
+router.post("/:id/cancel", async (req, res) => {
+  const orderId = req.params.id;
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      const order = await tx.salesOrder.findUnique({
+        where: { id: orderId },
+        include: { items: true }
+      });
+      if (!order) {
+        throw new Error("Order not found");
+      }
+      if (order.status === "CANCELLED") {
+        throw new Error("Order already cancelled");
+      }
+
+      // Restock
+      await Promise.all(
+        order.items.map((item) =>
+          tx.product.update({
+            where: { id: item.productId },
+            data: { stockQty: { increment: item.qty } }
+          })
+        )
+      );
+
+      return tx.salesOrder.update({
+        where: { id: orderId },
+        data: { status: "CANCELLED" }
+      });
+    });
+
+    res.json({ data: updated });
+  } catch (err: any) {
+    console.error("[orders] cancel failed", err?.message ?? err);
+    res.status(400).json({ error: err?.message ?? "Unable to cancel order" });
+  }
 });
 
 async function fetchUpsellProducts(productIds: string[]) {
