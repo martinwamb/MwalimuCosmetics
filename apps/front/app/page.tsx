@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type Product = {
@@ -49,7 +49,7 @@ const fallbackCatalog: Product[] = [
   }
 ];
 
-export default function Page() {
+function HomePage() {
   const [catalog, setCatalog] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -407,5 +407,13 @@ export default function Page() {
         </article>
       </section>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<p className="muted">Loading page...</p>}>
+      <HomePage />
+    </Suspense>
   );
 }
