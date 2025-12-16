@@ -129,10 +129,14 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
     [product, selectedVariantId]
   );
   const displayPrice = activeVariant?.price ?? product?.price ?? 0;
+  const stockQty = typeof product?.stockQty === "number" ? product.stockQty : null;
+  const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
+  const outOfStock = stockQty === 0;
 
   function persistCart(next: typeof cart) {
     try {
       localStorage.setItem("mwalimu_cart", JSON.stringify(next));
+      window.dispatchEvent(new Event("mwalimu-cart-updated"));
     } catch {
       // ignore
     }
@@ -203,12 +207,19 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
           </p>
           <div className="price-row">
             <span className="price">{formatKES(displayPrice)}</span>
-            <span className="delivery">{(product.stockQty ?? 0) > 0 ? "In stock" : "Currently restocking"}</span>
+            <span className={`delivery ${outOfStock ? "danger" : ""}`}>{outOfStock ? "Out of stock" : "In stock"}</span>
+          </div>
+          <div className="stock-flag-row">
+            {lowStock && <span className="stock-flag low">Only {stockQty} left in stock - order soon.</span>}
+            {outOfStock && <span className="stock-flag out">Currently unavailable</span>}
+            {!lowStock && !outOfStock && stockQty !== null && <span className="stock-flag">Stock: {stockQty}</span>}
           </div>
           <ul className="detail-list">
             <li>{product.category ? `Category: ${product.category}` : "Uncategorized item"}</li>
             <li>SKU: {product.sku ?? product.id}</li>
-            <li>{product.stockQty ? `${product.stockQty} units available` : "Limited availability"}</li>
+            <li>
+              {stockQty === null ? "Stock: updating" : stockQty === 0 ? "Out of stock" : `${stockQty} units available`}
+            </li>
           </ul>
 
           {product.variants.length > 0 && (

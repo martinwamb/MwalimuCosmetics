@@ -244,6 +244,26 @@ a {
   font-weight: 600;
 }
 
+.cart-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cart-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: #febd69;
+  color: #111;
+  font-weight: 800;
+  border: 1px solid #b18a43;
+  font-size: 0.8rem;
+}
+
 .language-switch {
   display: inline-flex;
   align-items: center;
@@ -417,6 +437,36 @@ a {
   font-size: 0.8rem;
 }
 
+.stock-flag-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.2rem 0;
+}
+
+.stock-flag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 700;
+  border: 1px solid var(--border);
+}
+
+.stock-flag.low {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecdd3;
+}
+
+.stock-flag.out {
+  background: #fff1f2;
+  color: #9f1239;
+  border-color: #fecdd3;
+}
+
 .rating {
   display: flex;
   align-items: center;
@@ -440,6 +490,10 @@ a {
 .delivery {
   color: #0f5ba7;
   font-weight: 700;
+}
+
+.delivery.danger {
+  color: #b12704;
 }
 
 .actions {

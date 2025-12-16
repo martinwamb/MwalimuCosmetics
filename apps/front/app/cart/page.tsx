@@ -71,6 +71,7 @@ export default function CartPage() {
     setCart(next);
     try {
       localStorage.setItem("mwalimu_cart", JSON.stringify(next));
+      window.dispatchEvent(new Event("mwalimu-cart-updated"));
     } catch {
       // ignore storage errors
     }
@@ -166,7 +167,7 @@ export default function CartPage() {
       if (!res.ok) {
         throw new Error((data?.error as string) ?? "Order failed");
       }
-      setNotice("Order placed. We will follow up shortly.");
+      setNotice("Order placed. We emailed your order summary and will update you with the status.");
       persist([]);
       setCustomer((prev) => ({ ...prev, address: "", phone: "", name: "", email: "" }));
     } catch (err: any) {
@@ -185,7 +186,7 @@ export default function CartPage() {
       </p>
       {notice && <p className="signin-success">{notice}</p>}
 
-      {!hydrated && <p className="muted">Loading your cart…</p>}
+      {!hydrated && <p className="muted">Loading your cart...</p>}
 
       {hydrated && cart.length === 0 && (
         <div style={{ marginTop: "0.5rem" }}>
@@ -217,7 +218,7 @@ export default function CartPage() {
                   <div>
                     <strong>{item.name}</strong>
                     <div className="muted small">
-                      {formatKES(item.price)} each • Line total {formatKES(item.price * item.qty)}
+                      {formatKES(item.price)} each - Line total {formatKES(item.price * item.qty)}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -228,7 +229,7 @@ export default function CartPage() {
                       onClick={() => updateQty(index, item.qty - 1)}
                       aria-label={`Decrease quantity for ${item.name}`}
                     >
-                      −
+                      -
                     </button>
                     <input
                       type="number"
@@ -255,12 +256,12 @@ export default function CartPage() {
                   </div>
                 </div>
               ))}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
-                  <div className="muted small">Items: {totalItems}</div>
-                  <button className="text-link" type="button" onClick={() => clearCart()}>
-                    Clear cart
-                  </button>
-                </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
+                <div className="muted small">Items: {totalItems}</div>
+                <button className="text-link" type="button" onClick={() => clearCart()}>
+                  Clear cart
+                </button>
+              </div>
             </div>
           </section>
 

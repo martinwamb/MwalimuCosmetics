@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 export function NavBar() {
   const [token, setToken] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [cartCount, setCartCount] = useState(0);
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     try {
@@ -17,6 +22,46 @@ export function NavBar() {
     }
   }, []);
 
+  useEffect(() => {
+    const q = searchParams?.get("q") ?? "";
+    setSearchTerm(q);
+  }, [searchParams]);
+
+  useEffect(() => {
+    function syncCartCount() {
+      try {
+        const raw = typeof window !== "undefined" ? localStorage.getItem("mwalimu_cart") : null;
+        const parsed = raw ? JSON.parse(raw) : [];
+        const count = Array.isArray(parsed) ? parsed.reduce((sum, item) => sum + Number(item?.qty ?? 0), 0) : 0;
+        setCartCount(Number.isFinite(count) ? count : 0);
+      } catch {
+        setCartCount(0);
+      }
+    }
+
+    syncCartCount();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "mwalimu_cart") syncCartCount();
+    };
+    const onCartUpdate = () => syncCartCount();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("mwalimu-cart-updated", onCartUpdate);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("mwalimu-cart-updated", onCartUpdate);
+    };
+  }, []);
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = searchTerm.trim();
+    if (trimmed) {
+      router.push(`/?q=${encodeURIComponent(trimmed)}`);
+    } else {
+      router.push("/");
+    }
+  }
+
   const isLoggedIn = Boolean(token);
   const isAdmin = role === "ADMIN";
 
@@ -26,16 +71,23 @@ export function NavBar() {
         <a href="/" className="brand">
           Mwalimu Cosmetics
         </a>
-        <div className="search">
+        <form className="search" onSubmit={handleSearch} role="search">
           <select aria-label="Category">
-            <option>All beauty</option>
-            <option>Skin care</option>
-            <option>Hair</option>
-            <option>Makeup</option>
+            <option value="all">All beauty</option>
+            <option value="skin">Skin care</option>
+            <option value="hair">Hair</option>
+            <option value="makeup">Makeup</option>
           </select>
-          <input placeholder="Search Mwalimu favorites..." aria-label="Search" />
-          <button aria-label="Search products">Search</button>
-        </div>
+          <input
+            placeholder="Search Mwalimu favorites..."
+            aria-label="Search"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <button aria-label="Search products" type="submit">
+            Search
+          </button>
+        </form>
         <nav className="nav-links nav-actions">
           <a href="/">Home</a>
           <div className="language-switch" aria-label="Language">
@@ -47,13 +99,19 @@ export function NavBar() {
             <>
               {isAdmin && <a href="/dashboard/admin">Dashboard</a>}
               <a href="/orders">Orders</a>
-              <a href="/cart">Cart</a>
+              <a href="/cart" className="cart-link">
+                Cart
+                {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
+              </a>
             </>
           ) : (
             <>
               <a href="/sign-in">Sign in</a>
               <a href="/orders">Orders</a>
-              <a href="/cart">Cart</a>
+              <a href="/cart" className="cart-link">
+                Cart
+                {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
+              </a>
             </>
           )}
         </nav>

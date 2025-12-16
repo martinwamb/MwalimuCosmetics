@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type Product = {
   id: string;
@@ -55,6 +56,7 @@ export default function Page() {
   const [notice, setNotice] = useState<string | null>(null);
   const [cart, setCart] = useState<Record<string, any>[]>([]);
   const [saved, setSaved] = useState<Record<string, any>[]>([]);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     async function load() {
@@ -107,6 +109,9 @@ export default function Page() {
   function persist(key: string, value: any) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      if (key === "mwalimu_cart") {
+        window.dispatchEvent(new Event("mwalimu-cart-updated"));
+      }
     } catch {
       // ignore
     }
@@ -144,6 +149,23 @@ export default function Page() {
   const featured = productsToShow.filter((p) => p.featured);
   const featuredRow = featured.length ? featured.slice(0, 3) : productsToShow.slice(0, 3);
   const categories = Array.from(new Set(productsToShow.map((p) => p.category).filter(Boolean) as string[])).slice(0, 8);
+  const searchQuery = useMemo(() => (searchParams?.get("q") ?? "").trim(), [searchParams]);
+  const normalizedQuery = searchQuery.toLowerCase();
+  const filteredProducts = useMemo(
+    () =>
+      normalizedQuery
+        ? productsToShow.filter((product) => {
+            const haystack = `${product.name} ${product.description ?? ""} ${product.category ?? ""} ${product.sku ?? ""}`.toLowerCase();
+            return haystack.includes(normalizedQuery);
+          })
+        : productsToShow,
+    [productsToShow, normalizedQuery]
+  );
+  const visibleProducts = filteredProducts;
+  const recommendations = useMemo(() => {
+    const pool = featured.length ? featured : productsToShow;
+    return pool.slice(0, 4);
+  }, [featured, productsToShow]);
 
   function formatKES(value: number) {
     return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(value);
@@ -229,12 +251,65 @@ export default function Page() {
           Live products will appear here once the catalog is set up. You are seeing sample items for now.
         </p>
       )}
+      {loading && <p className="muted">Loading products...</p>}
       {error && <p className="signin-error">{error}</p>}
       {notice && <p className="signin-success">{notice}</p>}
 
+      {searchQuery && (
+        <div className="card" style={{ padding: "0.85rem 1rem", margin: "0.5rem 0" }}>
+          <strong>
+            Showing results for &quot;
+            {searchQuery}
+            &quot;
+          </strong>
+          <p className="muted small" style={{ margin: "0.2rem 0 0" }}>
+            {visibleProducts.length
+              ? `${visibleProducts.length} match${visibleProducts.length === 1 ? "" : "es"} found`
+              : "No exact matches. Here are a few recommendations instead."}
+          </p>
+        </div>
+      )}
+
+      {searchQuery && visibleProducts.length === 0 && (
+        <div className="card" style={{ marginBottom: "0.75rem" }}>
+          <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
+            Recommended while we look for that item
+          </div>
+          <div className="catalog-grid">
+            {recommendations.map((product) => {
+              const img = normalizeImageUrl(product.imageUrl);
+              return (
+                <a
+                  className="product-card"
+                  key={product.id}
+                  href={`/products/${product.slug ?? product.id}`}
+                  style={{ textDecoration: "none", color: "inherit" }}
+                >
+                  {product.badge && <div className="badge">{product.badge}</div>}
+                  <div
+                    className="product-thumb"
+                    style={img ? { backgroundImage: `url(${img})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+                  >
+                    {!img && (product.tagline ?? "New arrival")}
+                  </div>
+                  <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
+                  <p className="muted" style={{ margin: 0 }}>
+                    {product.description}
+                  </p>
+                  <p className="price">{formatKES(product.price)}</p>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="catalog-grid">
-        {productsToShow.map((product) => {
+        {visibleProducts.map((product) => {
           const img = normalizeImageUrl(product.imageUrl);
+          const stockQty = typeof product.stockQty === "number" ? product.stockQty : null;
+          const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
+          const outOfStock = stockQty === 0;
           return (
             <a
               className="product-card"
@@ -256,8 +331,16 @@ export default function Page() {
               <p className="price">{formatKES(product.price)}</p>
               <p className="muted small" style={{ margin: "0 0 0.35rem" }}>
                 {product.category ? `Category: ${product.category}` : "Fresh stock ready"}
-                {typeof product.stockQty === "number" ? ` • ${product.stockQty} in stock` : ""}
               </p>
+              <div className="muted small" style={{ marginBottom: "0.35rem", display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                {stockQty !== null && (
+                  <span>
+                    Stock: {stockQty} {stockQty === 1 ? "unit" : "units"}
+                  </span>
+                )}
+                {lowStock && <span className="stock-flag low">Only {stockQty} left in stock - order soon.</span>}
+                {outOfStock && <span className="stock-flag out">Out of stock</span>}
+              </div>
               <div className="actions">
                 <button
                   className="button full"
