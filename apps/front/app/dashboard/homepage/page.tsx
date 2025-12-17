@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
@@ -95,8 +95,8 @@ export default function HomepageAdminPage() {
     setError(null);
     try {
       const [bannerRes, sectionRes] = await Promise.all([
-        fetch(${apiBase}/homepage/banners, { headers: { Authorization: Bearer  }, cache: "no-store" }),
-        fetch(${apiBase}/homepage/sections, { headers: { Authorization: Bearer  }, cache: "no-store" })
+        fetch(`${apiBase}/homepage/banners`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+        fetch(`${apiBase}/homepage/sections`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" })
       ]);
       const bannerJson = await bannerRes.json().catch(() => ({}));
       const sectionJson = await sectionRes.json().catch(() => ({}));
@@ -121,11 +121,11 @@ export default function HomepageAdminPage() {
       return uploadImage(file, base64);
     }
 
-    const res = await fetch(${apiBase}/uploads, {
+    const res = await fetch(`${apiBase}/uploads`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: Bearer 
+        Authorization: `Bearer ${token}`
       },
       body: JSON.stringify({ filename: file.name, data: preview })
     });
@@ -139,8 +139,8 @@ export default function HomepageAdminPage() {
     const trimmed = url.trim();
     if (!trimmed) return null;
     if (trimmed.startsWith("data:")) return trimmed;
-    if (trimmed.startsWith("//")) return https:;
-    if (trimmed.startsWith("/")) return ${apiBase.replace(/\/$/, "")};
+    if (trimmed.startsWith("//")) return `https:${trimmed}`;
+    if (trimmed.startsWith("/")) return `${apiBase.replace(/\/$/, "")}${trimmed}`;
     if (trimmed.startsWith("http://api.mwalimucosmetics.com")) {
       return trimmed.replace("http://", "https://");
     }
@@ -180,13 +180,13 @@ export default function HomepageAdminPage() {
       };
 
       const method = editingBannerId ? "PUT" : "POST";
-      const url = editingBannerId ? ${apiBase}/homepage/banners/ : ${apiBase}/homepage/banners;
+      const url = editingBannerId ? `${apiBase}/homepage/banners/${editingBannerId}` : `${apiBase}/homepage/banners`;
 
       const res = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
-          Authorization: Bearer 
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify(payload)
       });
@@ -219,11 +219,11 @@ export default function HomepageAdminPage() {
   async function persistBannerOrder(list: Banner[]) {
     if (!token) return;
     try {
-      await fetch(${apiBase}/homepage/banners/reorder, {
+      await fetch(`${apiBase}/homepage/banners/reorder`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: Bearer 
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify(list.map((b, idx) => ({ id: b.id, sortOrder: idx })))
       });
@@ -236,9 +236,9 @@ export default function HomepageAdminPage() {
     if (!token) return;
     setBanners((prev) => prev.map((b) => (b.id === id ? { ...b, enabled: next } : b)));
     try {
-      await fetch(${apiBase}/homepage/banners/, {
+      await fetch(`${apiBase}/homepage/banners/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: Bearer  },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ enabled: next })
       });
     } catch (err: any) {
@@ -289,13 +289,13 @@ export default function HomepageAdminPage() {
       };
 
       const method = editingSectionId ? "PUT" : "POST";
-      const url = editingSectionId ? ${apiBase}/homepage/sections/ : ${apiBase}/homepage/sections;
+      const url = editingSectionId ? `${apiBase}/homepage/sections/${editingSectionId}` : `${apiBase}/homepage/sections`;
 
       const res = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
-          Authorization: Bearer 
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify(payload)
       });
@@ -329,11 +329,11 @@ export default function HomepageAdminPage() {
   async function persistSectionOrder(list: Section[]) {
     if (!token) return;
     try {
-      await fetch(${apiBase}/homepage/sections/reorder, {
+      await fetch(`${apiBase}/homepage/sections/reorder`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          Authorization: Bearer 
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify(list.map((s, idx) => ({ id: s.id, sortOrder: idx })))
       });
@@ -346,9 +346,9 @@ export default function HomepageAdminPage() {
     if (!token) return;
     setSections((prev) => prev.map((s) => (s.id === id ? { ...s, enabled: next } : s)));
     try {
-      await fetch(${apiBase}/homepage/sections/, {
+      await fetch(`${apiBase}/homepage/sections/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: Bearer  },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ enabled: next })
       });
     } catch (err: any) {
@@ -472,7 +472,7 @@ export default function HomepageAdminPage() {
                   className="product-thumb"
                   style={{
                     height: 140,
-                    backgroundImage: url(),
+                    backgroundImage: `url(${bannerForm.preview || bannerForm.imageUrl})`,
                     backgroundSize: "cover",
                     backgroundPosition: "center"
                   }}
@@ -525,7 +525,7 @@ export default function HomepageAdminPage() {
                   className="product-thumb"
                   style={{
                     height: 120,
-                    backgroundImage: normalizeImageUrl(banner.imageUrl) ? url() : undefined,
+                    backgroundImage: normalizeImageUrl(banner.imageUrl) ? `url(${normalizeImageUrl(banner.imageUrl)})` : undefined,
                     backgroundSize: "cover",
                     backgroundPosition: "center"
                   }}
@@ -752,7 +752,7 @@ export default function HomepageAdminPage() {
                           className="product-thumb"
                           style={{
                             height: 120,
-                            backgroundImage: url(),
+                            backgroundImage: `url(${itemPreviews[idx] || item.imageUrl})`,
                             backgroundSize: "cover",
                             backgroundPosition: "center"
                           }}
@@ -818,7 +818,7 @@ export default function HomepageAdminPage() {
                     {item.badge && <div className="mini-pill">{item.badge}</div>}
                     <strong>{item.label}</strong>
                     <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
-                      {item.linkType ?? "URL"} {item.linkTarget ? →  : ""}
+                      {item.linkType ?? "URL"} {item.linkTarget ? `→ ${item.linkTarget}` : ""}
                     </p>
                   </div>
                 ))}
