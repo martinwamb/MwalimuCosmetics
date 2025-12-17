@@ -343,6 +343,203 @@ a {
   margin-top: 0.75rem;
 }
 
+.home-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.hero-wrapper {
+  position: relative;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  padding: 0 0 0.5rem;
+}
+
+.hero-carousel {
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-slide {
+  min-height: 340px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  background-size: cover;
+  background-position: center;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  padding: 2rem;
+  color: #f9fafb;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.hero-slide.active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.hero-content h1 {
+  color: #fff;
+  font-size: 2.4rem;
+}
+
+.hero-content .muted {
+  color: #e5e7eb;
+  max-width: 560px;
+}
+
+.hero-content .button {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}
+
+.hero-index {
+  justify-self: end;
+  align-self: start;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.hero-dots {
+  position: absolute;
+  bottom: 1rem;
+  left: 1.5rem;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.dot-btn {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+}
+
+.dot-btn.active {
+  background: #febd69;
+  border-color: #febd69;
+}
+
+.hero-placeholder {
+  max-width: 1200px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.hero-skeleton {
+  height: 340px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite;
+}
+
+.section-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.module {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.2rem;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+}
+
+.tile-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, #f8fafc, #ffffff);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  color: inherit;
+}
+
+.tile-card.need {
+  background: linear-gradient(135deg, #fef9e7, #fff);
+}
+
+.tile-card.price {
+  background: #f8fafc;
+}
+
+.tile-media {
+  width: 100%;
+  height: 140px;
+  border-radius: 12px;
+  background: #f3f4f6;
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--border);
+}
+
+.tile-body {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.featured-card {
+  display: grid;
+  min-height: 240px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: #111827;
+  color: #fff;
+  background-size: cover;
+  background-position: center;
+  text-decoration: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.featured-overlay {
+  position: relative;
+  z-index: 2;
+  padding: 1.5rem;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.55), rgba(17, 24, 39, 0.1));
+  height: 100%;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.hero-wrapper::after,
+.featured-card::after {
+  content: \"\";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.18));
+  pointer-events: none;
+}
+
 .mini-pill {
   border-radius: 999px;
   padding: 0.35rem 0.8rem;
@@ -969,5 +1166,27 @@ a {
 @media (max-width: 900px) {
   .signin-stack {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 960px) {
+  .hero-slide {
+    grid-template-columns: 1fr;
+    min-height: 280px;
+  }
+
+  .hero-wrapper {
+    left: 50%;
+    width: 100%;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
   }
 }

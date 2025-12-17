@@ -11,6 +11,7 @@ import { router as aiRouter } from "./routes/ai.js";
 import { router as authRouter } from "./routes/auth.js";
 import { router as mailRouter } from "./routes/mail.js";
 import { router as uploadRouter } from "./routes/uploads.js";
+import { router as homepageRouter } from "./routes/homepage.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
@@ -38,6 +39,7 @@ app.use("/ai", aiRouter);
 app.use("/auth", authRouter);
 app.use("/mail", mailRouter);
 app.use("/uploads", uploadRouter);
+app.use("/homepage", homepageRouter);
 
 seedAdmin()
   .catch((err) => {

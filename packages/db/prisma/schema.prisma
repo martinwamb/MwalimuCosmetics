@@ -290,3 +290,57 @@ enum MailStatus {
   SENT
   FAILED
 }
+
+model HomepageBanner {
+  id        String   @id @default(cuid())
+  title     String
+  subtext   String?
+  ctaText   String?
+  ctaLink   String?
+  imageUrl  String
+  enabled   Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model HomepageSection {
+  id        String              @id @default(cuid())
+  type      HomepageSectionType
+  title     String
+  subtitle  String?
+  enabled   Boolean             @default(true)
+  sortOrder Int                 @default(0)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  items     HomepageSectionItem[]
+}
+
+model HomepageSectionItem {
+  id         String            @id @default(cuid())
+  section    HomepageSection   @relation(fields: [sectionId], references: [id])
+  sectionId  String
+  label      String
+  imageUrl   String?
+  linkType   HomepageLinkType  @default(URL)
+  linkTarget String?
+  badge      String?
+  sortOrder  Int               @default(0)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+}
+
+enum HomepageSectionType {
+  CATEGORY
+  NEED
+  FEATURED_COLLECTION
+  BEST_SELLERS
+  PRICE
+}
+
+enum HomepageLinkType {
+  URL
+  CATEGORY
+  PRODUCT
+  FILTER
+}
