@@ -22,12 +22,25 @@ const cards = [
   {
     title: "Catalog Management",
     body: "Add/update products, pricing, cost, and visibility for the storefront and POS.",
-    action: "Manage products"
+    action: "Manage products",
+    href: "/dashboard/products"
+  },
+  {
+    title: "Admin Workspace",
+    body: "Reports, dashboards, and quick actions for admins.",
+    action: "Open admin",
+    href: "/dashboard/admin"
   },
   {
     title: "Staff Clocking",
     body: "Biometric or WebAuthn clock-ins for attendance and payroll exports.",
     action: "Open timesheets"
+  },
+  {
+    title: "Messages",
+    body: "Emails the platform sent to your account, visible in-app after sign-in.",
+    action: "View messages",
+    href: "/dashboard/mail"
   }
 ];
 
@@ -38,9 +51,15 @@ export default function DashboardPage() {
         <article key={card.title} className="card">
           <h3>{card.title}</h3>
           <p className="muted">{card.body}</p>
-          <button className="button" style={{ marginTop: "0.8rem" }}>
-            {card.action}
-          </button>
+          {card.href ? (
+            <a className="button" style={{ marginTop: "0.8rem", display: "inline-block" }} href={card.href}>
+              {card.action}
+            </a>
+          ) : (
+            <button className="button" style={{ marginTop: "0.8rem" }}>
+              {card.action}
+            </button>
+          )}
         </article>
       ))}
     </div>

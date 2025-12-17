@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "lint": "echo \"lint not configured for @mwalimu/pos yet\""
   },
   "dependencies": {
-    "escpos": "^3.0.0-alpha.6"
+    "node-thermal-printer": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",
