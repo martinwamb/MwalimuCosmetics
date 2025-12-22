@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 
 import { requireRoles } from "../lib/authz.js";
 import { prisma } from "../lib/prisma.js";
@@ -247,7 +248,7 @@ router.put("/sections/:id", requireRoles(["ADMIN"]), async (req, res) => {
     withItems = parsed.data.items;
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     if (withItems) {
       await tx.homepageSectionItem.deleteMany({ where: { sectionId: req.params.id } });
     }
