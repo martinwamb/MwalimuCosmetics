@@ -26,16 +26,37 @@ function toLabel(value: string) {
 router.get("/groups", requireRoles(["ADMIN"]), async (req, res) => {
   await ensureSystemTaxonomy();
   const includeTags = req.query.includeTags === "true";
+  if (includeTags) {
+    const groups = await prisma.tagGroup.findMany({
+      orderBy: { name: "asc" },
+      include: { tags: { orderBy: { sortOrder: "asc" } } }
+    });
+
+    return res.json({
+      data: groups.map((group) => ({
+        id: group.id,
+        code: group.code,
+        name: group.name,
+        description: group.description,
+        selection: group.selection,
+        required: group.required,
+        editable: group.editable,
+        tags: group.tags.map((tag) => ({
+          id: tag.id,
+          value: tag.value,
+          label: tag.label,
+          isSystem: tag.isSystem,
+          sortOrder: tag.sortOrder
+        }))
+      }))
+    });
+  }
+
   const groups = await prisma.tagGroup.findMany({
-    orderBy: { name: "asc" },
-    include: includeTags
-      ? {
-          tags: { orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }
-        }
-      : undefined
+    orderBy: { name: "asc" }
   });
 
-  res.json({
+  return res.json({
     data: groups.map((group) => ({
       id: group.id,
       code: group.code,
@@ -44,15 +65,7 @@ router.get("/groups", requireRoles(["ADMIN"]), async (req, res) => {
       selection: group.selection,
       required: group.required,
       editable: group.editable,
-      tags: includeTags
-        ? group.tags.map((tag) => ({
-            id: tag.id,
-            value: tag.value,
-            label: tag.label,
-            isSystem: tag.isSystem,
-            sortOrder: tag.sortOrder
-          }))
-        : undefined
+      tags: undefined
     }))
   });
 });
