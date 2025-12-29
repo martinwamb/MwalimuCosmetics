@@ -12,6 +12,7 @@ import { router as authRouter } from "./routes/auth.js";
 import { router as mailRouter } from "./routes/mail.js";
 import { router as uploadRouter } from "./routes/uploads.js";
 import { router as homepageRouter } from "./routes/homepage.js";
+import { router as tagRouter } from "./routes/tags.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
@@ -40,6 +41,7 @@ app.use("/auth", authRouter);
 app.use("/mail", mailRouter);
 app.use("/uploads", uploadRouter);
 app.use("/homepage", homepageRouter);
+app.use("/tags", tagRouter);
 
 seedAdmin()
   .catch((err) => {

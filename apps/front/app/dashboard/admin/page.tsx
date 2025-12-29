@@ -184,6 +184,9 @@ export default function AdminDashboardPage() {
             <a className="button ghost" href="/dashboard/homepage">
               Homepage layout
             </a>
+            <a className="button ghost" href="/dashboard/tags">
+              Manage tags
+            </a>
           </div>
           <div>
             <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>

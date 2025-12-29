@@ -65,6 +65,18 @@ export function NavBar() {
   const isLoggedIn = Boolean(token);
   const isAdmin = role === "ADMIN";
 
+  function handleSignOut() {
+    try {
+      localStorage.removeItem("mwalimu_token");
+      localStorage.removeItem("mwalimu_role");
+    } catch {
+      // ignore
+    }
+    setToken(null);
+    setRole(null);
+    router.push("/sign-in");
+  }
+
   return (
     <header className="header">
       <div className="nav-primary">
@@ -103,6 +115,9 @@ export function NavBar() {
                 Cart
                 {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
               </a>
+              <button className="button ghost" type="button" onClick={handleSignOut}>
+                Sign out
+              </button>
             </>
           ) : (
             <>

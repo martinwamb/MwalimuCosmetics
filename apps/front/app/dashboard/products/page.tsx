@@ -55,6 +55,23 @@ type FormState = {
   }[];
 };
 
+type TagOption = {
+  id: string;
+  value: string;
+  label: string;
+  isSystem: boolean;
+};
+
+type TagGroup = {
+  id: string;
+  code: string;
+  name: string;
+  selection: string;
+  required: boolean;
+  editable: boolean;
+  tags?: TagOption[];
+};
+
 const PRODUCT_TYPES = [
   "hair_oil",
   "hair_food",
@@ -181,6 +198,8 @@ export default function ProductDashboardPage() {
   const [form, setForm] = useState<FormState>({ ...emptyForm });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [variantPreviews, setVariantPreviews] = useState<Record<number, string | null>>({});
+  const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
+  const [tagError, setTagError] = useState<string | null>(null);
 
   const loadProducts = useCallback(async (authToken?: string | null) => {
     setFetching(true);
@@ -248,6 +267,41 @@ export default function ProductDashboardPage() {
     setToken(savedToken);
     loadProducts(savedToken);
   }, [loadProducts]);
+
+  useEffect(() => {
+    async function loadTags(authToken?: string | null) {
+      if (!authToken) return;
+      setTagError(null);
+      try {
+        const res = await fetch(`${apiBase}/tags/groups?includeTags=true`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+          cache: "no-store"
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error((data?.error as string) ?? "Could not load tags");
+        setTagGroups((data?.data as TagGroup[]) ?? []);
+      } catch (err: any) {
+        setTagError(err?.message ?? "Could not load tags");
+      }
+    }
+
+    loadTags(token);
+  }, [token]);
+
+  function groupOptions(code: string, fallback: readonly string[]) {
+    const group = tagGroups.find((item) => item.code === code);
+    if (group?.tags?.length) {
+      return group.tags.map((tag) => tag.value);
+    }
+    return [...fallback];
+  }
+
+  const productTypeOptions = groupOptions("product_type", PRODUCT_TYPES);
+  const careAreaOptions = groupOptions("care_area", CARE_AREAS);
+  const benefitOptions = groupOptions("benefit", BENEFITS);
+  const suitableOptions = groupOptions("suitable_for", SUITABLE_FOR);
+  const ingredientOptions = groupOptions("ingredient", INGREDIENTS);
+  const marketingOptions = groupOptions("marketing", MARKETING_TAGS);
 
   const badgeForProduct = useCallback((product: Product) => {
     if (product.marketingTags?.includes("new_arrival")) return "New Arrival";
@@ -500,7 +554,7 @@ export default function ProductDashboardPage() {
               <span>Product type (single)</span>
               <select value={form.productType} onChange={(e) => setForm((prev) => ({ ...prev, productType: e.target.value }))} required>
                 <option value="">Select a type</option>
-                {PRODUCT_TYPES.map((type) => (
+                {productTypeOptions.map((type) => (
                   <option key={type} value={type}>
                     {humanize(type)}
                   </option>
@@ -511,7 +565,7 @@ export default function ProductDashboardPage() {
             <div className="input-group">
               <span>Care area (pick at least one)</span>
               <div className="pill-grid">
-                {CARE_AREAS.map((area) => (
+                {careAreaOptions.map((area) => (
                   <label key={area} className={`pill ${form.careAreas.includes(area) ? "active" : ""}`}>
                     <input
                       type="checkbox"
@@ -529,7 +583,7 @@ export default function ProductDashboardPage() {
             <div className="input-group">
               <span>Benefits (multi-select)</span>
               <div className="pill-grid">
-                {BENEFITS.map((benefit) => (
+                {benefitOptions.map((benefit) => (
                   <label key={benefit} className={`pill ${form.benefits.includes(benefit) ? "active" : ""}`}>
                     <input
                       type="checkbox"
@@ -546,7 +600,7 @@ export default function ProductDashboardPage() {
             <div className="input-group">
               <span>Suitable for (hair/skin types)</span>
               <div className="pill-grid">
-                {SUITABLE_FOR.map((option) => (
+                {suitableOptions.map((option) => (
                   <label key={option} className={`pill ${form.suitableFor.includes(option) ? "active" : ""}`}>
                     <input
                       type="checkbox"
@@ -563,7 +617,7 @@ export default function ProductDashboardPage() {
             <div className="input-group">
               <span>Ingredients / formula</span>
               <div className="pill-grid">
-                {INGREDIENTS.map((ingredient) => (
+                {ingredientOptions.map((ingredient) => (
                   <label key={ingredient} className={`pill ${form.ingredients.includes(ingredient) ? "active" : ""}`}>
                     <input
                       type="checkbox"
@@ -580,7 +634,7 @@ export default function ProductDashboardPage() {
             <div className="input-group">
               <span>Marketing tags (drives homepage)</span>
               <div className="pill-grid">
-                {MARKETING_TAGS.map((tag) => (
+                {marketingOptions.map((tag) => (
                   <label key={tag} className={`pill ${form.marketingTags.includes(tag) ? "active" : ""}`}>
                     <input
                       type="checkbox"
@@ -594,6 +648,11 @@ export default function ProductDashboardPage() {
               </div>
             </div>
           </div>
+          {tagError && (
+            <p className="muted small" style={{ marginTop: "0.35rem" }}>
+              {tagError} (showing default options)
+            </p>
+          )}
 
           <div className="input-row">
             <label className="input-group">
