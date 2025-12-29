@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "dev:back": "npm run dev",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
+    "start": "node --env-file=.env dist/index.js",
     "lint": "echo \"lint not configured for @mwalimu/back yet\""
   },
   "dependencies": {

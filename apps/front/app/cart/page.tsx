@@ -70,6 +70,9 @@ function formatValidationErrors(payload: any): string | null {
       }
     }
   }
+  if (parts.join(" ").includes("items") && parts.join(" ").includes("Expected string, received null")) {
+    return "Some cart items are missing product details. Clear the cart and add the items again.";
+  }
   return parts.length ? `Order validation failed. ${parts.join(" | ")}` : null;
 }
 
