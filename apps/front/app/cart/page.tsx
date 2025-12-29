@@ -40,6 +40,21 @@ function normalizePhone(phone?: string | null) {
   return phone.replace(/[^\d]/g, "");
 }
 
+function formatErrorMessage(err: unknown, fallback: string) {
+  if (!err) return fallback;
+  if (typeof err === "string") return err;
+  if (typeof err === "object") {
+    const maybeMessage = (err as any).message;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) return maybeMessage;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 export default function CartPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -165,13 +180,17 @@ export default function CartPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error((data?.error as string) ?? "Order failed");
+        const apiError =
+          typeof data?.error === "string"
+            ? data.error
+            : data?.error?.message ?? (data?.error ? JSON.stringify(data.error) : null);
+        throw new Error(apiError || "Order failed");
       }
       setNotice("Order placed. We emailed your order summary and will update you with the status.");
       persist([]);
       setCustomer((prev) => ({ ...prev, address: "", phone: "", name: "", email: "" }));
     } catch (err: any) {
-      setError(err?.message ?? "Could not place order.");
+      setError(formatErrorMessage(err, "Could not place order."));
     } finally {
       setSubmitting(false);
       setTimeout(() => setNotice(null), 2200);
