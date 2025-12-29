@@ -60,12 +60,15 @@ jobs:
           fi
 
           npm ci
-          npm run build --workspace=@mwalimu/front
-          npx prisma generate --schema packages/db/prisma/schema.prisma
+          NEXT_SKIP_LOCKFILE_PATCH=1 npm run build --workspace=@mwalimu/front
+          pushd packages/db >/dev/null
+          npx prisma generate --schema prisma/schema.prisma
+          popd >/dev/null
           npm run build --workspace=@mwalimu/back
 
           # Ensure standalone build serves static assets
-          rsync -a apps/front/.next/static/ apps/front/.next/standalone/.next/static/ || true
+          mkdir -p apps/front/.next/standalone/apps/front/.next/static
+          rsync -a apps/front/.next/static/ apps/front/.next/standalone/apps/front/.next/static/ || true
 
           pushd apps/front >/dev/null
           PORT=${FRONT_PORT:-3000} pm2 restart mwalimu-front || PORT=${FRONT_PORT:-3000} pm2 start npm --name "mwalimu-front" -- run start
