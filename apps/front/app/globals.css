@@ -369,6 +369,7 @@ a {
 .hero-carousel {
   position: relative;
   overflow: hidden;
+  min-height: 340px;
 }
 
 .hero-slide {
