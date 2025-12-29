@@ -225,9 +225,6 @@ export default function CartPage() {
   return (
     <div className="card">
       <h2 style={{ marginTop: 0 }}>Cart</h2>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Review your picks, adjust quantities, then place the order via email, WhatsApp, or Telegram.
-      </p>
       {notice && <p className="signin-success">{notice}</p>}
 
       {!hydrated && <p className="muted">Loading your cart...</p>}
