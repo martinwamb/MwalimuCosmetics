@@ -24,14 +24,19 @@ model User {
 model Product {
   id          String   @id @default(cuid())
   name        String
+  brand       String?
   sku         String   @unique
   slug        String?  @unique
+  shortDescription String? @db.VarChar(160)
   description String?
   featured    Boolean  @default(false)
   imageUrl    String?
-  category    Category @relation(fields: [categoryId], references: [id])
-  categoryId  String
+  galleryImages String[] @db.Text
+  category    Category? @relation(fields: [categoryId], references: [id])
+  categoryId  String?
   price       Decimal  @db.Decimal(12, 2)
+  compareAtPrice Decimal? @db.Decimal(12, 2)
+  currency    String   @default("KES")
   cost        Decimal  @db.Decimal(12, 2)
   stockQty    Int      @default(0)
   status      ProductStatus @default(ACTIVE)
@@ -43,6 +48,7 @@ model Product {
   recommendations AiRecommendation[] @relation("ProductRecommendations")
   inventoryMovements InventoryMovement[]
   variants    ProductVariant[]
+  productTags ProductTag[]
 }
 
 model ProductVariant {
@@ -59,6 +65,42 @@ model Category {
   id       String    @id @default(cuid())
   name     String    @unique
   products Product[]
+}
+
+model TagGroup {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  description String?
+  selection   TagSelection
+  required    Boolean      @default(false)
+  editable    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  tags        Tag[]
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  value     String
+  label     String
+  isSystem  Boolean  @default(false)
+  sortOrder Int      @default(0)
+  group     TagGroup @relation(fields: [groupId], references: [id])
+  groupId   String
+  products  ProductTag[]
+
+  @@unique([groupId, value])
+}
+
+model ProductTag {
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
+  tag       Tag     @relation(fields: [tagId], references: [id])
+  tagId     String
+  createdAt DateTime @default(now())
+
+  @@id([productId, tagId])
 }
 
 model Customer {
@@ -231,6 +273,7 @@ enum Role {
 }
 
 enum ProductStatus {
+  DRAFT
   ACTIVE
   INACTIVE
   ARCHIVED
@@ -311,6 +354,10 @@ model HomepageSection {
   subtitle  String?
   enabled   Boolean             @default(true)
   sortOrder Int                 @default(0)
+  queryType HomepageRuleType?
+  queryValue String?
+  maxItems  Int                 @default(8)
+  sortBy    HomepageSort        @default(NEWEST)
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
   items     HomepageSectionItem[]
@@ -336,6 +383,8 @@ enum HomepageSectionType {
   FEATURED_COLLECTION
   BEST_SELLERS
   PRICE
+  NEW_ARRIVALS
+  BIG_SAVINGS
 }
 
 enum HomepageLinkType {
@@ -343,4 +392,25 @@ enum HomepageLinkType {
   CATEGORY
   PRODUCT
   FILTER
+}
+
+enum HomepageRuleType {
+  MARKETING_TAG
+  CARE_AREA
+  PRODUCT_TYPE
+  BENEFIT
+  PRICE_BUCKET
+  SPECIAL
+}
+
+enum HomepageSort {
+  NEWEST
+  PRICE_ASC
+  PRICE_DESC
+  BEST_SELLING
+}
+
+enum TagSelection {
+  SINGLE
+  MULTI
 }

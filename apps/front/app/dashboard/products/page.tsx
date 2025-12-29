@@ -1,21 +1,160 @@
-"use client";
+﻿"use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Product = {
   id: string;
   name: string;
+  brand?: string | null;
   sku: string;
-  category: string | null;
   price: number;
+  compareAtPrice?: number | null;
+  currency?: string | null;
   cost: number;
   stockQty: number;
   imageUrl?: string | null;
+  galleryImages?: string[];
+  shortDescription?: string | null;
   description?: string | null;
+  productType?: string | null;
+  careAreas?: string[];
+  benefits?: string[];
+  suitableFor?: string[];
+  ingredients?: string[];
+  marketingTags?: string[];
+  categories?: string[];
   variants?: { id: string; name: string; price?: number | null; imageUrl?: string | null }[];
 };
 
+type FormState = {
+  name: string;
+  brand: string;
+  sku: string;
+  price: string;
+  compareAtPrice: string;
+  currency: string;
+  cost: string;
+  stockQty: string;
+  imageUrl: string;
+  description: string;
+  shortDescription: string;
+  imageFile: File | null;
+  featured: boolean;
+  productType: string;
+  careAreas: string[];
+  benefits: string[];
+  suitableFor: string[];
+  ingredients: string[];
+  marketingTags: string[];
+  variants: {
+    name: string;
+    price: string;
+    imageUrl: string;
+    imageFile: File | null;
+    preview: string | null;
+  }[];
+};
+
+const PRODUCT_TYPES = [
+  "hair_oil",
+  "hair_food",
+  "hair_treatment",
+  "hair_dye",
+  "lotion",
+  "cream",
+  "body_oil",
+  "cleanser",
+  "toner",
+  "serum",
+  "shower_gel",
+  "soap",
+  "scrub",
+  "deodorant_roll_on",
+  "deodorant_spray",
+  "lip_care",
+  "sunscreen"
+] as const;
+
+const CARE_AREAS = ["hair", "scalp", "face", "body", "underarm", "hands_feet"] as const;
+const BENEFITS = [
+  "hair_growth",
+  "anti_dandruff",
+  "strengthening",
+  "repairing",
+  "moisturizing",
+  "shine_gloss",
+  "anti_breakage",
+  "brightening",
+  "even_tone",
+  "anti_acne",
+  "soothing",
+  "hydrating",
+  "firming",
+  "exfoliating",
+  "odour_control",
+  "anti_perspirant"
+] as const;
+const SUITABLE_FOR = [
+  "dry_skin",
+  "oily_skin",
+  "combination_skin",
+  "sensitive_skin",
+  "normal_skin",
+  "natural_hair",
+  "relaxed_hair",
+  "colored_hair",
+  "damaged_hair",
+  "low_porosity",
+  "high_porosity"
+] as const;
+const INGREDIENTS = [
+  "shea_butter",
+  "coconut_oil",
+  "castor_oil",
+  "olive_oil",
+  "aloe_vera",
+  "vitamin_e",
+  "tea_tree",
+  "glycolic_acid",
+  "salicylic_acid",
+  "niacinamide",
+  "fragrance_free",
+  "alcohol_free",
+  "sulfate_free",
+  "paraben_free"
+] as const;
+const MARKETING_TAGS = ["new_arrival", "best_seller", "featured", "seasonal", "limited_offer"] as const;
+
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+const emptyForm: FormState = {
+  name: "",
+  brand: "",
+  sku: "",
+  price: "",
+  compareAtPrice: "",
+  currency: "KES",
+  cost: "",
+  stockQty: "0",
+  imageUrl: "",
+  description: "",
+  shortDescription: "",
+  imageFile: null,
+  featured: false,
+  productType: "",
+  careAreas: [],
+  benefits: [],
+  suitableFor: [],
+  ingredients: [],
+  marketingTags: [],
+  variants: []
+};
+
+function humanize(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export default function ProductDashboardPage() {
   function normalizeImageUrl(url?: string | null) {
@@ -39,25 +178,7 @@ export default function ProductDashboardPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    name: "",
-    sku: "",
-    category: "General",
-    price: "",
-    cost: "",
-    stockQty: "0",
-    imageUrl: "",
-    description: "",
-    imageFile: null as File | null,
-    featured: false,
-    variants: [] as {
-      name: string;
-      price: string;
-      imageUrl: string;
-      imageFile: File | null;
-      preview: string | null;
-    }[]
-  });
+  const [form, setForm] = useState<FormState>({ ...emptyForm });
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [variantPreviews, setVariantPreviews] = useState<Record<number, string | null>>({});
 
@@ -78,15 +199,32 @@ export default function ProductDashboardPage() {
         const price = Number(item.price);
         const cost = Number(item.cost);
         const stockQty = Number(item.stockQty ?? 0);
+        const compareAt = typeof item.compareAtPrice === "number" ? Number(item.compareAtPrice) : null;
+        const categories = Array.isArray(item.categories)
+          ? item.categories
+          : item.category
+            ? [item.category]
+            : [];
         return {
           id: item.id,
           name: item.name,
+          brand: item.brand,
           sku: item.sku,
-          category: item.category ?? null,
+          categories,
+          productType: item.productType,
+          careAreas: item.careAreas ?? [],
+          benefits: item.benefits ?? [],
+          suitableFor: item.suitableFor ?? [],
+          ingredients: item.ingredients ?? [],
+          marketingTags: item.marketingTags ?? [],
           price: Number.isFinite(price) ? price : 0,
+          compareAtPrice: Number.isFinite(compareAt ?? NaN) ? compareAt : null,
+          currency: item.currency ?? "KES",
           cost: Number.isFinite(cost) ? cost : 0,
           stockQty: Number.isFinite(stockQty) ? stockQty : 0,
           imageUrl: item.imageUrl,
+          galleryImages: item.galleryImages ?? [],
+          shortDescription: item.shortDescription,
           description: item.description,
           variants:
             item.variants?.map((v: any) => ({
@@ -111,6 +249,24 @@ export default function ProductDashboardPage() {
     loadProducts(savedToken);
   }, [loadProducts]);
 
+  const badgeForProduct = useCallback((product: Product) => {
+    if (product.marketingTags?.includes("new_arrival")) return "New Arrival";
+    if (product.marketingTags?.includes("best_seller")) return "Best Seller";
+    if (product.marketingTags?.includes("featured")) return "Featured";
+    if (product.categories?.length) return product.categories[0];
+    if (product.productType) return humanize(product.productType);
+    return "Uncategorized";
+  }, []);
+
+  function toggleList(field: keyof Pick<FormState, "careAreas" | "benefits" | "suitableFor" | "ingredients" | "marketingTags">, value: string) {
+    setForm((prev) => {
+      const set = new Set(prev[field]);
+      if (set.has(value)) set.delete(value);
+      else set.add(value);
+      return { ...prev, [field]: Array.from(set) } as FormState;
+    });
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -122,9 +278,18 @@ export default function ProductDashboardPage() {
     }
 
     const price = parseFloat(form.price);
+    const compareAt = form.compareAtPrice ? parseFloat(form.compareAtPrice) : null;
     const cost = parseFloat(form.cost);
     const stockQty = parseInt(form.stockQty || "0", 10);
 
+    if (!form.productType) {
+      setError("Pick a product type.");
+      return;
+    }
+    if (form.careAreas.length === 0) {
+      setError("Select at least one care area.");
+      return;
+    }
     if (Number.isNaN(price) || Number.isNaN(cost)) {
       setError("Enter valid numbers for price and cost.");
       return;
@@ -135,6 +300,10 @@ export default function ProductDashboardPage() {
     }
     if (Number.isNaN(stockQty) || stockQty < 0) {
       setError("Stock quantity must be zero or more.");
+      return;
+    }
+    if (compareAt !== null && !Number.isFinite(compareAt)) {
+      setError("Compare-at price must be a valid number.");
       return;
     }
 
@@ -200,14 +369,25 @@ export default function ProductDashboardPage() {
         },
         body: JSON.stringify({
           name: form.name.trim(),
+          brand: form.brand.trim() || undefined,
           sku: form.sku.trim(),
-          category: form.category.trim() || "General",
           price,
+          compareAtPrice: compareAt ?? undefined,
+          currency: form.currency.trim() || "KES",
           cost,
           stockQty,
           featured: form.featured,
           imageUrl: form.imageUrl.trim() || uploadedUrl || imagePreview || undefined,
+          shortDescription: form.shortDescription.trim() || undefined,
           description: form.description.trim() || undefined,
+          tags: {
+            productType: form.productType,
+            careAreas: form.careAreas,
+            benefits: form.benefits,
+            suitableFor: form.suitableFor,
+            ingredients: form.ingredients,
+            marketingTags: form.marketingTags
+          },
           variants: variantPayload
         })
       });
@@ -217,19 +397,7 @@ export default function ProductDashboardPage() {
       }
 
       setStatus(editingId ? "Product updated." : "Product added to catalog.");
-      setForm({
-        name: "",
-        sku: "",
-        category: "General",
-        price: "",
-        cost: "",
-        stockQty: "0",
-        imageUrl: "",
-        description: "",
-        imageFile: null,
-        featured: false,
-        variants: []
-      });
+      setForm({ ...emptyForm, currency: form.currency || "KES" });
       setEditingId(null);
       setImagePreview(null);
       setVariantPreviews({});
@@ -267,15 +435,24 @@ export default function ProductDashboardPage() {
     }
   }
 
+  const categoryHint = useMemo(() => {
+    if (!form.productType && form.careAreas.length === 0) return "Tag products to auto-place them in categories and homepage modules.";
+    if (form.careAreas.includes("hair") || form.careAreas.includes("scalp")) return "Will show in Hair Care";
+    if (form.careAreas.includes("face")) return "Will show in Skin Care";
+    if (form.careAreas.includes("underarm")) return "Will show in Personal Care";
+    if (form.careAreas.includes("body")) return "Will show in Bath & Body";
+    return null;
+  }, [form.productType, form.careAreas]);
+
   return (
-    <div className="grid" style={{ gridTemplateColumns: "minmax(320px, 420px) 1fr", gap: "1.5rem" }}>
+    <div className="grid" style={{ gridTemplateColumns: "minmax(340px, 500px) 1fr", gap: "1.5rem" }}>
       <section className="card">
         <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
           Catalog management
         </div>
         <h1 style={{ margin: 0 }}>Add a product</h1>
         <p className="muted" style={{ marginTop: "0.35rem" }}>
-          Provide the selling price, cost, imagery, and category. Only admins can add or update products.
+          Structured tags auto-place items into categories, homepage sections, and filters. No manual category dropdown.
         </p>
 
         <form className="signin-form" onSubmit={handleSubmit} style={{ marginTop: "1rem" }}>
@@ -290,6 +467,13 @@ export default function ProductDashboardPage() {
               />
             </label>
             <label className="input-group">
+              <span>Brand</span>
+              <input value={form.brand} onChange={(e) => setForm((prev) => ({ ...prev, brand: e.target.value }))} placeholder="Optional" />
+            </label>
+          </div>
+
+          <div className="input-row">
+            <label className="input-group">
               <span>SKU</span>
               <input
                 value={form.sku}
@@ -298,18 +482,7 @@ export default function ProductDashboardPage() {
                 required
               />
             </label>
-          </div>
-
-          <div className="input-row">
             <label className="input-group">
-              <span>Category</span>
-              <input
-                value={form.category}
-                onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
-                placeholder="Serums"
-              />
-            </label>
-            <label className="input-group" style={{ alignSelf: "flex-end" }}>
               <span>Featured</span>
               <input
                 type="checkbox"
@@ -317,8 +490,114 @@ export default function ProductDashboardPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, featured: e.target.checked }))}
               />
             </label>
+          </div>
+
+          <div className="card" style={{ padding: "0.75rem", background: "#f8fafc" }}>
+            <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
+              Classification & filters
+            </div>
             <label className="input-group">
-            <span>Price (KES)</span>
+              <span>Product type (single)</span>
+              <select value={form.productType} onChange={(e) => setForm((prev) => ({ ...prev, productType: e.target.value }))} required>
+                <option value="">Select a type</option>
+                {PRODUCT_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {humanize(type)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="input-group">
+              <span>Care area (pick at least one)</span>
+              <div className="pill-grid">
+                {CARE_AREAS.map((area) => (
+                  <label key={area} className={`pill ${form.careAreas.includes(area) ? "active" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={form.careAreas.includes(area)}
+                      onChange={() => toggleList("careAreas", area)}
+                      style={{ display: "none" }}
+                    />
+                    {humanize(area)}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {categoryHint && <p className="muted small" style={{ marginTop: "0.25rem" }}>{categoryHint}</p>}
+
+            <div className="input-group">
+              <span>Benefits (multi-select)</span>
+              <div className="pill-grid">
+                {BENEFITS.map((benefit) => (
+                  <label key={benefit} className={`pill ${form.benefits.includes(benefit) ? "active" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={form.benefits.includes(benefit)}
+                      onChange={() => toggleList("benefits", benefit)}
+                      style={{ display: "none" }}
+                    />
+                    {humanize(benefit)}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="input-group">
+              <span>Suitable for (hair/skin types)</span>
+              <div className="pill-grid">
+                {SUITABLE_FOR.map((option) => (
+                  <label key={option} className={`pill ${form.suitableFor.includes(option) ? "active" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={form.suitableFor.includes(option)}
+                      onChange={() => toggleList("suitableFor", option)}
+                      style={{ display: "none" }}
+                    />
+                    {humanize(option)}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="input-group">
+              <span>Ingredients / formula</span>
+              <div className="pill-grid">
+                {INGREDIENTS.map((ingredient) => (
+                  <label key={ingredient} className={`pill ${form.ingredients.includes(ingredient) ? "active" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={form.ingredients.includes(ingredient)}
+                      onChange={() => toggleList("ingredients", ingredient)}
+                      style={{ display: "none" }}
+                    />
+                    {humanize(ingredient)}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="input-group">
+              <span>Marketing tags (drives homepage)</span>
+              <div className="pill-grid">
+                {MARKETING_TAGS.map((tag) => (
+                  <label key={tag} className={`pill ${form.marketingTags.includes(tag) ? "active" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={form.marketingTags.includes(tag)}
+                      onChange={() => toggleList("marketingTags", tag)}
+                      style={{ display: "none" }}
+                    />
+                    {humanize(tag)}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="input-row">
+            <label className="input-group">
+              <span>Price ({form.currency || "KES"})</span>
               <input
                 type="number"
                 step="0.01"
@@ -330,7 +609,25 @@ export default function ProductDashboardPage() {
               />
             </label>
             <label className="input-group">
-            <span>Cost (KES)</span>
+              <span>Compare-at</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.compareAtPrice}
+                onChange={(e) => setForm((prev) => ({ ...prev, compareAtPrice: e.target.value }))}
+                placeholder="Optional (drives Big Savings)"
+              />
+            </label>
+            <label className="input-group">
+              <span>Currency</span>
+              <input value={form.currency} onChange={(e) => setForm((prev) => ({ ...prev, currency: e.target.value }))} placeholder="KES" />
+            </label>
+          </div>
+
+          <div className="input-row">
+            <label className="input-group">
+              <span>Cost ({form.currency || "KES"})</span>
               <input
                 type="number"
                 step="0.01"
@@ -352,6 +649,26 @@ export default function ProductDashboardPage() {
               />
             </label>
           </div>
+
+          <label className="input-group">
+            <span>Short description (160 chars)</span>
+            <input
+              value={form.shortDescription}
+              maxLength={160}
+              onChange={(e) => setForm((prev) => ({ ...prev, shortDescription: e.target.value }))}
+              placeholder="One-liner for cards"
+            />
+          </label>
+
+          <label className="input-group">
+            <span>Long description</span>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+              placeholder="What makes this product great?"
+              rows={3}
+            />
+          </label>
 
           <label className="input-group">
             <span>Image URL</span>
@@ -399,10 +716,7 @@ export default function ProductDashboardPage() {
               onClick={() =>
                 setForm((prev) => ({
                   ...prev,
-                  variants: [
-                    ...prev.variants,
-                    { name: "", price: "", imageUrl: "", imageFile: null, preview: null }
-                  ]
+                  variants: [...prev.variants, { name: "", price: "", imageUrl: "", imageFile: null, preview: null }]
                 }))
               }
             >
@@ -427,7 +741,7 @@ export default function ProductDashboardPage() {
                       />
                     </label>
                     <label className="input-group">
-                      <span>Price (KES)</span>
+                      <span>Price ({form.currency || "KES"})</span>
                       <input
                         type="number"
                         step="0.01"
@@ -513,18 +827,8 @@ export default function ProductDashboardPage() {
             </div>
           </div>
 
-          <label className="input-group">
-            <span>Description</span>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-              placeholder="What makes this product great?"
-              rows={3}
-            />
-          </label>
-
           <button className="button" type="submit" disabled={loading}>
-            {loading ? "Saving..." : "Add product"}
+            {loading ? "Saving..." : editingId ? "Update product" : "Add product"}
           </button>
         </form>
 
@@ -557,7 +861,7 @@ export default function ProductDashboardPage() {
         <div className="catalog-grid">
           {products.map((product) => (
             <article key={product.id} className="product-card">
-              <div className="badge">{product.category ?? "Uncategorized"}</div>
+              <div className="badge">{badgeForProduct(product)}</div>
               <div
                 className="product-thumb"
                 style={
@@ -574,11 +878,21 @@ export default function ProductDashboardPage() {
               </div>
               <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
               <p className="muted" style={{ margin: 0 }}>
-                {product.description ?? "No description yet."}
+                {product.shortDescription || product.description || "No description yet."}
               </p>
-              <p className="price">KES {product.price.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="price">
+                {product.currency ?? "KES"} {product.price.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {product.compareAtPrice && product.compareAtPrice > product.price ? (
+                  <span className="muted small" style={{ marginLeft: "6px" }}>
+                    (was {product.compareAtPrice.toFixed(2)})
+                  </span>
+                ) : null}
+              </p>
               <p className="muted small" style={{ margin: 0 }}>
-                Cost: {product.cost.toFixed(2)} • Stock: {product.stockQty}
+                Cost: {product.cost.toFixed(2)} | Stock: {product.stockQty}
+              </p>
+              <p className="muted small" style={{ margin: "0.35rem 0 0" }}>
+                {product.productType ? humanize(product.productType) : "-"} | {product.careAreas?.map(humanize).join(", ")}
               </p>
               <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
                 <button
@@ -588,15 +902,24 @@ export default function ProductDashboardPage() {
                     setEditingId(product.id);
                     setForm({
                       name: product.name,
+                      brand: product.brand ?? "",
                       sku: product.sku,
-                      category: product.category ?? "General",
                       price: product.price.toString(),
+                      compareAtPrice: product.compareAtPrice ? product.compareAtPrice.toString() : "",
+                      currency: product.currency ?? "KES",
                       cost: product.cost.toString(),
                       stockQty: product.stockQty.toString(),
                       imageUrl: product.imageUrl ?? "",
                       description: product.description ?? "",
+                      shortDescription: product.shortDescription ?? "",
                       imageFile: null,
-                      featured: false,
+                      featured: product.marketingTags?.includes("featured") ?? false,
+                      productType: product.productType ?? "",
+                      careAreas: product.careAreas ?? [],
+                      benefits: product.benefits ?? [],
+                      suitableFor: product.suitableFor ?? [],
+                      ingredients: product.ingredients ?? [],
+                      marketingTags: product.marketingTags ?? [],
                       variants:
                         product.variants?.map((v) => ({
                           name: v.name,
@@ -628,3 +951,12 @@ export default function ProductDashboardPage() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+

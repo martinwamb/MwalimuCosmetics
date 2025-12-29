@@ -4,19 +4,34 @@ import { z } from "zod";
 
 import { requireRoles, verifyAuth } from "../lib/authz.js";
 import { prisma } from "../lib/prisma.js";
+import { ensureSystemTaxonomy, formatProduct, persistProductTags, validateStructuredTags } from "../lib/taxonomy.js";
+
+const tagPayloadSchema = z.object({
+  productType: z.string().min(1),
+  careAreas: z.array(z.string().min(1)).min(1),
+  benefits: z.array(z.string().min(1)).optional(),
+  suitableFor: z.array(z.string().min(1)).optional(),
+  ingredients: z.array(z.string().min(1)).optional(),
+  marketingTags: z.array(z.string().min(1)).optional()
+});
 
 const productCreateSchema = z.object({
   name: z.string().min(1),
+  brand: z.string().optional(),
   sku: z.string().min(1),
   slug: z.string().min(1).optional(),
   price: z.number().positive(),
+  compareAtPrice: z.number().positive().optional(),
+  currency: z.string().min(1).default("KES"),
   cost: z.number().nonnegative(),
+  shortDescription: z.string().max(160).optional(),
   description: z.string().optional(),
   imageUrl: z.string().min(1).optional(),
+  galleryImages: z.array(z.string().min(1)).optional(),
   featured: z.boolean().optional(),
   stockQty: z.number().int().nonnegative().default(0),
-  category: z.string().min(1).default("General"),
-  status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]).optional(),
+  status: z.enum(["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED"]).optional(),
+  tags: tagPayloadSchema,
   variants: z
     .array(
       z.object({
@@ -31,42 +46,6 @@ const productCreateSchema = z.object({
 const productUpdateSchema = productCreateSchema.partial();
 
 export const router = Router();
-
-function formatProduct(product: any, includeCost = false) {
-  const base: any = {
-    id: product.id,
-    name: product.name,
-    sku: product.sku,
-    slug: product.slug ?? null,
-    description: product.description,
-    featured: product.featured,
-    imageUrl: product.imageUrl,
-    price: parseFloat(product.price.toString()),
-    stockQty: product.stockQty,
-    status: product.status,
-    category: product.category?.name ?? null,
-    createdAt: product.createdAt,
-    updatedAt: product.updatedAt,
-    variants:
-      product.variants?.map((v: any) => ({
-        id: v.id,
-        name: v.name,
-        imageUrl: v.imageUrl,
-        price: v.price ? parseFloat(v.price.toString()) : null
-      })) ?? []
-  };
-  if (includeCost) {
-    base.cost = parseFloat(product.cost.toString());
-  }
-  return base;
-}
-
-async function ensureCategory(name: string) {
-  const trimmed = name.trim();
-  const existing = await prisma.category.findUnique({ where: { name: trimmed } });
-  if (existing) return existing;
-  return prisma.category.create({ data: { name: trimmed } });
-}
 
 function slugify(input: string) {
   return input
@@ -104,10 +83,10 @@ router.get("/", async (req, res) => {
   const includeCost = requester?.role === "ADMIN";
 
   const where: any = {};
-  if (status && ["ACTIVE", "INACTIVE", "ARCHIVED"].includes(status)) {
+  if (status && ["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED"].includes(status)) {
     where.status = status;
   } else {
-    where.status = { in: ["ACTIVE", "INACTIVE"] };
+    where.status = { in: ["DRAFT", "ACTIVE", "INACTIVE"] };
   }
 
   if (search) {
@@ -120,7 +99,7 @@ router.get("/", async (req, res) => {
 
   const products = await prisma.product.findMany({
     where,
-    include: { category: true, variants: true },
+    include: { productTags: { include: { tag: { include: { group: true } } } }, variants: true },
     orderBy: { createdAt: "desc" },
     take,
     skip
@@ -135,7 +114,7 @@ router.get("/:id", async (req, res) => {
 
   const product = await prisma.product.findUnique({
     where: { id: req.params.id },
-    include: { category: true, variants: true }
+    include: { productTags: { include: { tag: { include: { group: true } } } }, variants: true }
   });
   if (!product) return res.status(404).json({ error: "Not found" });
   res.json({ data: formatProduct(product, includeCost) });
@@ -147,34 +126,51 @@ router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const category = await ensureCategory(parsed.data.category);
   const slug = await generateUniqueSlug(parsed.data.slug ?? parsed.data.name, parsed.data.sku);
+  const tagValidation = validateStructuredTags(parsed.data.tags ?? {});
+  if (!tagValidation.ok) {
+    return res.status(400).json({ error: tagValidation.errors });
+  }
 
   try {
-    const created = await prisma.product.create({
-      data: {
-        name: parsed.data.name,
-        sku: parsed.data.sku,
-        slug,
-        description: parsed.data.description,
-        featured: Boolean(parsed.data.featured),
-        imageUrl: parsed.data.imageUrl,
-        categoryId: category.id,
-        price: parsed.data.price,
-        cost: parsed.data.cost,
-        stockQty: parsed.data.stockQty ?? 0,
-        status: parsed.data.status ?? "ACTIVE",
-        variants: parsed.data.variants
-          ? {
-              create: parsed.data.variants.map((v) => ({
-                name: v.name,
-                imageUrl: v.imageUrl,
-                price: typeof v.price === "number" ? v.price : undefined
-              }))
-            }
-          : undefined
-      },
-      include: { category: true, variants: true }
+    const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await ensureSystemTaxonomy();
+      const product = await tx.product.create({
+        data: {
+          name: parsed.data.name,
+          brand: parsed.data.brand,
+          sku: parsed.data.sku,
+          slug,
+          shortDescription: parsed.data.shortDescription,
+          description: parsed.data.description,
+          featured: Boolean(parsed.data.featured),
+          imageUrl: parsed.data.imageUrl,
+          galleryImages: parsed.data.galleryImages ?? [],
+          price: parsed.data.price,
+          compareAtPrice: parsed.data.compareAtPrice,
+          currency: parsed.data.currency ?? "KES",
+          cost: parsed.data.cost,
+          stockQty: parsed.data.stockQty ?? 0,
+          status: parsed.data.status ?? "ACTIVE",
+          variants: parsed.data.variants
+            ? {
+                create: parsed.data.variants.map((v) => ({
+                  name: v.name,
+                  imageUrl: v.imageUrl,
+                  price: typeof v.price === "number" ? v.price : undefined
+                }))
+              }
+            : undefined
+        },
+        include: { productTags: { include: { tag: { include: { group: true } } } }, variants: true }
+      });
+
+      await persistProductTags(product.id, tagValidation.normalized, tx);
+      const refreshed = await tx.product.findUnique({
+        where: { id: product.id },
+        include: { productTags: { include: { tag: { include: { group: true } } } }, variants: true }
+      });
+      return refreshed!;
     });
 
     res.status(201).json({ data: formatProduct(created, true) });
@@ -195,13 +191,18 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
 
   const updates: any = {
     name: parsed.data.name,
+    brand: parsed.data.brand,
     sku: parsed.data.sku,
     slug: parsed.data.slug,
+    shortDescription: parsed.data.shortDescription,
     description: parsed.data.description,
     featured: parsed.data.featured,
     imageUrl: parsed.data.imageUrl,
+    galleryImages: parsed.data.galleryImages,
     stockQty: parsed.data.stockQty,
-    status: parsed.data.status
+    status: parsed.data.status,
+    compareAtPrice: parsed.data.compareAtPrice,
+    currency: parsed.data.currency
   };
 
   if (typeof parsed.data.price === "number") {
@@ -211,20 +212,35 @@ router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
     updates.cost = parsed.data.cost;
   }
 
-  if (parsed.data.category) {
-    const category = await ensureCategory(parsed.data.category);
-    updates.categoryId = category.id;
-  }
-
   try {
+    let normalizedTags = null;
+    if (parsed.data.tags) {
+      const validation = validateStructuredTags(parsed.data.tags);
+      if (!validation.ok) {
+        return res.status(400).json({ error: validation.errors });
+      }
+      normalizedTags = validation.normalized;
+    }
+
     if (updates.slug) {
       updates.slug = await generateUniqueSlug(updates.slug, parsed.data.sku, req.params.id);
     }
 
-    const updated = await prisma.product.update({
-      where: { id: req.params.id },
-      data: updates,
-      include: { category: true, variants: true }
+    const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const product = await tx.product.update({
+        where: { id: req.params.id },
+        data: updates,
+        include: { productTags: { include: { tag: { include: { group: true } } } }, variants: true }
+      });
+      if (normalizedTags) {
+        await ensureSystemTaxonomy();
+        await persistProductTags(product.id, normalizedTags, tx);
+      }
+      const refreshed = await tx.product.findUnique({
+        where: { id: product.id },
+        include: { productTags: { include: { tag: { include: { group: true } } } }, variants: true }
+      });
+      return refreshed!;
     });
     res.json({ data: formatProduct(updated, true) });
   } catch (err: any) {

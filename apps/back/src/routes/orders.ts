@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { sendAppMail } from "../lib/mailer.js";
 import { prisma } from "../lib/prisma.js";
+import { buildTagMap } from "../lib/taxonomy.js";
 
 const ORDER_EMAIL = process.env.ORDER_EMAIL ?? process.env.MAIL_FROM;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
@@ -219,21 +220,46 @@ async function fetchUpsellProducts(productIds: string[]) {
   try {
     const products = await prisma.product.findMany({
       where: { id: { in: productIds } },
-      include: { category: true }
+      include: { productTags: { include: { tag: { include: { group: true } } } } }
     });
-    const categoryIds = Array.from(
+    const productTypes = Array.from(
       new Set(
         products
-          .map((p: any) => p.categoryId)
-          .filter((id: any): id is string => Boolean(id))
+          .flatMap((p: any) => {
+            const tags = buildTagMap(p.productTags ?? []);
+            return tags["product_type"] ?? [];
+          })
+          .filter(Boolean)
       )
     );
+    const careAreas = Array.from(
+      new Set(
+        products
+          .flatMap((p: any) => {
+            const tags = buildTagMap(p.productTags ?? []);
+            return tags["care_area"] ?? [];
+          })
+          .filter(Boolean)
+      )
+    );
+
+    const whereClause: Prisma.ProductWhereInput = {
+      status: { in: ["ACTIVE", "INACTIVE"] },
+      id: { notIn: productIds }
+    };
+    const tagFilters: Prisma.ProductWhereInput[] = [];
+    if (productTypes.length) {
+      tagFilters.push({ productTags: { some: { tag: { group: { code: "product_type" }, value: { in: productTypes } } } } });
+    }
+    if (careAreas.length) {
+      tagFilters.push({ productTags: { some: { tag: { group: { code: "care_area" }, value: { in: careAreas } } } } });
+    }
+    if (tagFilters.length) {
+      whereClause.AND = tagFilters;
+    }
+
     const candidates = await prisma.product.findMany({
-      where: {
-        status: { in: ["ACTIVE", "INACTIVE"] },
-        id: { notIn: productIds },
-        ...(categoryIds.length ? { categoryId: { in: categoryIds } } : {})
-      },
+      where: whereClause,
       orderBy: { createdAt: "desc" },
       take: 5
     });
