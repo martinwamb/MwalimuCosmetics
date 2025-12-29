@@ -386,14 +386,18 @@ a {
   grid-template-columns: 1.1fr 1fr;
   padding: 2rem;
   color: #f9fafb;
-  transition: opacity 0.5s ease, transform 0.5s ease;
+  transition: transform 0.8s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.8s ease;
   opacity: 0;
-  transform: translateX(100%);
+  transform: translate3d(100%, 0, 0);
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  z-index: 0;
 }
 
 .hero-slide.active {
   opacity: 1;
-  transform: translateX(0);
+  transform: translate3d(0, 0, 0);
+  z-index: 1;
 }
 
 .hero-content h1 {
