@@ -212,7 +212,7 @@ export default function TagAdminPage() {
                       <span>Label</span>
                       <input
                         defaultValue={tag.label}
-                        disabled={!activeGroup.editable || tag.isSystem}
+                        disabled={!activeGroup.editable}
                         onBlur={(e) => {
                           const next = e.target.value.trim();
                           if (next && next !== tag.label) {
@@ -228,7 +228,7 @@ export default function TagAdminPage() {
                     <button
                       className="button ghost"
                       type="button"
-                      disabled={!activeGroup.editable || tag.isSystem || savingId === tag.id}
+                      disabled={!activeGroup.editable || savingId === tag.id}
                       onClick={() => handleDeleteTag(tag.id)}
                     >
                       {savingId === tag.id ? "..." : "Delete"}

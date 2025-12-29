@@ -115,7 +115,7 @@ export function NavBar() {
                 Cart
                 {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
               </a>
-              <button className="button ghost" type="button" onClick={handleSignOut}>
+              <button className="nav-link-button" type="button" onClick={handleSignOut}>
                 Sign out
               </button>
             </>

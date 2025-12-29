@@ -109,7 +109,7 @@ router.patch("/tags/:id", requireRoles(["ADMIN"]), async (req, res) => {
 
   const tag = await prisma.tag.findUnique({ where: { id: req.params.id }, include: { group: true } });
   if (!tag) return res.status(404).json({ error: "Tag not found." });
-  if (!tag.group.editable || tag.isSystem) {
+  if (!tag.group.editable) {
     return res.status(400).json({ error: "This tag cannot be edited." });
   }
 
@@ -127,7 +127,7 @@ router.delete("/tags/:id", requireRoles(["ADMIN"]), async (req, res) => {
     include: { group: true, products: true }
   });
   if (!tag) return res.status(404).json({ error: "Tag not found." });
-  if (!tag.group.editable || tag.isSystem) {
+  if (!tag.group.editable) {
     return res.status(400).json({ error: "This tag cannot be deleted." });
   }
   if (tag.products.length > 0) {

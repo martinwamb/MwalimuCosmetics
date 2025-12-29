@@ -244,6 +244,15 @@ a {
   font-weight: 600;
 }
 
+.nav-link-button {
+  background: none;
+  border: none;
+  color: #f6f7f8;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
 .cart-link {
   display: inline-flex;
   align-items: center;
