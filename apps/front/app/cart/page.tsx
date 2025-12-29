@@ -55,6 +55,24 @@ function formatErrorMessage(err: unknown, fallback: string) {
   return fallback;
 }
 
+function formatValidationErrors(payload: any): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const fieldErrors = payload.fieldErrors ?? payload.error?.fieldErrors;
+  const formErrors = payload.formErrors ?? payload.error?.formErrors;
+  const parts: string[] = [];
+  if (Array.isArray(formErrors) && formErrors.length) {
+    parts.push(formErrors.join("; "));
+  }
+  if (fieldErrors && typeof fieldErrors === "object") {
+    for (const [field, messages] of Object.entries(fieldErrors)) {
+      if (Array.isArray(messages) && messages.length) {
+        parts.push(`${field}: ${messages.join("; ")}`);
+      }
+    }
+  }
+  return parts.length ? `Order validation failed. ${parts.join(" | ")}` : null;
+}
+
 export default function CartPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -164,8 +182,8 @@ export default function CartPage() {
           channel: "ONLINE",
           items: cart.map((item) => ({
             productId: item.id,
-            slug: item.slug,
-            name: item.name,
+            ...(item.slug ? { slug: item.slug } : {}),
+            ...(item.name ? { name: item.name } : {}),
             qty: item.qty,
             unitPrice: item.price
           })),
@@ -180,6 +198,10 @@ export default function CartPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const validationError = formatValidationErrors(data?.error ?? data);
+        if (validationError) {
+          throw new Error(validationError);
+        }
         const apiError =
           typeof data?.error === "string"
             ? data.error
@@ -369,11 +391,6 @@ export default function CartPage() {
               <button className="button ghost full" type="button" onClick={() => copyOrderDetails(orderMessage)}>
                 Copy order details
               </button>
-              {!mailtoHref && !whatsappHref && !telegramHref && (
-                <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
-                  Set order email/WhatsApp/Telegram in your environment to enable quick send buttons.
-                </p>
-              )}
             </div>
           </aside>
         </div>
