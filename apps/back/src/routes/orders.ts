@@ -1,4 +1,4 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { sendAppMail } from "../lib/mailer.js";
@@ -11,6 +11,7 @@ const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 const WHATSAPP_TO = process.env.ORDER_WHATSAPP_TO;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
 const STORE_BASE_URL = process.env.STORE_BASE_URL ?? "https://mwalimucosmetics.com/products";
 
 const orderSchema = z.object({
@@ -167,7 +168,7 @@ router.post("/", async (req, res) => {
       sendOrderEmail(summary),
       sendCustomerEmail(summary, parsed.data.customer?.email),
       sendOrderWhatsApp(summary),
-      sendOrderTelegram(summary)
+      sendOrderTelegram({ text: summary.text, orderId: persistedOrder.id })
     ]);
   } catch (err: any) {
     console.error("[orders] Failed to dispatch all notifications", err?.message ?? err);
@@ -212,6 +213,64 @@ router.post("/:id/cancel", async (req, res) => {
   } catch (err: any) {
     console.error("[orders] cancel failed", err?.message ?? err);
     res.status(400).json({ error: err?.message ?? "Unable to cancel order" });
+  }
+});
+
+// Telegram webhook to process inline button actions
+router.post("/telegram/webhook", async (req, res) => {
+  try {
+    if (TELEGRAM_WEBHOOK_SECRET) {
+      const secret = req.header("x-telegram-bot-api-secret-token");
+      if (secret !== TELEGRAM_WEBHOOK_SECRET) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+
+    const update = req.body;
+    const callback = update?.callback_query;
+    if (!callback?.data) {
+      return res.json({ ok: true });
+    }
+
+    if (!callback.data.startsWith("process:")) {
+      return res.json({ ok: true });
+    }
+
+    const orderId = callback.data.replace("process:", "").trim();
+    if (!orderId) {
+      return res.json({ ok: true });
+    }
+
+    const order = await prisma.salesOrder.findUnique({
+      where: { id: orderId },
+      include: { customer: true, items: true }
+    });
+    if (!order) {
+      await answerTelegramCallback(callback.id, "Order not found.");
+      return res.json({ ok: true });
+    }
+
+    if (order.status === "FULFILLED") {
+      await answerTelegramCallback(callback.id, "Already marked as processed.");
+      await markTelegramMessageProcessed(callback.message, true);
+      return res.json({ ok: true });
+    }
+
+    const updated = await prisma.salesOrder.update({
+      where: { id: orderId },
+      data: { status: "FULFILLED" }
+    });
+
+    await Promise.allSettled([
+      sendOrderProcessedEmail(updated, order.customer?.email ?? null, order.customer?.name ?? null),
+      answerTelegramCallback(callback.id, "Order marked as processed."),
+      markTelegramMessageProcessed(callback.message, false)
+    ]);
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error("[orders] Telegram webhook failed", err?.message ?? err);
+    return res.status(500).json({ error: "Webhook error" });
   }
 });
 
@@ -443,19 +502,29 @@ async function sendOrderWhatsApp(summary: { text: string }) {
   }
 }
 
-async function sendOrderTelegram(summary: { text: string }) {
+async function sendOrderTelegram(summary: { text: string; orderId: string }) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
     console.warn("[orders] Telegram credentials missing. Skipping Telegram send.");
     return;
   }
 
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const reply_markup = {
+    inline_keyboard: [
+      [
+        {
+          text: "Mark order processed",
+          callback_data: `process:${summary.orderId}`
+        }
+      ]
+    ]
+  };
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: summary.text })
+    body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: summary.text, reply_markup })
   });
 
   if (!res.ok) {
@@ -464,3 +533,51 @@ async function sendOrderTelegram(summary: { text: string }) {
     throw new Error("Telegram send failed");
   }
 }
+
+async function sendOrderProcessedEmail(order: { id: string; total?: any }, customerEmail?: string | null, customerName?: string | null) {
+  if (!customerEmail) return;
+  const subject = `Your order ${order.id} is being processed`;
+  const greeting = customerName ? `Hi ${customerName},` : "Hello,";
+  const text = `${greeting}\n\nGood news! Your order ${order.id} is now being processed. We will notify you once it ships.\n\nThank you for shopping with Mwalimu Cosmetics.`;
+  const html = `
+    <div style="font-family:Arial, sans-serif;color:#222;line-height:1.5;">
+      <p style="margin:0 0 12px 0;">${greeting}</p>
+      <p style="margin:0 0 12px 0;">Good news! Your order <strong>${order.id}</strong> is now being processed.</p>
+      <p style="margin:0 0 12px 0;">We will notify you once it ships.</p>
+      <p style="margin:0;">Thank you for shopping with Mwalimu Cosmetics.</p>
+    </div>
+  `;
+  try {
+    await sendAppMail({ to: customerEmail, subject, text, html });
+  } catch (err: any) {
+    console.error("[orders] Failed to send processed email", err?.message ?? err);
+  }
+}
+
+async function answerTelegramCallback(callbackId: string, text: string) {
+  if (!TELEGRAM_BOT_TOKEN) return;
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackId, text, show_alert: false })
+  });
+}
+
+async function markTelegramMessageProcessed(message: any, alreadyProcessed: boolean) {
+  if (!TELEGRAM_BOT_TOKEN || !message?.chat?.id || !message?.message_id) return;
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`;
+  const suffix = alreadyProcessed ? "Processed already" : "Processed";
+  const nextText = `${message.text}\n\n${suffix}`;
+  await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: message.chat.id,
+      message_id: message.message_id,
+      text: nextText,
+      reply_markup: { inline_keyboard: [] }
+    })
+  });
+}
+
