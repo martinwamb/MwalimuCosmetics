@@ -758,12 +758,23 @@ export default function ProductDashboardPage() {
             />
             {imagePreview && (
               <div style={{ marginTop: "0.5rem" }}>
-                <div className="product-thumb" style={{ backgroundImage: `url(${imagePreview})`, backgroundSize: "cover", backgroundPosition: "center" }}>
+                <div
+                  className="product-thumb"
+                  style={{
+                    backgroundImage: `url(${imagePreview})`,
+                    backgroundSize: "contain",
+                    backgroundRepeat: "no-repeat",
+                    backgroundPosition: "center"
+                  }}
+                >
                   &nbsp;
                 </div>
               </div>
             )}
           </label>
+          <p className="muted small" style={{ marginTop: "-0.25rem" }}>
+            Recommended product image size: 1200 x 1200 (minimum 800 x 800). Square images show best.
+          </p>
 
           <div className="card" style={{ padding: "0.75rem", background: "#f8fafc" }}>
             <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
@@ -860,7 +871,8 @@ export default function ProductDashboardPage() {
                           className="product-thumb"
                           style={{
                             backgroundImage: `url(${variantPreviews[idx] || variant.imageUrl})`,
-                            backgroundSize: "cover",
+                            backgroundSize: "contain",
+                            backgroundRepeat: "no-repeat",
                             backgroundPosition: "center"
                           }}
                         >
@@ -927,7 +939,8 @@ export default function ProductDashboardPage() {
                   normalizeImageUrl(product.imageUrl)
                     ? {
                         backgroundImage: `url(${normalizeImageUrl(product.imageUrl)})`,
-                        backgroundSize: "cover",
+                        backgroundSize: "contain",
+                        backgroundRepeat: "no-repeat",
                         backgroundPosition: "center"
                       }
                     : undefined

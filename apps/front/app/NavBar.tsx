@@ -133,11 +133,12 @@ export function NavBar() {
       </div>
       <div className="nav-sub">
         <div className="nav-sub-inner">
-          <span>Skin care</span>
-          <span>Makeup</span>
-          <span>Hair</span>
-          <span>Fragrance</span>
-          <span>Gifts & Kits</span>
+          <a href="/?q=skin">Skin care</a>
+          <a href="/?q=makeup">Makeup</a>
+          <a href="/?q=hair">Hair</a>
+          <a href="/?q=bath">Bath & Body</a>
+          <a href="/?q=fragrance">Fragrance</a>
+          <a href="/?q=gifts">Gifts & Kits</a>
         </div>
       </div>
     </header>

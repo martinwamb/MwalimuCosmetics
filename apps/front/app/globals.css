@@ -309,6 +309,17 @@ a {
   gap: 1.1rem;
   max-width: 1200px;
   margin: 0 auto;
+  flex-wrap: wrap;
+  row-gap: 0.4rem;
+}
+
+.nav-sub-inner a {
+  color: #f6f7f8;
+  font-weight: 600;
+}
+
+.nav-sub-inner a:hover {
+  color: var(--gold);
 }
 
 .page-shell {
@@ -388,12 +399,14 @@ a {
   border-radius: 20px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
-  background-size: cover;
+  background-size: contain;
   background-position: center;
+  background-repeat: no-repeat;
+  background-color: #f8fafc;
   display: grid;
   grid-template-columns: 1.1fr 1fr;
   padding: 2rem;
-  color: #f9fafb;
+  color: #111;
   transition: transform 0.8s cubic-bezier(0.22, 0.61, 0.36, 1), opacity 0.8s ease;
   opacity: 0;
   transform: translate3d(100%, 0, 0);
@@ -402,19 +415,36 @@ a {
   z-index: 0;
 }
 
+.hero-content {
+  background: rgba(255, 255, 255, 0.88);
+  color: #111;
+  padding: 1.25rem;
+  border-radius: 14px;
+  max-width: 560px;
+  box-shadow: var(--shadow);
+}
+
 .hero-slide.active {
   opacity: 1;
   transform: translate3d(0, 0, 0);
   z-index: 1;
 }
 
+.hero-carousel.dir-back .hero-slide {
+  transform: translate3d(-100%, 0, 0);
+}
+
+.hero-carousel.dir-back .hero-slide.active {
+  transform: translate3d(0, 0, 0);
+}
+
 .hero-content h1 {
-  color: #fff;
+  color: #111;
   font-size: 2.4rem;
 }
 
 .hero-content .muted {
-  color: #e5e7eb;
+  color: var(--muted);
   max-width: 560px;
 }
 
@@ -438,14 +468,16 @@ a {
   left: 1.5rem;
   display: flex;
   gap: 0.4rem;
+  z-index: 2;
 }
 
 .dot-btn {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(15, 23, 42, 0.4);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.15);
   cursor: pointer;
 }
 
@@ -491,6 +523,19 @@ a {
   margin-bottom: 0.75rem;
 }
 
+.section-action {
+  border: none;
+  background: none;
+  color: var(--teal);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.section-action:hover {
+  text-decoration: underline;
+}
+
 .tile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -522,7 +567,8 @@ a {
   height: 140px;
   border-radius: 12px;
   background: #f3f4f6;
-  background-size: cover;
+  background-size: contain;
+  background-repeat: no-repeat;
   background-position: center;
   border: 1px solid var(--border);
 }
@@ -539,7 +585,8 @@ a {
   border: 1px solid var(--border);
   background: #111827;
   color: #fff;
-  background-size: cover;
+  background-size: contain;
+  background-repeat: no-repeat;
   background-position: center;
   text-decoration: none;
   position: relative;
@@ -556,7 +603,6 @@ a {
   gap: 0.4rem;
 }
 
-.hero-wrapper::after,
 .featured-card::after {
   content: \"\";
   position: absolute;
@@ -645,6 +691,9 @@ a {
   place-items: center;
   font-weight: 700;
   color: #0f5ba7;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
 }
 
 .badge {
@@ -761,6 +810,79 @@ a {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
   margin: 2rem 0 0.5rem;
+}
+
+.site-footer {
+  background: #111827;
+  color: #f8fafc;
+  padding: 2rem 1.5rem;
+  margin-top: 2rem;
+}
+
+.site-footer .muted {
+  color: rgba(248, 250, 252, 0.72);
+}
+
+.footer-grid {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.footer-grid > div {
+  display: grid;
+  gap: 0.4rem;
+  align-content: start;
+}
+
+.footer-title {
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.footer-grid a {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.footer-grid a:hover {
+  color: var(--gold);
+}
+
+.footer-social {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+
+.footer-bottom {
+  max-width: 1200px;
+  margin: 1.5rem auto 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  padding-top: 1rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.footer-bottom a {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.footer-bottom a:hover {
+  color: var(--gold);
+}
+
+.footer-links {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .signin-shell {
@@ -1087,7 +1209,8 @@ a {
   border-radius: 10px;
   border: 1px solid var(--border);
   background: #f8fafc;
-  background-size: cover;
+  background-size: contain;
+  background-repeat: no-repeat;
   background-position: center;
   cursor: pointer;
   box-shadow: var(--shadow);

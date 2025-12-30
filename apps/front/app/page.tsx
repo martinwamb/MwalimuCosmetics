@@ -92,6 +92,8 @@ function HomePage() {
   const [homeBanners, setHomeBanners] = useState<Banner[]>([]);
   const [homeSections, setHomeSections] = useState<Section[]>([]);
   const [activeSlide, setActiveSlide] = useState(0);
+  const [slideDirection, setSlideDirection] = useState<"forward" | "back">("forward");
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -245,31 +247,22 @@ function HomePage() {
 
   useEffect(() => {
     setActiveSlide(0);
+    setSlideDirection("forward");
+  }, [heroSlides]);
+
+  useEffect(() => {
     if (heroSlides.length <= 1) return;
     const timer = setInterval(() => {
+      setSlideDirection("forward");
       setActiveSlide((prev) => (prev + 1) % heroSlides.length);
     }, 6000);
     return () => clearInterval(timer);
   }, [heroSlides]);
 
-  const sectionByType = useMemo(() => {
-    const bucket: Partial<Record<Section["type"], Section>> = {};
-    homeSections
-      .slice()
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .forEach((section) => {
-        if (!bucket[section.type]) {
-          bucket[section.type] = section;
-        }
-      });
-    return bucket;
-  }, [homeSections]);
-
-  const categorySection = sectionByType.CATEGORY;
-  const needSection = sectionByType.NEED;
-  const featuredCollection = sectionByType.FEATURED_COLLECTION;
-  const bestSellerSection = sectionByType.BEST_SELLERS;
-  const priceSection = sectionByType.PRICE;
+  const sortedSections = useMemo(
+    () => homeSections.slice().sort((a, b) => a.sortOrder - b.sortOrder),
+    [homeSections]
+  );
 
   const productLookup = useMemo(() => {
     const map: Record<string, Product> = {};
@@ -281,9 +274,9 @@ function HomePage() {
     return map;
   }, [productsToShow]);
 
-  const bestSellerProducts = useMemo(() => {
-    if (bestSellerSection?.items?.length) {
-      const resolved = bestSellerSection.items
+  function resolveSectionProducts(section: Section) {
+    if (section.items?.length) {
+      const resolved = section.items
         .map((item) => {
           const target = item.linkTarget?.trim();
           if (target && productLookup[target]) return productLookup[target];
@@ -291,11 +284,15 @@ function HomePage() {
           return null;
         })
         .filter(Boolean) as Product[];
-      if (resolved.length) return resolved.slice(0, 8);
+      if (resolved.length) return resolved;
     }
-    if (featured.length) return featured.slice(0, 8);
-    return productsToShow.slice(0, 8);
-  }, [bestSellerSection, productLookup, featured, productsToShow]);
+    if (featured.length) return featured;
+    return productsToShow;
+  }
+
+  function toggleExpanded(sectionId: string) {
+    setExpandedSections((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  }
 
   function formatKES(value: number) {
     return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(value);
@@ -323,17 +320,16 @@ function HomePage() {
         {homeLoading ? (
           <div className="hero-skeleton">Loading hero...</div>
         ) : heroSlides.length ? (
-          <div className="hero-carousel">
+          <div className={`hero-carousel ${slideDirection === "back" ? "dir-back" : "dir-forward"}`}>
             {heroSlides.map((banner, idx) => {
               const bg = normalizeImageUrl(banner.imageUrl);
               return (
                 <article
                   key={`${banner.id}-${idx}`}
                   className={`hero-slide ${idx === activeSlide ? "active" : ""}`}
-                  style={bg ? { backgroundImage: `linear-gradient(90deg, rgba(19,25,33,0.48), rgba(19,25,33,0.05)), url(${bg})` } : undefined}
+                  style={bg ? { backgroundImage: `url(${bg})` } : undefined}
                 >
                   <div className="hero-content">
-                    <div className="hero-eyebrow">Homepage banner</div>
                     <h1>{banner.title}</h1>
                     {banner.subtext && <p className="muted">{banner.subtext}</p>}
                     <div className="hero-actions">
@@ -359,7 +355,10 @@ function HomePage() {
                   <button
                     key={idx}
                     className={`dot-btn ${idx === activeSlide ? "active" : ""}`}
-                    onClick={() => setActiveSlide(idx)}
+                    onClick={() => {
+                      setSlideDirection(idx > activeSlide ? "forward" : "back");
+                      setActiveSlide(idx);
+                    }}
                     aria-label={`Go to slide ${idx + 1}`}
                     type="button"
                   />
@@ -372,7 +371,7 @@ function HomePage() {
             <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
               Add homepage banners
             </div>
-            <p className="muted">Set up 3–5 banners from the admin dashboard to fill this carousel.</p>
+            <p className="muted">Set up 3-5 banners from the admin dashboard to fill this carousel.</p>
             <a className="button ghost" href="/dashboard/homepage">
               Go to homepage layout
             </a>
@@ -391,69 +390,88 @@ function HomePage() {
         {error && <p className="signin-error">{error}</p>}
         {notice && <p className="signin-success">{notice}</p>}
 
-        {categorySection && (
-          <section className="module">
-            <div className="section-head">
-              <div>
-                <div className="hero-eyebrow">{categorySection.title}</div>
-                {categorySection.subtitle && <p className="muted">{categorySection.subtitle}</p>}
-              </div>
-            </div>
-            <div className="tile-grid">
-              {categorySection.items.slice(0, 4).map((item) => {
-                const img = normalizeImageUrl(item.imageUrl);
-                return (
-                  <a key={item.id} className="tile-card" href={item.linkTarget || "#"}>
-                    {item.badge && <span className="mini-pill">{item.badge}</span>}
-                    <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
-                    <div className="tile-body">
-                      <strong>{item.label}</strong>
-                      {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
-                    </div>
-                  </a>
-                );
-              })}
-            </div>
-          </section>
-        )}
+        {sortedSections.map((section) => {
+          const isExpanded = Boolean(expandedSections[section.id]);
+          if (section.type === "CATEGORY") {
+            const canExpand = section.items.length > 4;
+            const items = section.items.slice(0, isExpanded ? section.items.length : 4);
+            return (
+              <section className="module" key={section.id}>
+                <div className="section-head">
+                  <div>
+                    <div className="hero-eyebrow">{section.title}</div>
+                    {section.subtitle && <p className="muted">{section.subtitle}</p>}
+                  </div>
+                  {canExpand && (
+                    <button className="section-action" type="button" onClick={() => toggleExpanded(section.id)}>
+                      {isExpanded ? "See less" : "See more"}
+                    </button>
+                  )}
+                </div>
+                <div className="tile-grid">
+                  {items.map((item) => {
+                    const img = normalizeImageUrl(item.imageUrl);
+                    return (
+                      <a key={item.id} className="tile-card" href={item.linkTarget || "#"}>
+                        {item.badge && <span className="mini-pill">{item.badge}</span>}
+                        <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
+                        <div className="tile-body">
+                          <strong>{item.label}</strong>
+                          {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          }
 
-        {needSection && (
-          <section className="module">
-            <div className="section-head">
-              <div>
-                <div className="hero-eyebrow">{needSection.title}</div>
-                {needSection.subtitle && <p className="muted">{needSection.subtitle}</p>}
-              </div>
-            </div>
-            <div className="tile-grid">
-              {needSection.items.slice(0, 4).map((item) => {
-                const img = normalizeImageUrl(item.imageUrl);
-                return (
-                  <a key={item.id} className="tile-card need" href={item.linkTarget || "#"}>
-                    <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
-                    <div className="tile-body">
-                      <strong>{item.label}</strong>
-                      {item.badge && <span className="muted small">{item.badge}</span>}
-                    </div>
-                  </a>
-                );
-              })}
-            </div>
-          </section>
-        )}
+          if (section.type === "NEED") {
+            const canExpand = section.items.length > 4;
+            const items = section.items.slice(0, isExpanded ? section.items.length : 4);
+            return (
+              <section className="module" key={section.id}>
+                <div className="section-head">
+                  <div>
+                    <div className="hero-eyebrow">{section.title}</div>
+                    {section.subtitle && <p className="muted">{section.subtitle}</p>}
+                  </div>
+                  {canExpand && (
+                    <button className="section-action" type="button" onClick={() => toggleExpanded(section.id)}>
+                      {isExpanded ? "See less" : "See more"}
+                    </button>
+                  )}
+                </div>
+                <div className="tile-grid">
+                  {items.map((item) => {
+                    const img = normalizeImageUrl(item.imageUrl);
+                    return (
+                      <a key={item.id} className="tile-card need" href={item.linkTarget || "#"}>
+                        <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
+                        <div className="tile-body">
+                          <strong>{item.label}</strong>
+                          {item.badge && <span className="muted small">{item.badge}</span>}
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          }
 
-        {featuredCollection && featuredCollection.items.length > 0 && (
-          <section className="module">
-            <div className="section-head">
-              <div>
-                <div className="hero-eyebrow">{featuredCollection.title}</div>
-                {featuredCollection.subtitle && <p className="muted">{featuredCollection.subtitle}</p>}
-              </div>
-            </div>
-            {(() => {
-              const item = featuredCollection.items[0];
-              const img = normalizeImageUrl(item.imageUrl);
-              return (
+          if (section.type === "FEATURED_COLLECTION" && section.items.length > 0) {
+            const item = section.items[0];
+            const img = normalizeImageUrl(item.imageUrl);
+            return (
+              <section className="module" key={section.id}>
+                <div className="section-head">
+                  <div>
+                    <div className="hero-eyebrow">{section.title}</div>
+                    {section.subtitle && <p className="muted">{section.subtitle}</p>}
+                  </div>
+                </div>
                 <a className="featured-card" href={item.linkTarget || "#"} style={img ? { backgroundImage: `url(${img})` } : undefined}>
                   <div className="featured-overlay">
                     {item.badge && <span className="mini-pill">{item.badge}</span>}
@@ -461,103 +479,128 @@ function HomePage() {
                     {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
                   </div>
                 </a>
-              );
-            })()}
-          </section>
-        )}
+              </section>
+            );
+          }
 
-        {bestSellerSection && (
-          <section className="module">
-            <div className="section-head">
-              <div>
-                <div className="hero-eyebrow">{bestSellerSection.title}</div>
-                {bestSellerSection.subtitle && <p className="muted">{bestSellerSection.subtitle}</p>}
-              </div>
-            </div>
-            <div className="catalog-grid">
-              {bestSellerProducts.map((product) => {
-                const img = normalizeImageUrl(product.imageUrl);
-                const stockQty = typeof product.stockQty === "number" ? product.stockQty : null;
-                const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
-                const outOfStock = stockQty === 0;
-                return (
-                  <a
-                    className="product-card"
-                    key={product.id}
-                    href={`/products/${product.slug ?? product.id}`}
-                    style={{ textDecoration: "none", color: "inherit" }}
-                  >
-                    {product.badge && <div className="badge">{product.badge}</div>}
-                    <div
-                      className="product-thumb"
-                      style={img ? { backgroundImage: `url(${img})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
-                    >
-                      {!img && (product.tagline ?? "New arrival")}
-                    </div>
-                    <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
-                    <p className="muted" style={{ margin: 0 }}>
-                      {product.description}
-                    </p>
-                    <p className="price">{formatKES(product.price)}</p>
-                    <div className="muted small" style={{ marginBottom: "0.35rem", display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-                      {stockQty !== null && (
-                        <span>
-                          Stock: {stockQty} {stockQty === 1 ? "unit" : "units"}
-                        </span>
-                      )}
-                      {lowStock && <span className="stock-flag low">Only {stockQty} left</span>}
-                      {outOfStock && <span className="stock-flag out">Out of stock</span>}
-                    </div>
-                    <div className="actions">
-                      <button
-                        className="button full"
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleAddToCart(product);
-                        }}
-                      >
-                        Add to Cart
-                      </button>
-                      <button
-                        className="button ghost full"
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleSave(product);
-                        }}
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </a>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {priceSection && (
-          <section className="module">
-            <div className="section-head">
-              <div>
-                <div className="hero-eyebrow">{priceSection.title}</div>
-                {priceSection.subtitle && <p className="muted">{priceSection.subtitle}</p>}
-              </div>
-            </div>
-            <div className="tile-grid">
-              {priceSection.items.slice(0, 4).map((item) => (
-                <a key={item.id} className="tile-card price" href={item.linkTarget || "#"}>
-                  <div className="tile-body">
-                    <strong>{item.label}</strong>
-                    {item.badge && <span className="mini-pill">{item.badge}</span>}
-                    {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
+          if (section.type === "BEST_SELLERS") {
+            const resolved = resolveSectionProducts(section);
+            const canExpand = resolved.length > 4;
+            const products = resolved.slice(0, isExpanded ? resolved.length : 4);
+            return (
+              <section className="module" key={section.id}>
+                <div className="section-head">
+                  <div>
+                    <div className="hero-eyebrow">{section.title}</div>
+                    {section.subtitle && <p className="muted">{section.subtitle}</p>}
                   </div>
-                </a>
-              ))}
-            </div>
-          </section>
-        )}
+                  {canExpand && (
+                    <button className="section-action" type="button" onClick={() => toggleExpanded(section.id)}>
+                      {isExpanded ? "See less" : "See more"}
+                    </button>
+                  )}
+                </div>
+                <div className="catalog-grid">
+                  {products.map((product) => {
+                    const img = normalizeImageUrl(product.imageUrl);
+                    const stockQty = typeof product.stockQty === "number" ? product.stockQty : null;
+                    const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
+                    const outOfStock = stockQty === 0;
+                    return (
+                      <a
+                        className="product-card"
+                        key={product.id}
+                        href={`/products/${product.slug ?? product.id}`}
+                        style={{ textDecoration: "none", color: "inherit" }}
+                      >
+                        {product.badge && <div className="badge">{product.badge}</div>}
+                        <div
+                          className="product-thumb"
+                          style={
+                            img
+                              ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
+                              : undefined
+                          }
+                        >
+                          {!img && (product.tagline ?? "New arrival")}
+                        </div>
+                        <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
+                        <p className="muted" style={{ margin: 0 }}>
+                          {product.description}
+                        </p>
+                        <p className="price">{formatKES(product.price)}</p>
+                        <div className="muted small" style={{ marginBottom: "0.35rem", display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                          {stockQty !== null && (
+                            <span>
+                              Stock: {stockQty} {stockQty === 1 ? "unit" : "units"}
+                            </span>
+                          )}
+                          {lowStock && <span className="stock-flag low">Only {stockQty} left</span>}
+                          {outOfStock && <span className="stock-flag out">Out of stock</span>}
+                        </div>
+                        <div className="actions">
+                          <button
+                            className="button full"
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleAddToCart(product);
+                            }}
+                          >
+                            Add to Cart
+                          </button>
+                          <button
+                            className="button ghost full"
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleSave(product);
+                            }}
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          }
+
+          if (section.type === "PRICE") {
+            const canExpand = section.items.length > 4;
+            const items = section.items.slice(0, isExpanded ? section.items.length : 4);
+            return (
+              <section className="module" key={section.id}>
+                <div className="section-head">
+                  <div>
+                    <div className="hero-eyebrow">{section.title}</div>
+                    {section.subtitle && <p className="muted">{section.subtitle}</p>}
+                  </div>
+                  {canExpand && (
+                    <button className="section-action" type="button" onClick={() => toggleExpanded(section.id)}>
+                      {isExpanded ? "See less" : "See more"}
+                    </button>
+                  )}
+                </div>
+                <div className="tile-grid">
+                  {items.map((item) => (
+                    <a key={item.id} className="tile-card price" href={item.linkTarget || "#"}>
+                      <div className="tile-body">
+                        <strong>{item.label}</strong>
+                        {item.badge && <span className="mini-pill">{item.badge}</span>}
+                        {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            );
+          }
+
+          return null;
+        })}
 
         {searchQuery && (
           <section className="module">
@@ -585,7 +628,11 @@ function HomePage() {
                       {product.badge && <div className="badge">{product.badge}</div>}
                       <div
                         className="product-thumb"
-                        style={img ? { backgroundImage: `url(${img})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+                        style={
+                          img
+                            ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
+                            : undefined
+                        }
                       >
                         {!img && (product.tagline ?? "New arrival")}
                       </div>
@@ -616,7 +663,11 @@ function HomePage() {
                       {product.badge && <div className="badge">{product.badge}</div>}
                       <div
                         className="product-thumb"
-                        style={img ? { backgroundImage: `url(${img})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+                        style={
+                          img
+                            ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
+                            : undefined
+                        }
                       >
                         {!img && (product.tagline ?? "New arrival")}
                       </div>
@@ -676,44 +727,56 @@ function HomePage() {
         )}
       </div>
 
-      <section className="signin-preview">
-        <article className="card">
-          <div className="hero-eyebrow" style={{ marginBottom: "0.4rem" }}>
-            Customers
+      <footer className="site-footer">
+        <div className="footer-grid">
+          <div>
+            <div className="footer-title">Mwalimu Cosmetics</div>
+            <p className="muted small">
+              Premium beauty essentials from Kenya. Shop daily care, signature scents, and curated skincare rituals.
+            </p>
+            <div className="footer-social">
+              <a href="https://instagram.com" aria-label="Instagram">
+                Instagram
+              </a>
+              <a href="https://facebook.com" aria-label="Facebook">
+                Facebook
+              </a>
+              <a href="https://tiktok.com" aria-label="TikTok">
+                TikTok
+              </a>
+            </div>
           </div>
-          <h3 style={{ margin: 0 }}>Sign in to pick up where you left off</h3>
-          <p className="muted" style={{ marginTop: "0.35rem" }}>
-            See past orders, reorder routines, and follow every delivery without leaving the store.
-          </p>
-          <div className="tag-list">
-            <span className="mini-pill">Past orders</span>
-            <span className="mini-pill">Delivery updates</span>
-            <span className="mini-pill">Saved routines</span>
+          <div>
+            <div className="footer-title">Customer care</div>
+            <a href="/contact">Contact</a>
+            <a href="/policies/shipping">Shipping policy</a>
+            <a href="/policies/returns">Returns</a>
+            <a href="/policies/privacy">Privacy policy</a>
           </div>
-          <a className="text-link" href="/sign-in">
-            Sign in to view your history
-          </a>
-        </article>
-        <article className="card">
-          <div className="hero-eyebrow" style={{ marginBottom: "0.4rem" }}>
-            Staff
+          <div>
+            <div className="footer-title">About</div>
+            <a href="/about">Our story</a>
+            <a href="/locations">Store locations</a>
+            <a href="/wholesale">Wholesale</a>
+            <a href="/careers">Careers</a>
           </div>
-          <h3 style={{ margin: 0 }}>Team console unlocks after sign-in</h3>
-          <p className="muted" style={{ marginTop: "0.35rem" }}>
-            Accounts, sales, admin, store, and delivery teams each get their own workspace plus a clock-in station.
-          </p>
-          <div className="tag-list">
-            <span className="mini-pill">Accounts receivables</span>
-            <span className="mini-pill">Sales dashboards</span>
-            <span className="mini-pill">Store inventory</span>
-            <span className="mini-pill">Delivery routing</span>
-            <span className="mini-pill">Clock in/out</span>
+          <div>
+            <div className="footer-title">Visit us</div>
+            <p className="muted small">Nairobi, Kenya</p>
+            <p className="muted small">Open daily: 9:00 AM - 7:00 PM</p>
+            <a href="mailto:hello@mwalimucosmetics.com">hello@mwalimucosmetics.com</a>
+            <a href="tel:+254700000000">+254 700 000 000</a>
           </div>
-          <a className="text-link" href="/sign-in">
-            Sign in as staff to continue
-          </a>
-        </article>
-      </section>
+        </div>
+        <div className="footer-bottom">
+          <span>© {new Date().getFullYear()} Mwalimu Cosmetics. All rights reserved.</span>
+          <div className="footer-links">
+            <a href="/policies/terms">Terms</a>
+            <a href="/policies/privacy">Privacy</a>
+            <a href="/policies/cookies">Cookies</a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

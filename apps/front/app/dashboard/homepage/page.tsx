@@ -473,7 +473,8 @@ export default function HomepageAdminPage() {
                   style={{
                     height: 140,
                     backgroundImage: `url(${bannerForm.preview || bannerForm.imageUrl})`,
-                    backgroundSize: "cover",
+                    backgroundSize: "contain",
+                    backgroundRepeat: "no-repeat",
                     backgroundPosition: "center"
                   }}
                 >
@@ -482,6 +483,9 @@ export default function HomepageAdminPage() {
               </div>
             )}
           </label>
+          <p className="muted small" style={{ marginTop: "-0.25rem" }}>
+            Recommended banner size: 1600 x 600 (minimum 1200 x 500). Images display full-size without cropping.
+          </p>
           <div className="input-row" style={{ alignItems: "center" }}>
             <label className="input-group" style={{ flex: 1 }}>
               <span>Sort order</span>
@@ -526,7 +530,8 @@ export default function HomepageAdminPage() {
                   style={{
                     height: 120,
                     backgroundImage: normalizeImageUrl(banner.imageUrl) ? `url(${normalizeImageUrl(banner.imageUrl)})` : undefined,
-                    backgroundSize: "cover",
+                    backgroundSize: "contain",
+                    backgroundRepeat: "no-repeat",
                     backgroundPosition: "center"
                   }}
                 >
@@ -753,7 +758,8 @@ export default function HomepageAdminPage() {
                           style={{
                             height: 120,
                             backgroundImage: `url(${itemPreviews[idx] || item.imageUrl})`,
-                            backgroundSize: "cover",
+                            backgroundSize: "contain",
+                            backgroundRepeat: "no-repeat",
                             backgroundPosition: "center"
                           }}
                         >

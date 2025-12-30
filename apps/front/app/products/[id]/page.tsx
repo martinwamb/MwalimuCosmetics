@@ -305,7 +305,12 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
                   {vImg && (
                     <div
                       className="product-thumb"
-                      style={{ backgroundImage: `url(${vImg})`, backgroundSize: "cover", backgroundPosition: "center" }}
+                      style={{
+                        backgroundImage: `url(${vImg})`,
+                        backgroundSize: "contain",
+                        backgroundRepeat: "no-repeat",
+                        backgroundPosition: "center"
+                      }}
                     />
                   )}
                   <h3 style={{ margin: "0.25rem 0 0" }}>{v.name}</h3>
