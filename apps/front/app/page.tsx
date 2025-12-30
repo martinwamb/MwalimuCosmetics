@@ -316,68 +316,70 @@ function HomePage() {
 
   return (
     <div className="home-shell">
-      <section className="hero-wrapper">
-        {homeLoading ? (
-          <div className="hero-skeleton">Loading hero...</div>
-        ) : heroSlides.length ? (
-          <div className={`hero-carousel ${slideDirection === "back" ? "dir-back" : "dir-forward"}`}>
-            {heroSlides.map((banner, idx) => {
-              const bg = normalizeImageUrl(banner.imageUrl);
-              return (
-                <article
-                  key={`${banner.id}-${idx}`}
-                  className={`hero-slide ${idx === activeSlide ? "active" : ""}`}
-                  style={bg ? { backgroundImage: `url(${bg})` } : undefined}
-                >
-                  <div className="hero-content">
-                    <h1>{banner.title}</h1>
-                    {banner.subtext && <p className="muted">{banner.subtext}</p>}
-                    <div className="hero-actions">
-                      {banner.ctaText && (
-                        <a className="button" href={banner.ctaLink || "#"}>
-                          {banner.ctaText}
-                        </a>
-                      )}
-                      {!banner.ctaText && banner.ctaLink && (
-                        <a className="button ghost" href={banner.ctaLink}>
-                          View more
-                        </a>
-                      )}
+      {!searchQuery && (
+        <section className="hero-wrapper">
+          {homeLoading ? (
+            <div className="hero-skeleton">Loading hero...</div>
+          ) : heroSlides.length ? (
+            <div className={`hero-carousel ${slideDirection === "back" ? "dir-back" : "dir-forward"}`}>
+              {heroSlides.map((banner, idx) => {
+                const bg = normalizeImageUrl(banner.imageUrl);
+                return (
+                  <article
+                    key={`${banner.id}-${idx}`}
+                    className={`hero-slide ${idx === activeSlide ? "active" : ""}`}
+                    style={bg ? { backgroundImage: `url(${bg})` } : undefined}
+                  >
+                    <div className="hero-content">
+                      <h1>{banner.title}</h1>
+                      {banner.subtext && <p className="muted">{banner.subtext}</p>}
+                      <div className="hero-actions">
+                        {banner.ctaText && (
+                          <a className="button" href={banner.ctaLink || "#"}>
+                            {banner.ctaText}
+                          </a>
+                        )}
+                        {!banner.ctaText && banner.ctaLink && (
+                          <a className="button ghost" href={banner.ctaLink}>
+                            View more
+                          </a>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="hero-index">{idx + 1}/{heroSlides.length}</div>
-                </article>
-              );
-            })}
-            {heroSlides.length > 1 && (
-              <div className="hero-dots">
-                {heroSlides.map((_, idx) => (
-                  <button
-                    key={idx}
-                    className={`dot-btn ${idx === activeSlide ? "active" : ""}`}
-                    onClick={() => {
-                      setSlideDirection(idx > activeSlide ? "forward" : "back");
-                      setActiveSlide(idx);
-                    }}
-                    aria-label={`Go to slide ${idx + 1}`}
-                    type="button"
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="card hero-placeholder">
-            <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
-              Add homepage banners
+                    <div className="hero-index">{idx + 1}/{heroSlides.length}</div>
+                  </article>
+                );
+              })}
+              {heroSlides.length > 1 && (
+                <div className="hero-dots">
+                  {heroSlides.map((_, idx) => (
+                    <button
+                      key={idx}
+                      className={`dot-btn ${idx === activeSlide ? "active" : ""}`}
+                      onClick={() => {
+                        setSlideDirection(idx > activeSlide ? "forward" : "back");
+                        setActiveSlide(idx);
+                      }}
+                      aria-label={`Go to slide ${idx + 1}`}
+                      type="button"
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-            <p className="muted">Set up 3-5 banners from the admin dashboard to fill this carousel.</p>
-            <a className="button ghost" href="/dashboard/homepage">
-              Go to homepage layout
-            </a>
-          </div>
-        )}
-      </section>
+          ) : (
+            <div className="card hero-placeholder">
+              <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
+                Add homepage banners
+              </div>
+              <p className="muted">Set up 3-5 banners from the admin dashboard to fill this carousel.</p>
+              <a className="button ghost" href="/dashboard/homepage">
+                Go to homepage layout
+              </a>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="section-stack">
         {homeError && <p className="signin-error">{homeError}</p>}
@@ -390,9 +392,10 @@ function HomePage() {
         {error && <p className="signin-error">{error}</p>}
         {notice && <p className="signin-success">{notice}</p>}
 
-        {sortedSections.map((section) => {
-          const isExpanded = Boolean(expandedSections[section.id]);
-          if (section.type === "CATEGORY") {
+        {!searchQuery &&
+          sortedSections.map((section) => {
+            const isExpanded = Boolean(expandedSections[section.id]);
+            if (section.type === "CATEGORY") {
             const canExpand = section.items.length > 4;
             const items = section.items.slice(0, isExpanded ? section.items.length : 4);
             return (
@@ -600,7 +603,7 @@ function HomePage() {
           }
 
           return null;
-        })}
+          })}
 
         {searchQuery && (
           <section className="module">
@@ -715,7 +718,7 @@ function HomePage() {
           </section>
         )}
 
-        {!homeLoading && !homeSections.length && (
+        {!searchQuery && !homeLoading && !homeSections.length && (
           <div className="card">
             <div className="hero-eyebrow" style={{ marginBottom: "0.25rem" }}>
               Homepage sections
@@ -727,56 +730,58 @@ function HomePage() {
         )}
       </div>
 
-      <footer className="site-footer">
-        <div className="footer-grid">
-          <div>
-            <div className="footer-title">Mwalimu Cosmetics</div>
-            <p className="muted small">
-              Premium beauty essentials from Kenya. Shop daily care, signature scents, and curated skincare rituals.
-            </p>
-            <div className="footer-social">
-              <a href="https://instagram.com" aria-label="Instagram">
-                Instagram
-              </a>
-              <a href="https://facebook.com" aria-label="Facebook">
-                Facebook
-              </a>
-              <a href="https://tiktok.com" aria-label="TikTok">
-                TikTok
-              </a>
+      {!searchQuery && (
+        <footer className="site-footer">
+          <div className="footer-grid">
+            <div>
+              <div className="footer-title">Mwalimu Cosmetics</div>
+              <p className="muted small">
+                Premium beauty essentials from Kenya. Shop daily care, signature scents, and curated skincare rituals.
+              </p>
+              <div className="footer-social">
+                <a href="https://instagram.com" aria-label="Instagram">
+                  Instagram
+                </a>
+                <a href="https://facebook.com" aria-label="Facebook">
+                  Facebook
+                </a>
+                <a href="https://tiktok.com" aria-label="TikTok">
+                  TikTok
+                </a>
+              </div>
+            </div>
+            <div>
+              <div className="footer-title">Customer care</div>
+              <a href="/contact">Contact</a>
+              <a href="/policies/shipping">Shipping policy</a>
+              <a href="/policies/returns">Returns</a>
+              <a href="/policies/privacy">Privacy policy</a>
+            </div>
+            <div>
+              <div className="footer-title">About</div>
+              <a href="/about">Our story</a>
+              <a href="/locations">Store locations</a>
+              <a href="/wholesale">Wholesale</a>
+              <a href="/careers">Careers</a>
+            </div>
+            <div>
+              <div className="footer-title">Visit us</div>
+              <p className="muted small">Nairobi, Kenya</p>
+              <p className="muted small">Open daily: 9:00 AM - 7:00 PM</p>
+              <a href="mailto:hello@mwalimucosmetics.com">hello@mwalimucosmetics.com</a>
+              <a href="tel:+254700000000">+254 700 000 000</a>
             </div>
           </div>
-          <div>
-            <div className="footer-title">Customer care</div>
-            <a href="/contact">Contact</a>
-            <a href="/policies/shipping">Shipping policy</a>
-            <a href="/policies/returns">Returns</a>
-            <a href="/policies/privacy">Privacy policy</a>
+          <div className="footer-bottom">
+            <span>© {new Date().getFullYear()} Mwalimu Cosmetics. All rights reserved.</span>
+            <div className="footer-links">
+              <a href="/policies/terms">Terms</a>
+              <a href="/policies/privacy">Privacy</a>
+              <a href="/policies/cookies">Cookies</a>
+            </div>
           </div>
-          <div>
-            <div className="footer-title">About</div>
-            <a href="/about">Our story</a>
-            <a href="/locations">Store locations</a>
-            <a href="/wholesale">Wholesale</a>
-            <a href="/careers">Careers</a>
-          </div>
-          <div>
-            <div className="footer-title">Visit us</div>
-            <p className="muted small">Nairobi, Kenya</p>
-            <p className="muted small">Open daily: 9:00 AM - 7:00 PM</p>
-            <a href="mailto:hello@mwalimucosmetics.com">hello@mwalimucosmetics.com</a>
-            <a href="tel:+254700000000">+254 700 000 000</a>
-          </div>
-        </div>
-        <div className="footer-bottom">
-          <span>© {new Date().getFullYear()} Mwalimu Cosmetics. All rights reserved.</span>
-          <div className="footer-links">
-            <a href="/policies/terms">Terms</a>
-            <a href="/policies/privacy">Privacy</a>
-            <a href="/policies/cookies">Cookies</a>
-          </div>
-        </div>
-      </footer>
+        </footer>
+      )}
     </div>
   );
 }
