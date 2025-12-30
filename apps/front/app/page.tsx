@@ -139,20 +139,24 @@ function HomePage() {
         }
         const items = (data?.data as any[]) ?? [];
         setCatalog(
-          items.map((item) => ({
-            id: item.id,
-            slug: item.slug,
-            name: item.name,
-            description: item.description,
-            price: item.price,
-            sku: item.sku,
-            imageUrl: item.imageUrl,
-            category: item.category,
-            stockQty: item.stockQty,
-            tagline: item.category ?? "New arrival",
-            badge: item.stockQty === 0 ? "Out of stock" : item.category ?? undefined,
-            featured: item.featured
-          }))
+          items.map((item) => {
+            const stockQty = Number(item.stockQty ?? 0);
+            const normalizedStock = Number.isFinite(stockQty) ? stockQty : undefined;
+            return {
+              id: item.id,
+              slug: item.slug,
+              name: item.name,
+              description: item.description,
+              price: item.price,
+              sku: item.sku,
+              imageUrl: item.imageUrl,
+              category: item.category,
+              stockQty: normalizedStock,
+              tagline: item.category ?? "New arrival",
+              badge: normalizedStock === 0 ? "Out of stock" : item.category ?? undefined,
+              featured: item.featured
+            };
+          })
         );
       } catch (err: any) {
         console.error("[front] Failed to load products", err);

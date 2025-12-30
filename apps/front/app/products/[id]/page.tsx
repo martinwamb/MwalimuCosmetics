@@ -52,7 +52,7 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
           sku: p.sku,
           imageUrl: p.imageUrl,
           category: p.category,
-          stockQty: p.stockQty,
+          stockQty: Number.isFinite(Number(p.stockQty)) ? Number(p.stockQty) : undefined,
           variants:
             (p.variants as Variant[] | undefined)?.map((v) => ({
               id: v.id,
