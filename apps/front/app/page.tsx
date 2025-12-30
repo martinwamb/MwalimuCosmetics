@@ -556,7 +556,7 @@ function HomePage() {
                   {products.map((product) => {
                     const img = normalizeImageUrl(product.imageUrl);
                     const stockQty = typeof product.stockQty === "number" ? product.stockQty : null;
-                    const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
+                    const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 10;
                     const outOfStock = stockQty === 0;
                     return (
                       <a
@@ -766,7 +766,7 @@ function HomePage() {
                     {filteredResults.map((product) => {
                       const img = normalizeImageUrl(product.imageUrl);
                       const stockQty = typeof product.stockQty === "number" ? product.stockQty : null;
-                      const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
+                      const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 10;
                       const outOfStock = stockQty === 0;
                       return (
                         <a

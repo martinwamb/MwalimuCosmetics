@@ -130,7 +130,7 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
   );
   const displayPrice = activeVariant?.price ?? product?.price ?? 0;
   const stockQty = typeof product?.stockQty === "number" ? product.stockQty : null;
-  const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
+  const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 10;
   const outOfStock = stockQty === 0;
 
   function persistCart(next: typeof cart) {
