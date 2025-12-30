@@ -94,6 +94,11 @@ function HomePage() {
   const [activeSlide, setActiveSlide] = useState(0);
   const [slideDirection, setSlideDirection] = useState<"forward" | "back">("forward");
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [priceMin, setPriceMin] = useState<string>("");
+  const [priceMax, setPriceMax] = useState<string>("");
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [featuredOnly, setFeaturedOnly] = useState(false);
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -225,6 +230,34 @@ function HomePage() {
     [productsToShow, normalizedQuery]
   );
   const visibleProducts = filteredProducts;
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>();
+    productsToShow.forEach((product) => {
+      if (product.category) set.add(product.category);
+    });
+    return Array.from(set).sort();
+  }, [productsToShow]);
+  const filteredResults = useMemo(() => {
+    let next = filteredProducts;
+    if (selectedCategories.length) {
+      next = next.filter((product) => product.category && selectedCategories.includes(product.category));
+    }
+    const min = priceMin ? Number(priceMin) : null;
+    const max = priceMax ? Number(priceMax) : null;
+    if (Number.isFinite(min ?? NaN)) {
+      next = next.filter((product) => product.price >= (min as number));
+    }
+    if (Number.isFinite(max ?? NaN)) {
+      next = next.filter((product) => product.price <= (max as number));
+    }
+    if (inStockOnly) {
+      next = next.filter((product) => (typeof product.stockQty === "number" ? product.stockQty > 0 : true));
+    }
+    if (featuredOnly) {
+      next = next.filter((product) => product.featured);
+    }
+    return next;
+  }, [filteredProducts, selectedCategories, priceMin, priceMax, inStockOnly, featuredOnly]);
   const recommendations = useMemo(() => {
     const pool = featured.length ? featured : productsToShow;
     return pool.slice(0, 4);
@@ -292,6 +325,18 @@ function HomePage() {
 
   function toggleExpanded(sectionId: string) {
     setExpandedSections((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  }
+
+  function toggleCategory(category: string) {
+    setSelectedCategories((prev) => (prev.includes(category) ? prev.filter((item) => item !== category) : [...prev, category]));
+  }
+
+  function resetFilters() {
+    setSelectedCategories([]);
+    setPriceMin("");
+    setPriceMax("");
+    setInStockOnly(false);
+    setFeaturedOnly(false);
   }
 
   function formatKES(value: number) {
@@ -606,115 +651,179 @@ function HomePage() {
           })}
 
         {searchQuery && (
-          <section className="module">
+          <section className="module search-module">
             <div className="section-head">
               <div>
-                <div className="hero-eyebrow">Search</div>
+                <div className="hero-eyebrow">Search results</div>
                 <p className="muted small" style={{ margin: 0 }}>
-                  {visibleProducts.length
-                    ? `${visibleProducts.length} match${visibleProducts.length === 1 ? "" : "es"} found`
-                    : "No exact matches. Showing recommendations instead."}
+                  {filteredResults.length
+                    ? `${filteredResults.length} match${filteredResults.length === 1 ? "" : "es"} found`
+                    : "No exact matches with the current filters."}
                 </p>
               </div>
+              <button className="section-action" type="button" onClick={resetFilters}>
+                Clear filters
+              </button>
             </div>
-            {visibleProducts.length === 0 && (
-              <div className="catalog-grid">
-                {recommendations.map((product) => {
-                  const img = normalizeImageUrl(product.imageUrl);
-                  return (
-                    <a
-                      className="product-card"
-                      key={product.id}
-                      href={`/products/${product.slug ?? product.id}`}
-                      style={{ textDecoration: "none", color: "inherit" }}
-                    >
-                      {product.badge && <div className="badge">{product.badge}</div>}
-                      <div
-                        className="product-thumb"
-                        style={
-                          img
-                            ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
-                            : undefined
-                        }
-                      >
-                        {!img && (product.tagline ?? "New arrival")}
-                      </div>
-                      <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
-                      <p className="muted" style={{ margin: 0 }}>
-                        {product.description}
-                      </p>
-                      <p className="price">{formatKES(product.price)}</p>
-                    </a>
-                  );
-                })}
-              </div>
-            )}
-            {visibleProducts.length > 0 && (
-              <div className="catalog-grid">
-                {visibleProducts.map((product) => {
-                  const img = normalizeImageUrl(product.imageUrl);
-                  const stockQty = typeof product.stockQty === "number" ? product.stockQty : null;
-                  const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
-                  const outOfStock = stockQty === 0;
-                  return (
-                    <a
-                      className="product-card"
-                      key={product.id}
-                      href={`/products/${product.slug ?? product.id}`}
-                      style={{ textDecoration: "none", color: "inherit" }}
-                    >
-                      {product.badge && <div className="badge">{product.badge}</div>}
-                      <div
-                        className="product-thumb"
-                        style={
-                          img
-                            ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
-                            : undefined
-                        }
-                      >
-                        {!img && (product.tagline ?? "New arrival")}
-                      </div>
-                      <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
-                      <p className="muted" style={{ margin: 0 }}>
-                        {product.description}
-                      </p>
-                      <p className="price">{formatKES(product.price)}</p>
-                      <div className="muted small" style={{ marginBottom: "0.35rem", display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-                        {stockQty !== null && (
-                          <span>
-                            Stock: {stockQty} {stockQty === 1 ? "unit" : "units"}
-                          </span>
-                        )}
-                        {lowStock && <span className="stock-flag low">Only {stockQty} left</span>}
-                        {outOfStock && <span className="stock-flag out">Out of stock</span>}
-                      </div>
-                      <div className="actions">
-                        <button
-                          className="button full"
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleAddToCart(product);
-                          }}
+            <div className="search-layout">
+              <aside className="search-filters">
+                <div className="filter-block">
+                  <div className="filter-title">Categories</div>
+                  {availableCategories.length === 0 && <p className="muted small">No categories yet.</p>}
+                  {availableCategories.map((category) => (
+                    <label key={category} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedCategories.includes(category)}
+                        onChange={() => toggleCategory(category)}
+                      />
+                      <span>{category}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Price (KES)</div>
+                  <div className="filter-row">
+                    <input
+                      className="filter-input"
+                      type="number"
+                      min={0}
+                      placeholder="Min"
+                      value={priceMin}
+                      onChange={(e) => setPriceMin(e.target.value)}
+                    />
+                    <input
+                      className="filter-input"
+                      type="number"
+                      min={0}
+                      placeholder="Max"
+                      value={priceMax}
+                      onChange={(e) => setPriceMax(e.target.value)}
+                    />
+                  </div>
+                  <div className="filter-quick">
+                    <button type="button" onClick={() => { setPriceMin(""); setPriceMax("500"); }}>
+                      Under 500
+                    </button>
+                    <button type="button" onClick={() => { setPriceMin("500"); setPriceMax("1500"); }}>
+                      500 - 1,500
+                    </button>
+                    <button type="button" onClick={() => { setPriceMin("1500"); setPriceMax(""); }}>
+                      1,500+
+                    </button>
+                  </div>
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Availability</div>
+                  <label className="filter-item">
+                    <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
+                    <span>In stock only</span>
+                  </label>
+                  <label className="filter-item">
+                    <input type="checkbox" checked={featuredOnly} onChange={(e) => setFeaturedOnly(e.target.checked)} />
+                    <span>Featured picks</span>
+                  </label>
+                </div>
+              </aside>
+              <div className="search-results">
+                {filteredResults.length === 0 && (
+                  <div className="catalog-grid">
+                    {recommendations.map((product) => {
+                      const img = normalizeImageUrl(product.imageUrl);
+                      return (
+                        <a
+                          className="product-card"
+                          key={product.id}
+                          href={`/products/${product.slug ?? product.id}`}
+                          style={{ textDecoration: "none", color: "inherit" }}
                         >
-                          Add to Cart
-                        </button>
-                        <button
-                          className="button ghost full"
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleSave(product);
-                          }}
+                          <div
+                            className="product-thumb"
+                            style={
+                              img
+                                ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
+                                : undefined
+                            }
+                          >
+                            {!img && (product.tagline ?? "New arrival")}
+                          </div>
+                          <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
+                          <p className="muted" style={{ margin: 0 }}>
+                            {product.description}
+                          </p>
+                          <p className="price">{formatKES(product.price)}</p>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+                {filteredResults.length > 0 && (
+                  <div className="catalog-grid">
+                    {filteredResults.map((product) => {
+                      const img = normalizeImageUrl(product.imageUrl);
+                      const stockQty = typeof product.stockQty === "number" ? product.stockQty : null;
+                      const lowStock = stockQty !== null && stockQty > 0 && stockQty <= 6;
+                      const outOfStock = stockQty === 0;
+                      return (
+                        <a
+                          className="product-card"
+                          key={product.id}
+                          href={`/products/${product.slug ?? product.id}`}
+                          style={{ textDecoration: "none", color: "inherit" }}
                         >
-                          Save
-                        </button>
-                      </div>
-                    </a>
-                  );
-                })}
+                          <div
+                            className="product-thumb"
+                            style={
+                              img
+                                ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
+                                : undefined
+                            }
+                          >
+                            {!img && (product.tagline ?? "New arrival")}
+                          </div>
+                          <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
+                          <p className="muted" style={{ margin: 0 }}>
+                            {product.description}
+                          </p>
+                          <p className="price">{formatKES(product.price)}</p>
+                          <div className="muted small" style={{ marginBottom: "0.35rem", display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                            {stockQty !== null && (
+                              <span>
+                                Stock: {stockQty} {stockQty === 1 ? "unit" : "units"}
+                              </span>
+                            )}
+                            {lowStock && <span className="stock-flag low">Only {stockQty} left</span>}
+                            {outOfStock && <span className="stock-flag out">Out of stock</span>}
+                          </div>
+                          <div className="actions">
+                            <button
+                              className="button full"
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleAddToCart(product);
+                              }}
+                            >
+                              Add to Cart
+                            </button>
+                            <button
+                              className="button ghost full"
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleSave(product);
+                              }}
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </section>
         )}
 

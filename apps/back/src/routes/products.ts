@@ -112,8 +112,14 @@ router.get("/:id", async (req, res) => {
   const requester = verifyAuth(req.headers.authorization);
   const includeCost = requester?.role === "ADMIN";
 
-  const product = await prisma.product.findUnique({
-    where: { id: req.params.id },
+  const product = await prisma.product.findFirst({
+    where: {
+      OR: [
+        { id: req.params.id },
+        { slug: req.params.id },
+        { sku: req.params.id }
+      ]
+    },
     include: { productTags: { include: { tag: { include: { group: true } } } }, variants: true }
   });
   if (!product) return res.status(404).json({ error: "Not found" });
