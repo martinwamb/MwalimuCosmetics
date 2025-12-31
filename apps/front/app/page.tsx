@@ -669,6 +669,62 @@ function HomePage() {
                 Clear filters
               </button>
             </div>
+            <div className="filter-chip-bar" aria-label="Quick filters">
+              {availableCategories.map((category) => (
+                <button
+                  key={category}
+                  className={`filter-chip ${selectedCategories.includes(category) ? "active" : ""}`}
+                  type="button"
+                  onClick={() => toggleCategory(category)}
+                >
+                  {category}
+                </button>
+              ))}
+              <button
+                className={`filter-chip ${priceMin === "" && priceMax === "500" ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setPriceMin("");
+                  setPriceMax("500");
+                }}
+              >
+                Under 500
+              </button>
+              <button
+                className={`filter-chip ${priceMin === "500" && priceMax === "1500" ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setPriceMin("500");
+                  setPriceMax("1500");
+                }}
+              >
+                500 - 1,500
+              </button>
+              <button
+                className={`filter-chip ${priceMin === "1500" && priceMax === "" ? "active" : ""}`}
+                type="button"
+                onClick={() => {
+                  setPriceMin("1500");
+                  setPriceMax("");
+                }}
+              >
+                1,500+
+              </button>
+              <button
+                className={`filter-chip ${inStockOnly ? "active" : ""}`}
+                type="button"
+                onClick={() => setInStockOnly((prev) => !prev)}
+              >
+                In stock
+              </button>
+              <button
+                className={`filter-chip ${featuredOnly ? "active" : ""}`}
+                type="button"
+                onClick={() => setFeaturedOnly((prev) => !prev)}
+              >
+                Featured
+              </button>
+            </div>
             <div className="search-layout">
               <aside className="search-filters">
                 <div className="filter-block">
