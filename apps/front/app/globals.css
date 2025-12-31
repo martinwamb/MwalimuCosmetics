@@ -197,6 +197,13 @@ a {
   gap: 0.5rem;
 }
 
+.brand-logo {
+  display: block;
+  height: 32px;
+  width: auto;
+  object-fit: contain;
+}
+
 .search {
   display: grid;
   grid-template-columns: 0.7fr 4fr auto;
@@ -1552,6 +1559,10 @@ a {
     grid-area: brand;
     justify-self: center;
     font-size: 1rem;
+  }
+
+  .brand-logo {
+    height: 26px;
   }
 
   .search {
