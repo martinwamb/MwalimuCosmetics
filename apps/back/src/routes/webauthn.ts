@@ -43,13 +43,12 @@ router.post("/register/options", requireAuth, async (req: any, res) => {
   const options = await generateRegistrationOptions({
     rpName: "Mwalimu Cosmetics",
     rpID: RP_ID,
-    userID: user.id,
+    userID: Buffer.from(user.id),
     userName: user.email,
     userDisplayName: user.name ?? user.email,
     attestationType: "none",
     excludeCredentials: existing.map((cred) => ({
-      id: Buffer.from(cred.credentialId, "base64url"),
-      type: "public-key",
+      id: cred.credentialId,
       transports: cred.transports ? (JSON.parse(cred.transports) as string[]) : undefined
     }))
   });
@@ -86,9 +85,10 @@ router.post("/register/verify", requireAuth, async (req: any, res) => {
       return res.status(400).json({ error: "Biometric registration failed" });
     }
 
-    const { credentialID, credentialPublicKey, counter } = verification.registrationInfo;
-    const credentialId = Buffer.from(credentialID).toString("base64url");
-    const publicKey = Buffer.from(credentialPublicKey).toString("base64");
+    const registrationInfo = verification.registrationInfo;
+    const credentialId = String(registrationInfo.credential.id);
+    const publicKey = Buffer.from(registrationInfo.credential.publicKey).toString("base64");
+    const counter = registrationInfo.credential.counter;
 
     await prisma.webAuthnCredential.create({
       data: {
@@ -126,8 +126,7 @@ router.post("/authenticate/options", requireAuth, async (req: any, res) => {
     rpID: RP_ID,
     userVerification: "preferred",
     allowCredentials: creds.map((cred) => ({
-      id: Buffer.from(cred.credentialId, "base64url"),
-      type: "public-key",
+      id: cred.credentialId,
       transports: cred.transports ? (JSON.parse(cred.transports) as string[]) : undefined
     }))
   });
@@ -167,9 +166,9 @@ router.post("/authenticate/verify", requireAuth, async (req: any, res) => {
       expectedChallenge: user.biometricRef,
       expectedOrigin: ORIGIN,
       expectedRPID: RP_ID,
-      authenticator: {
-        credentialID: Buffer.from(stored.credentialId, "base64url"),
-        credentialPublicKey: Buffer.from(stored.publicKey, "base64"),
+      credential: {
+        id: stored.credentialId,
+        publicKey: Buffer.from(stored.publicKey, "base64"),
         counter: stored.counter,
         transports: stored.transports ? (JSON.parse(stored.transports) as string[]) : undefined
       }
