@@ -655,20 +655,7 @@ function HomePage() {
           })}
 
         {searchQuery && (
-          <section className="module search-module">
-            <div className="section-head">
-              <div>
-                <div className="hero-eyebrow">Search results</div>
-                <p className="muted small" style={{ margin: 0 }}>
-                  {filteredResults.length
-                    ? `${filteredResults.length} match${filteredResults.length === 1 ? "" : "es"} found`
-                    : "No exact matches with the current filters."}
-                </p>
-              </div>
-              <button className="section-action" type="button" onClick={resetFilters}>
-                Clear filters
-              </button>
-            </div>
+          <>
             <div className="filter-chip-bar" aria-label="Quick filters">
               {availableCategories.map((category) => (
                 <button
@@ -725,8 +712,22 @@ function HomePage() {
                 Featured
               </button>
             </div>
-            <div className="search-layout">
-              <aside className="search-filters">
+            <section className="module search-module">
+              <div className="section-head">
+                <div>
+                  <div className="hero-eyebrow">Search results</div>
+                  <p className="muted small" style={{ margin: 0 }}>
+                    {filteredResults.length
+                      ? `${filteredResults.length} match${filteredResults.length === 1 ? "" : "es"} found`
+                      : "No exact matches with the current filters."}
+                  </p>
+                </div>
+                <button className="section-action" type="button" onClick={resetFilters}>
+                  Clear filters
+                </button>
+              </div>
+              <div className="search-layout">
+                <aside className="search-filters">
                 <div className="filter-block">
                   <div className="filter-title">Categories</div>
                   {availableCategories.length === 0 && <p className="muted small">No categories yet.</p>}
@@ -883,8 +884,9 @@ function HomePage() {
                   </div>
                 )}
               </div>
-            </div>
-          </section>
+              </div>
+            </section>
+          </>
         )}
 
         {!searchQuery && !homeLoading && !homeSections.length && (

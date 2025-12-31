@@ -11,6 +11,7 @@
   --muted: #4b5563;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
   --radius: 12px;
+  --header-offset: 116px;
 }
 
 * {
@@ -177,6 +178,9 @@ a {
   background: var(--night);
   color: #f6f7f8;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  position: sticky;
+  top: 0;
+  z-index: 120;
 }
 
 .nav-primary {
@@ -444,12 +448,21 @@ a {
 }
 
 .filter-chip-bar {
-  display: none;
+  display: flex;
   gap: 0.5rem;
   overflow-x: auto;
-  padding: 0.35rem 0 0.75rem;
-  margin-bottom: 0.25rem;
+  padding: 0.5rem 1rem;
+  margin: 0;
   scroll-snap-type: x mandatory;
+  position: sticky;
+  top: var(--header-offset);
+  z-index: 110;
+  background: #232f3e;
+  color: #f6f7f8;
+  left: 50%;
+  width: 100vw;
+  transform: translateX(-50%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .filter-chip-bar .filter-chip {
@@ -1542,6 +1555,10 @@ a {
 }
 
 @media (max-width: 900px) {
+  :root {
+    --header-offset: 126px;
+  }
+
   .nav-primary {
     grid-template-columns: auto 1fr auto;
     grid-template-areas:
@@ -1649,15 +1666,6 @@ a {
     padding: 1rem;
     background: transparent;
     box-shadow: none;
-  }
-
-  .filter-chip-bar {
-    display: flex;
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    background: #fff;
-    padding: 0.5rem 0 0.75rem;
   }
 
   .search-layout {
