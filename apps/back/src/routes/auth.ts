@@ -2,6 +2,8 @@ import bcrypt from "bcryptjs";
 import { Router } from "express";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import crypto from "crypto";
+import { OAuth2Client } from "google-auth-library";
 
 import { sendAppMail } from "../lib/mailer.js";
 import { prisma } from "../lib/prisma.js";
@@ -9,6 +11,13 @@ import { seedAdmin } from "../lib/admin.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret";
 const PASSWORD_RESET_URL = process.env.PASSWORD_RESET_URL ?? "https://mwalimucosmetics.com/reset-password";
+const FRONT_BASE_URL = process.env.FRONT_BASE_URL ?? "https://mwalimucosmetics.com";
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? "";
+const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID ?? "";
+const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET ?? "";
+
+const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -23,7 +32,9 @@ const staffCreateSchema = z.object({
 
 const registerSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6)
+  password: z.string().min(6),
+  name: z.string().min(1).optional(),
+  marketingOptIn: z.boolean().optional()
 });
 
 const identifySchema = z.object({
@@ -38,6 +49,52 @@ export const router = Router();
 
 function signToken(user: { id: string; email: string; role: string }) {
   return jwt.sign({ sub: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+}
+
+function buildBaseUrl(req: any) {
+  const proto = (req.headers["x-forwarded-proto"] as string) ?? req.protocol ?? "http";
+  const host = req.headers.host ?? req.get("host") ?? "localhost:4000";
+  return `${proto}://${host}`;
+}
+
+function sanitizeRedirect(candidate?: string | null) {
+  if (!candidate) return FRONT_BASE_URL;
+  if (candidate.startsWith(FRONT_BASE_URL)) return candidate;
+  if (candidate.startsWith("http://localhost:3000")) return candidate;
+  return FRONT_BASE_URL;
+}
+
+function signOAuthState(payload: { redirect: string }) {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "10m" });
+}
+
+function verifyOAuthState(token?: string | null) {
+  if (!token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET) as { redirect: string };
+  } catch {
+    return null;
+  }
+}
+
+async function ensureCustomerRecord(email: string, name?: string | null, marketingOptIn?: boolean) {
+  const existing = await prisma.customer.findFirst({ where: { email } });
+  if (existing) {
+    return prisma.customer.update({
+      where: { id: existing.id },
+      data: {
+        name: name ?? existing.name,
+        marketingOptIn: typeof marketingOptIn === "boolean" ? marketingOptIn : existing.marketingOptIn
+      }
+    });
+  }
+  return prisma.customer.create({
+    data: {
+      name: name ?? "Customer",
+      email,
+      marketingOptIn: marketingOptIn ?? false
+    }
+  });
 }
 
 async function authenticate(email: string, password: string) {
@@ -123,9 +180,12 @@ router.post("/register", async (req, res) => {
     data: {
       email: parsed.data.email,
       passwordHash,
+      name: parsed.data.name ?? null,
       role: "CUSTOMER"
     }
   });
+
+  await ensureCustomerRecord(parsed.data.email, parsed.data.name ?? null, parsed.data.marketingOptIn ?? false);
 
   const token = signToken(created);
   return res.status(201).json({ token, user: { id: created.id, email: created.email, role: created.role } });
@@ -186,10 +246,163 @@ router.post("/forgot", async (req, res) => {
 
 router.get("/staff", requireAdmin, async (_req, res) => {
   const list = await prisma.user.findMany({
-    where: { role: { in: ["ACCOUNTS", "SALES", "ADMIN", "CUSTOMER"] } },
+    where: { role: { in: ["ACCOUNTS", "SALES", "ADMIN"] } },
     select: { id: true, email: true, role: true, createdAt: true }
   });
   res.json({ data: list });
+});
+
+router.get("/oauth/google/start", async (req, res) => {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    return res.status(500).send("Google OAuth is not configured.");
+  }
+  const redirect = sanitizeRedirect((req.query.redirect as string | undefined) ?? null);
+  const state = signOAuthState({ redirect });
+  const redirectUri = `${buildBaseUrl(req)}/auth/oauth/google/callback`;
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", GOOGLE_CLIENT_ID);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "openid email profile");
+  url.searchParams.set("prompt", "select_account");
+  url.searchParams.set("state", state);
+  res.redirect(url.toString());
+});
+
+router.get("/oauth/google/callback", async (req, res) => {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !googleClient) {
+    return res.status(500).send("Google OAuth is not configured.");
+  }
+  const code = req.query.code as string | undefined;
+  const state = verifyOAuthState(req.query.state as string | undefined);
+  const redirect = sanitizeRedirect(state?.redirect ?? null);
+  if (!code) {
+    return res.redirect(`${redirect}?error=missing_code`);
+  }
+  try {
+    const redirectUri = `${buildBaseUrl(req)}/auth/oauth/google/callback`;
+    const body = new URLSearchParams({
+      code,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code"
+    });
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) {
+      throw new Error(tokenData?.error ?? "Token exchange failed");
+    }
+    const idToken = tokenData.id_token as string | undefined;
+    if (!idToken) {
+      throw new Error("Missing id_token");
+    }
+    const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID });
+    const payload = ticket.getPayload();
+    const email = payload?.email;
+    const name = payload?.name ?? null;
+    if (!email) {
+      throw new Error("No email from Google");
+    }
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const passwordHash = await bcrypt.hash(crypto.randomUUID(), 12);
+      user = await prisma.user.create({
+        data: { email, passwordHash, role: "CUSTOMER", name }
+      });
+    }
+    await ensureCustomerRecord(email, name, false);
+    const token = signToken(user);
+    const params = new URLSearchParams({
+      token,
+      email,
+      role: user.role
+    });
+    res.redirect(`${redirect}?${params.toString()}`);
+  } catch (err: any) {
+    console.error("[auth] Google OAuth failed", err?.message ?? err);
+    res.redirect(`${redirect}?error=google_oauth_failed`);
+  }
+});
+
+router.get("/oauth/facebook/start", async (req, res) => {
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+    return res.status(500).send("Facebook OAuth is not configured.");
+  }
+  const redirect = sanitizeRedirect((req.query.redirect as string | undefined) ?? null);
+  const state = signOAuthState({ redirect });
+  const redirectUri = `${buildBaseUrl(req)}/auth/oauth/facebook/callback`;
+  const url = new URL("https://www.facebook.com/v18.0/dialog/oauth");
+  url.searchParams.set("client_id", FACEBOOK_APP_ID);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", "email,public_profile");
+  url.searchParams.set("state", state);
+  res.redirect(url.toString());
+});
+
+router.get("/oauth/facebook/callback", async (req, res) => {
+  if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+    return res.status(500).send("Facebook OAuth is not configured.");
+  }
+  const code = req.query.code as string | undefined;
+  const state = verifyOAuthState(req.query.state as string | undefined);
+  const redirect = sanitizeRedirect(state?.redirect ?? null);
+  if (!code) {
+    return res.redirect(`${redirect}?error=missing_code`);
+  }
+  try {
+    const redirectUri = `${buildBaseUrl(req)}/auth/oauth/facebook/callback`;
+    const tokenUrl = new URL("https://graph.facebook.com/v18.0/oauth/access_token");
+    tokenUrl.searchParams.set("client_id", FACEBOOK_APP_ID);
+    tokenUrl.searchParams.set("client_secret", FACEBOOK_APP_SECRET);
+    tokenUrl.searchParams.set("redirect_uri", redirectUri);
+    tokenUrl.searchParams.set("code", code);
+    const tokenRes = await fetch(tokenUrl.toString());
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) {
+      throw new Error(tokenData?.error?.message ?? "Token exchange failed");
+    }
+    const accessToken = tokenData.access_token as string | undefined;
+    if (!accessToken) {
+      throw new Error("Missing access token");
+    }
+    const profileUrl = new URL("https://graph.facebook.com/me");
+    profileUrl.searchParams.set("fields", "id,name,email");
+    profileUrl.searchParams.set("access_token", accessToken);
+    const profileRes = await fetch(profileUrl.toString());
+    const profile = await profileRes.json();
+    if (!profileRes.ok) {
+      throw new Error(profile?.error?.message ?? "Profile fetch failed");
+    }
+    const email = profile?.email as string | undefined;
+    const name = (profile?.name as string | undefined) ?? null;
+    if (!email) {
+      return res.redirect(`${redirect}?error=facebook_missing_email`);
+    }
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const passwordHash = await bcrypt.hash(crypto.randomUUID(), 12);
+      user = await prisma.user.create({
+        data: { email, passwordHash, role: "CUSTOMER", name }
+      });
+    }
+    await ensureCustomerRecord(email, name, false);
+    const token = signToken(user);
+    const params = new URLSearchParams({
+      token,
+      email,
+      role: user.role
+    });
+    res.redirect(`${redirect}?${params.toString()}`);
+  } catch (err: any) {
+    console.error("[auth] Facebook OAuth failed", err?.message ?? err);
+    res.redirect(`${redirect}?error=facebook_oauth_failed`);
+  }
 });
 
 router.post("/logout", (_req, res) => {

@@ -24,18 +24,30 @@ type StaffUser = {
   role: string;
 };
 
+type Customer = {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  marketingOptIn: boolean;
+  orderCount: number;
+  lastOrderAt: string | null;
+};
+
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export default function AdminDashboardPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [staff, setStaff] = useState<StaffUser[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [tab, setTab] = useState<"products" | "reports" | "users">("products");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [staffForm, setStaffForm] = useState({ email: "", password: "", role: "ADMIN" });
   const [staffStatus, setStaffStatus] = useState<string | null>(null);
+  const [customerStatus, setCustomerStatus] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -58,21 +70,25 @@ export default function AdminDashboardPage() {
       try {
         const headers: Record<string, string> = {};
         headers.Authorization = `Bearer ${token}`;
-        const [productsRes, ordersRes, staffRes] = await Promise.all([
+        const [productsRes, ordersRes, staffRes, customersRes] = await Promise.all([
           fetch(`${apiBase}/products?status=ACTIVE&take=200`, { cache: "no-store" }),
-          fetch(`${apiBase}/orders`, { cache: "no-store" }),
-          fetch(`${apiBase}/auth/staff`, { headers })
+          fetch(`${apiBase}/orders`, { headers, cache: "no-store" }),
+          fetch(`${apiBase}/auth/staff`, { headers }),
+          fetch(`${apiBase}/customers`, { headers, cache: "no-store" })
         ]);
         const productsJson = await productsRes.json().catch(() => ({}));
         const ordersJson = await ordersRes.json().catch(() => ({}));
         const staffJson = await staffRes.json().catch(() => ({}));
+        const customersJson = await customersRes.json().catch(() => ({}));
         if (!productsRes.ok) throw new Error((productsJson?.error as string) ?? "Could not load products");
         if (!ordersRes.ok) throw new Error((ordersJson?.error as string) ?? "Could not load orders");
         if (!staffRes.ok) throw new Error((staffJson?.error as string) ?? "Could not load users");
+        if (!customersRes.ok) throw new Error((customersJson?.error as string) ?? "Could not load customers");
 
         setProducts((productsJson?.data as Product[]) ?? []);
         setOrders((ordersJson?.data as Order[]) ?? []);
         setStaff((staffJson?.data as StaffUser[]) ?? []);
+        setCustomers((customersJson?.data as Customer[]) ?? []);
       } catch (err: any) {
         setError(err?.message ?? "Unable to load admin data.");
       } finally {
@@ -126,6 +142,35 @@ export default function AdminDashboardPage() {
     }
   }
 
+  async function handleExportCustomers() {
+    if (!token) {
+      setCustomerStatus("Sign in as admin to export customers.");
+      return;
+    }
+    setCustomerStatus(null);
+    try {
+      const res = await fetch(`${apiBase}/customers?format=csv&marketingOptIn=true`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data?.error as string) ?? "Could not export customers");
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "customers-marketing-opt-in.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setCustomerStatus("Customer export downloaded.");
+    } catch (err: any) {
+      setCustomerStatus(err?.message ?? "Could not export customers.");
+    }
+  }
+
   return (
     <div className="card">
       <div className="hero-eyebrow" style={{ marginBottom: "0.3rem" }}>
@@ -151,6 +196,7 @@ export default function AdminDashboardPage() {
       {loading && <p className="muted" style={{ marginTop: "0.75rem" }}>Loading workspace data...</p>}
       {error && <div className="signin-error" style={{ marginTop: "0.5rem" }}>{error}</div>}
       {staffStatus && <div className="signin-success" style={{ marginTop: "0.5rem" }}>{staffStatus}</div>}
+      {customerStatus && <div className="signin-success" style={{ marginTop: "0.5rem" }}>{customerStatus}</div>}
 
       {tab === "products" && (
         <div style={{ marginTop: "1rem", display: "grid", gridTemplateColumns: "1fr", gap: "1rem" }}>
@@ -304,6 +350,31 @@ export default function AdminDashboardPage() {
                     <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
                       {user.role}
                     </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="card">
+            <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
+              Customer list (marketing)
+            </div>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {customers.filter((customer) => customer.marketingOptIn).length} opted in to marketing.
+            </p>
+            <button className="button ghost" type="button" onClick={handleExportCustomers}>
+              Export opt-in list
+            </button>
+            {!customers.length && <p className="muted" style={{ marginTop: "0.5rem" }}>No customers yet.</p>}
+            {customers.length > 0 && (
+              <ul style={{ listStyle: "none", padding: 0, margin: "0.75rem 0 0", display: "grid", gap: "0.5rem" }}>
+                {customers.slice(0, 8).map((customer) => (
+                  <li key={customer.id} className="card" style={{ padding: "0.75rem" }}>
+                    <strong>{customer.name || "Customer"}</strong>
+                    <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
+                      {customer.email ?? "No email"} • {customer.orderCount} order{customer.orderCount === 1 ? "" : "s"}
+                    </p>
+                    {customer.marketingOptIn && <span className="badge" style={{ marginTop: "0.35rem" }}>Opted in</span>}
                   </li>
                 ))}
               </ul>

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { sendAppMail } from "../lib/mailer.js";
 import { prisma } from "../lib/prisma.js";
 import { buildTagMap } from "../lib/taxonomy.js";
+import { requireAuth, requireRoles } from "../lib/authz.js";
 
 const ORDER_EMAIL = process.env.ORDER_EMAIL ?? process.env.MAIL_FROM;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
@@ -40,7 +41,7 @@ const orderSchema = z.object({
 
 export const router = Router();
 
-router.get("/", async (_req, res) => {
+router.get("/", requireRoles(["ADMIN", "ACCOUNTS", "SALES"]), async (_req, res) => {
   try {
     const orders = await prisma.salesOrder.findMany({
       orderBy: { createdAt: "desc" },
@@ -49,6 +50,24 @@ router.get("/", async (_req, res) => {
     res.json({ data: orders });
   } catch (err: any) {
     console.error("[orders] list failed", err?.message ?? err);
+    res.status(500).json({ error: "Unable to load orders" });
+  }
+});
+
+router.get("/mine", requireAuth, async (req: any, res) => {
+  const email = req.user?.email;
+  if (!email) {
+    return res.status(400).json({ error: "Missing customer email" });
+  }
+  try {
+    const orders = await prisma.salesOrder.findMany({
+      where: { customer: { email } },
+      orderBy: { createdAt: "desc" },
+      include: { items: true, customer: true }
+    });
+    res.json({ data: orders });
+  } catch (err: any) {
+    console.error("[orders] mine failed", err?.message ?? err);
     res.status(500).json({ error: "Unable to load orders" });
   }
 });

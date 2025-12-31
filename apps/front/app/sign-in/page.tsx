@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 
 type Phase = "identifier" | "password" | "clock";
 
@@ -39,6 +40,10 @@ export default function SignInPage() {
   const [clockedIn, setClockedIn] = useState(false);
   const [forgotStatus, setForgotStatus] = useState<string | null>(null);
   const [remembered, setRemembered] = useState<{ email: string; role: string | null; token: string | null } | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
+  const [selfieData, setSelfieData] = useState<string | null>(null);
+  const [oauthRedirect, setOauthRedirect] = useState<string>("https://mwalimucosmetics.com/sign-in");
 
   const heading = useMemo(() => {
     if (phase === "identifier") return "Sign in or create account";
@@ -77,6 +82,7 @@ export default function SignInPage() {
       if (savedToken && savedEmail) {
         setRemembered({ email: savedEmail, role: savedRole, token: savedToken });
         setEmail(savedEmail);
+        setAuthToken(savedToken);
         setExists(true);
         setRole(savedRole);
         setPhase("password");
@@ -84,6 +90,41 @@ export default function SignInPage() {
       }
     } catch {
       // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setOauthRedirect(`${window.location.origin}/sign-in`);
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    const roleParam = params.get("role");
+    const emailParam = params.get("email");
+    const oauthError = params.get("error");
+    if (oauthError) {
+      setError("Social sign-in failed. Please try again.");
+    }
+    if (token && emailParam) {
+      try {
+        localStorage.setItem("mwalimu_token", token);
+        localStorage.setItem("mwalimu_email", emailParam);
+        if (roleParam) localStorage.setItem("mwalimu_role", roleParam);
+      } catch {
+        // ignore
+      }
+      setAuthToken(token);
+      setEmail(emailParam);
+      setRole(roleParam);
+      setExists(true);
+      setMessage("Signed in with social account.");
+      window.history.replaceState({}, document.title, "/sign-in");
+      if (isStaffRole(roleParam)) {
+        setPhase("clock");
+      } else {
+        setTimeout(() => {
+          window.location.href = "/orders";
+        }, 400);
+      }
     }
   }, []);
 
@@ -146,7 +187,7 @@ export default function SignInPage() {
       const res = await fetch(`${apiBase}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail, password })
+        body: JSON.stringify({ email: trimmedEmail, password, marketingOptIn })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -162,6 +203,7 @@ export default function SignInPage() {
           localStorage.setItem("mwalimu_token", data.token as string);
           localStorage.setItem("mwalimu_email", trimmedEmail);
           if (nextRole) localStorage.setItem("mwalimu_role", nextRole);
+          setAuthToken(data.token as string);
         } catch {
           // best-effort only
         }
@@ -175,6 +217,10 @@ export default function SignInPage() {
         // Redirect admins to workspace after a short delay
         setTimeout(() => {
           window.location.href = "/dashboard/admin";
+        }, 400);
+      } else {
+        setTimeout(() => {
+          window.location.href = "/orders";
         }, 400);
       }
       try {
@@ -192,21 +238,139 @@ export default function SignInPage() {
 
   function handleBiometricCapture(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
+    event.preventDefault();
+    handleClockWithSelfie();
+  }
+
+  async function handleClockWithSelfie() {
+    if (!authToken) {
+      setError("Sign in again to clock in.");
+      return;
+    }
+    if (!selfieData) {
+      setError("Capture a selfie first.");
+      return;
+    }
     setError(null);
     setMessage(null);
-    setClockStatus("Capturing selfie / fingerprint...");
-    // Placeholder for biometric SDK integration; simulate success.
-    setTimeout(() => {
-      if (!clockedIn) {
-        setClockedIn(true);
-        setClockStatus("Biometric match confirmed. Clocked in.");
-        setMessage("Clock-in event recorded.");
-      } else {
-        setClockedIn(false);
-        setClockStatus("Biometric match confirmed. Clocked out.");
-        setMessage("Clock-out event recorded.");
+    setClockStatus("Uploading selfie...");
+    try {
+      const res = await fetch(`${apiBase}/clockings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ selfieData, deviceRef: "selfie" })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data?.error as string) ?? "Clocking failed");
       }
-    }, 600);
+      const nextClockedIn = data?.status === "CLOCKED_IN";
+      setClockedIn(nextClockedIn);
+      setClockStatus(nextClockedIn ? "Clocked in with selfie." : "Clocked out with selfie.");
+      setMessage("Clocking event recorded.");
+    } catch (err: any) {
+      setError(err?.message ?? "Clocking failed. Try again.");
+    }
+  }
+
+  async function handleBiometricRegister() {
+    if (!authToken) {
+      setError("Sign in again to register.");
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    setClockStatus("Preparing biometric registration...");
+    try {
+      const optionsRes = await fetch(`${apiBase}/webauthn/register/options`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      const optionsData = await optionsRes.json().catch(() => ({}));
+      if (!optionsRes.ok) {
+        throw new Error((optionsData?.error as string) ?? "Unable to start registration");
+      }
+      const attResp = await startRegistration(optionsData.options);
+      const verifyRes = await fetch(`${apiBase}/webauthn/register/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ response: attResp })
+      });
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok || !verifyData?.verified) {
+        throw new Error((verifyData?.error as string) ?? "Registration failed");
+      }
+      setClockStatus("Biometric registered. You can now clock in with biometrics.");
+    } catch (err: any) {
+      setError(err?.message ?? "Biometric registration failed.");
+    }
+  }
+
+  async function handleBiometricAuth() {
+    if (!authToken) {
+      setError("Sign in again to verify.");
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    setClockStatus("Preparing biometric verification...");
+    try {
+      const optionsRes = await fetch(`${apiBase}/webauthn/authenticate/options`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      const optionsData = await optionsRes.json().catch(() => ({}));
+      if (!optionsRes.ok) {
+        throw new Error((optionsData?.error as string) ?? "No biometrics registered yet.");
+      }
+      const authResp = await startAuthentication(optionsData.options);
+      const verifyRes = await fetch(`${apiBase}/webauthn/authenticate/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ response: authResp })
+      });
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok || !verifyData?.verified) {
+        throw new Error((verifyData?.error as string) ?? "Biometric verification failed");
+      }
+      const clockRes = await fetch(`${apiBase}/clockings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`
+        },
+        body: JSON.stringify({ deviceRef: "webauthn" })
+      });
+      const clockData = await clockRes.json().catch(() => ({}));
+      if (!clockRes.ok) {
+        throw new Error((clockData?.error as string) ?? "Clocking failed");
+      }
+      const nextClockedIn = clockData?.status === "CLOCKED_IN";
+      setClockedIn(nextClockedIn);
+      setClockStatus(nextClockedIn ? "Clocked in with biometrics." : "Clocked out with biometrics.");
+      setMessage("Clocking event recorded.");
+    } catch (err: any) {
+      setError(err?.message ?? "Biometric verification failed.");
+    }
+  }
+
+  function handleSelfieChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelfieData(typeof reader.result === "string" ? reader.result : null);
+    };
+    reader.readAsDataURL(file);
   }
 
   async function handleForgot(event: React.MouseEvent<HTMLButtonElement>) {
@@ -291,6 +455,17 @@ export default function SignInPage() {
             </label>
           )}
 
+          {!exists && phase !== "identifier" && (
+            <label className="filter-item">
+              <input
+                type="checkbox"
+                checked={marketingOptIn}
+                onChange={(event) => setMarketingOptIn(event.target.checked)}
+              />
+              <span>Send me marketing updates by email</span>
+            </label>
+          )}
+
           <button className="button full" type="submit" disabled={loading}>
             {loading ? "Working..." : phase === "identifier" ? "Continue" : exists ? "Sign in" : "Create account"}
           </button>
@@ -303,6 +478,14 @@ export default function SignInPage() {
         {phase === "identifier" && (
           <div className="signin-foot">
             <p className="muted small">By continuing, you agree to the workspace terms for staff and store terms for shoppers.</p>
+            <div style={{ display: "grid", gap: "0.5rem", marginTop: "0.65rem" }}>
+              <a className="button ghost" href={`${apiBase}/auth/oauth/google/start?redirect=${encodeURIComponent(oauthRedirect)}`}>
+                Continue with Google
+              </a>
+              <a className="button ghost" href={`${apiBase}/auth/oauth/facebook/start?redirect=${encodeURIComponent(oauthRedirect)}`}>
+                Continue with Facebook
+              </a>
+            </div>
             {remembered && (
               <p className="muted small" style={{ marginTop: "0.35rem" }}>
                 Already signed in as {remembered.email}.{" "}
@@ -367,9 +550,21 @@ export default function SignInPage() {
               Use another account
             </button>
           </div>
-          <button className="button full" type="button" onClick={handleBiometricCapture} disabled={loading}>
-            {clockedIn ? "Clock out with selfie / fingerprint" : "Clock in with selfie / fingerprint"}
-          </button>
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <button className="button full" type="button" onClick={handleBiometricAuth} disabled={loading}>
+              {clockedIn ? "Clock out with biometrics" : "Clock in with biometrics"}
+            </button>
+            <button className="button ghost full" type="button" onClick={handleBiometricRegister} disabled={loading}>
+              Register this device
+            </button>
+            <label className="input-group">
+              <span>Selfie fallback</span>
+              <input type="file" accept="image/*" capture="user" onChange={handleSelfieChange} />
+            </label>
+            <button className="button ghost full" type="button" onClick={handleBiometricCapture} disabled={loading}>
+              {clockedIn ? "Clock out with selfie" : "Clock in with selfie"}
+            </button>
+          </div>
           {clockStatus && (
             <p className="muted" style={{ marginTop: "0.5rem" }}>
               {clockStatus}

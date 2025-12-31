@@ -19,6 +19,18 @@ model User {
   salesOrders   SalesOrder[] @relation("SalesUser")
   clockings     Clocking[]
   mailMessages  MailMessage[]
+  webauthnCredentials WebAuthnCredential[]
+}
+
+model WebAuthnCredential {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id])
+  userId       String
+  credentialId String   @unique
+  publicKey    String
+  counter      Int      @default(0)
+  transports   String?
+  createdAt    DateTime @default(now())
 }
 
 model Product {
@@ -250,6 +262,7 @@ model Clocking {
   timeIn    DateTime
   timeOut   DateTime?
   deviceRef String?
+  selfieUrl String?
 }
 
 model MailMessage {
