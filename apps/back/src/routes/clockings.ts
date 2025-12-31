@@ -53,29 +53,27 @@ router.post("/", requireAuth, async (req: any, res) => {
       orderBy: { timeIn: "desc" }
     });
 
-    const selfieUrl = parsed.data.selfieData ? await saveSelfie(parsed.data.selfieData, req) : null;
-    const deviceRef = parsed.data.deviceRef ?? null;
+  const selfieUrl = parsed.data.selfieData ? await saveSelfie(parsed.data.selfieData, req) : null;
+  const deviceRef = parsed.data.deviceRef ?? null;
 
     if (open) {
-      const updated = await prisma.clocking.update({
-        where: { id: open.id },
-        data: {
-          timeOut: new Date(),
-          deviceRef: deviceRef ?? open.deviceRef,
-          selfieUrl: selfieUrl ?? open.selfieUrl
-        }
-      });
-      return res.json({ data: updated, status: "CLOCKED_OUT" });
-    }
-
-    const created = await prisma.clocking.create({
+    const updated = await prisma.clocking.update({
+      where: { id: open.id },
       data: {
-        userId: req.user.sub,
-        timeIn: new Date(),
-        deviceRef: deviceRef ?? "selfie",
-        selfieUrl
+        timeOut: new Date(),
+        deviceRef: deviceRef ?? open.deviceRef
       }
     });
+    return res.json({ data: updated, status: "CLOCKED_OUT" });
+  }
+
+  const created = await prisma.clocking.create({
+    data: {
+      userId: req.user.sub,
+      timeIn: new Date(),
+      deviceRef: deviceRef ?? "selfie"
+    }
+  });
     return res.status(201).json({ data: created, status: "CLOCKED_IN" });
   } catch (err: any) {
     console.error("[clockings] save failed", err?.message ?? err);

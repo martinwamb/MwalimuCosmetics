@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
 
 type Phase = "identifier" | "password" | "clock";
 
@@ -56,9 +55,9 @@ export default function SignInPage() {
       return "Enter your email to continue. New customers will create an account; staff are matched to their admin-created profile.";
     }
     if (phase === "clock") {
-      return "Take a selfie or fingerprint scan to confirm it is you. This counts as your clock-in/out event.";
+      return "Take a selfie to confirm it is you. This counts as your clock-in/out event.";
     }
-    if (exists) return "Staff sign-ins unlock the workspace and biometric clock-in.";
+    if (exists) return "Staff sign-ins unlock the workspace and clock-in with a selfie.";
     return "Create your customer account to track orders and delivery status.";
   }, [phase, exists]);
 
@@ -238,7 +237,6 @@ export default function SignInPage() {
 
   function handleBiometricCapture(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
-    event.preventDefault();
     handleClockWithSelfie();
   }
 
@@ -276,92 +274,6 @@ export default function SignInPage() {
     }
   }
 
-  async function handleBiometricRegister() {
-    if (!authToken) {
-      setError("Sign in again to register.");
-      return;
-    }
-    setError(null);
-    setMessage(null);
-    setClockStatus("Preparing biometric registration...");
-    try {
-      const optionsRes = await fetch(`${apiBase}/webauthn/register/options`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${authToken}` }
-      });
-      const optionsData = await optionsRes.json().catch(() => ({}));
-      if (!optionsRes.ok) {
-        throw new Error((optionsData?.error as string) ?? "Unable to start registration");
-      }
-      const attResp = await startRegistration(optionsData.options);
-      const verifyRes = await fetch(`${apiBase}/webauthn/register/verify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ response: attResp })
-      });
-      const verifyData = await verifyRes.json().catch(() => ({}));
-      if (!verifyRes.ok || !verifyData?.verified) {
-        throw new Error((verifyData?.error as string) ?? "Registration failed");
-      }
-      setClockStatus("Biometric registered. You can now clock in with biometrics.");
-    } catch (err: any) {
-      setError(err?.message ?? "Biometric registration failed.");
-    }
-  }
-
-  async function handleBiometricAuth() {
-    if (!authToken) {
-      setError("Sign in again to verify.");
-      return;
-    }
-    setError(null);
-    setMessage(null);
-    setClockStatus("Preparing biometric verification...");
-    try {
-      const optionsRes = await fetch(`${apiBase}/webauthn/authenticate/options`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${authToken}` }
-      });
-      const optionsData = await optionsRes.json().catch(() => ({}));
-      if (!optionsRes.ok) {
-        throw new Error((optionsData?.error as string) ?? "No biometrics registered yet.");
-      }
-      const authResp = await startAuthentication(optionsData.options);
-      const verifyRes = await fetch(`${apiBase}/webauthn/authenticate/verify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ response: authResp })
-      });
-      const verifyData = await verifyRes.json().catch(() => ({}));
-      if (!verifyRes.ok || !verifyData?.verified) {
-        throw new Error((verifyData?.error as string) ?? "Biometric verification failed");
-      }
-      const clockRes = await fetch(`${apiBase}/clockings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ deviceRef: "webauthn" })
-      });
-      const clockData = await clockRes.json().catch(() => ({}));
-      if (!clockRes.ok) {
-        throw new Error((clockData?.error as string) ?? "Clocking failed");
-      }
-      const nextClockedIn = clockData?.status === "CLOCKED_IN";
-      setClockedIn(nextClockedIn);
-      setClockStatus(nextClockedIn ? "Clocked in with biometrics." : "Clocked out with biometrics.");
-      setMessage("Clocking event recorded.");
-    } catch (err: any) {
-      setError(err?.message ?? "Biometric verification failed.");
-    }
-  }
 
   function handleSelfieChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -508,7 +420,7 @@ export default function SignInPage() {
         </div>
         <p className="muted" style={{ margin: 0 }}>
           Customers land on orders and delivery history. Staff land on their workspace and will be prompted to clock in with a selfie
-          or fingerprint before work begins.
+          before work begins.
         </p>
         <div className="sidecard-grid">
           <div>
@@ -535,11 +447,11 @@ export default function SignInPage() {
       {phase === "clock" && staffBadge && (
         <div className="signin-card">
           <div className="hero-eyebrow" style={{ marginBottom: "0.25rem" }}>
-            Staff clock-in (biometric)
+            Staff clock-in (selfie)
           </div>
-          <h2 style={{ margin: "0 0 0.3rem" }}>Finish with biometric check</h2>
+          <h2 style={{ margin: "0 0 0.3rem" }}>Finish with selfie check</h2>
           <p className="muted" style={{ marginTop: 0 }}>
-            You are signed in as {friendlyRole(role)}. Capture a selfie or fingerprint to clock in before opening the workspace.
+            You are signed in as {friendlyRole(role)}. Capture a selfie to clock in before opening the workspace.
           </p>
           <div className="signin-identity" style={{ margin: "0.5rem 0" }}>
             <div>
@@ -551,12 +463,6 @@ export default function SignInPage() {
             </button>
           </div>
           <div style={{ display: "grid", gap: "0.5rem" }}>
-            <button className="button full" type="button" onClick={handleBiometricAuth} disabled={loading}>
-              {clockedIn ? "Clock out with biometrics" : "Clock in with biometrics"}
-            </button>
-            <button className="button ghost full" type="button" onClick={handleBiometricRegister} disabled={loading}>
-              Register this device
-            </button>
             <label className="input-group">
               <span>Selfie fallback</span>
               <input type="file" accept="image/*" capture="user" onChange={handleSelfieChange} />

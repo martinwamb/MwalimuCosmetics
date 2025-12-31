@@ -33,7 +33,7 @@ const cards = [
   },
   {
     title: "Staff Clocking",
-    body: "Biometric or WebAuthn clock-ins for attendance and payroll exports.",
+    body: "Selfie clock-ins for attendance and payroll exports.",
     action: "Open timesheets"
   },
   {
