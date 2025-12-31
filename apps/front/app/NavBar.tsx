@@ -98,7 +98,7 @@ export function NavBar() {
           <span className="menu-icon" aria-hidden="true" />
         </button>
         <a href="/" className="brand">
-          <img src="/logo.png" alt="Mwalimu Cosmetics" className="brand-logo" />
+          <img src="/logo.png?v=2" alt="Mwalimu Cosmetics" className="brand-logo" loading="eager" />
         </a>
         <form className="search" onSubmit={handleSearch} role="search">
           <select aria-label="Category">
