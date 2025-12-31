@@ -65,6 +65,7 @@ export function NavBar() {
 
   const isLoggedIn = Boolean(token);
   const isAdmin = role === "ADMIN";
+  const hasSearch = Boolean((searchParams?.get("q") ?? "").trim());
 
   function handleSignOut() {
     try {
@@ -103,7 +104,7 @@ export function NavBar() {
           <select aria-label="Category">
             <option value="all">All beauty</option>
             <option value="skin">Skin care</option>
-            <option value="hair">Hair</option>
+            <option value="hair">Hair care</option>
             <option value="makeup">Makeup</option>
           </select>
           <input
@@ -162,16 +163,18 @@ export function NavBar() {
           )}
         </nav>
       </div>
-      <div className="nav-sub">
-        <div className="nav-sub-inner">
-          <a href="/?q=skin">Skin care</a>
-          <a href="/?q=makeup">Makeup</a>
-          <a href="/?q=hair">Hair</a>
-          <a href="/?q=bath">Bath & Body</a>
-          <a href="/?q=fragrance">Fragrance</a>
-          <a href="/?q=gifts">Gifts & Kits</a>
+      {!hasSearch && (
+        <div className="nav-sub">
+          <div className="nav-sub-inner">
+            <a href="/?q=skin">Skin care</a>
+            <a href="/?q=makeup">Makeup</a>
+            <a href="/?q=hair">Hair care</a>
+            <a href="/?q=bath">Bath & Body</a>
+            <a href="/?q=fragrance">Fragrance</a>
+            <a href="/?q=gifts">Gifts & Kits</a>
+          </div>
         </div>
-      </div>
+      )}
       <div className={`drawer-backdrop ${menuOpen ? "open" : ""}`} onClick={closeMenu} />
       <aside className={`mobile-drawer ${menuOpen ? "open" : ""}`} id="mobile-drawer" aria-hidden={!menuOpen}>
         <div className="drawer-head">
@@ -222,7 +225,7 @@ export function NavBar() {
             Makeup
           </a>
           <a href="/?q=hair" onClick={closeMenu}>
-            Hair
+            Hair care
           </a>
           <a href="/?q=bath" onClick={closeMenu}>
             Bath & Body
