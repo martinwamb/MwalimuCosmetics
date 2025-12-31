@@ -9,6 +9,7 @@ export function NavBar() {
   const [searchTerm, setSearchTerm] = useState("");
   const [cartCount, setCartCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logoOk, setLogoOk] = useState(true);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -98,7 +99,17 @@ export function NavBar() {
           <span className="menu-icon" aria-hidden="true" />
         </button>
         <a href="/" className="brand">
-          <img src="/logo.png?v=2" alt="Mwalimu Cosmetics" className="brand-logo" loading="eager" />
+          {logoOk ? (
+            <img
+              src="/logo.png?v=3"
+              alt="Mwalimu Cosmetics"
+              className="brand-logo"
+              loading="eager"
+              onError={() => setLogoOk(false)}
+            />
+          ) : (
+            <span className="brand-text">Mwalimu Cosmetics</span>
+          )}
         </a>
         <form className="search" onSubmit={handleSearch} role="search">
           <select aria-label="Category">

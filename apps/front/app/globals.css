@@ -12,6 +12,7 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
   --radius: 12px;
   --header-offset: 116px;
+  --page-shell-pad: 2rem;
 }
 
 * {
@@ -199,6 +200,11 @@ a {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.brand-text {
+  font-weight: 700;
+  color: #f6f7f8;
 }
 
 .brand-logo {
@@ -467,7 +473,7 @@ a {
 .page-shell {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
+  padding: var(--page-shell-pad) 1.5rem;
 }
 
 .hero {
@@ -1667,7 +1673,7 @@ a {
   .filter-chip-bar {
     display: flex;
     gap: 1.1rem;
-    padding: 0.55rem 1rem;
+    padding: 0.55rem 1.5rem;
     position: sticky;
     top: var(--header-offset);
     z-index: 110;
@@ -1677,6 +1683,7 @@ a {
     width: 100vw;
     transform: translateX(-50%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: calc(-1 * var(--page-shell-pad));
   }
 
   .filter-chip-bar .filter-chip {

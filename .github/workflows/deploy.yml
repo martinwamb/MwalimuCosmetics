@@ -69,6 +69,8 @@ jobs:
           # Ensure standalone build serves static assets
           mkdir -p apps/front/.next/standalone/apps/front/.next/static
           rsync -a apps/front/.next/static/ apps/front/.next/standalone/apps/front/.next/static/ || true
+          mkdir -p apps/front/.next/standalone/apps/front/public
+          rsync -a apps/front/public/ apps/front/.next/standalone/apps/front/public/ || true
 
           pushd apps/front >/dev/null
           PORT=${FRONT_PORT:-3000} pm2 restart mwalimu-front || PORT=${FRONT_PORT:-3000} pm2 start npm --name "mwalimu-front" -- run start
