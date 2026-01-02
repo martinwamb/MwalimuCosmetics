@@ -119,7 +119,18 @@ export function NavBar() {
 
   const isLoggedIn = Boolean(token);
   const isAdmin = role === "ADMIN";
-  const hasSearch = Boolean((searchParams?.get("q") ?? "").trim());
+  const hasSearch = Boolean(
+    (searchParams?.get("q") ?? "").trim() ||
+      searchParams?.get("category") ||
+      searchParams?.get("productType") ||
+      searchParams?.get("careArea") ||
+      searchParams?.get("suitableFor") ||
+      searchParams?.get("ingredient") ||
+      searchParams?.get("priceMin") ||
+      searchParams?.get("priceMax") ||
+      searchParams?.get("inStock") ||
+      searchParams?.get("featured")
+  );
 
   function handleSignOut() {
     try {

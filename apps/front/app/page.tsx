@@ -235,6 +235,30 @@ function HomePage() {
   const featured = productsToShow.filter((p) => p.featured);
   const featuredRow = featured.length ? featured.slice(0, 3) : productsToShow.slice(0, 3);
   const searchQuery = useMemo(() => (searchParams?.get("q") ?? "").trim(), [searchParams]);
+  useEffect(() => {
+    if (!searchParams) return;
+    const parseList = (value: string | null) =>
+      value ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : [];
+
+    const categories = parseList(searchParams.get("category"));
+    const productTypes = parseList(searchParams.get("productType"));
+    const careAreas = parseList(searchParams.get("careArea"));
+    const suitableFor = parseList(searchParams.get("suitableFor"));
+    const ingredients = parseList(searchParams.get("ingredient"));
+
+    setSelectedCategories(categories);
+    setSelectedProductTypes(productTypes);
+    setSelectedCareAreas(careAreas);
+    setSelectedSuitableFor(suitableFor);
+    setSelectedIngredients(ingredients);
+
+    const min = searchParams.get("priceMin");
+    const max = searchParams.get("priceMax");
+    setPriceMin(min ?? "");
+    setPriceMax(max ?? "");
+    setInStockOnly(searchParams.get("inStock") === "true");
+    setFeaturedOnly(searchParams.get("featured") === "true");
+  }, [searchParams]);
   const normalizedQuery = searchQuery.toLowerCase();
   useEffect(() => {
     if (!searchQuery) setMobileFiltersOpen(false);
@@ -445,9 +469,37 @@ function HomePage() {
       .trim();
   }
 
+  function buildFilterHref(linkTarget?: string | null) {
+    if (!linkTarget) return "#";
+    const trimmed = linkTarget.trim();
+    if (!trimmed) return "#";
+    if (trimmed.startsWith("/") || trimmed.startsWith("http")) return trimmed;
+    if (trimmed.startsWith("?")) return `/${trimmed}`;
+    return `/?${trimmed}`;
+  }
+
+  function resolveItemLink(item: SectionItem) {
+    if (item.linkType === "FILTER") {
+      return buildFilterHref(item.linkTarget);
+    }
+    return item.linkTarget || "#";
+  }
+
+  const hasSearchResults =
+    Boolean(searchQuery) ||
+    selectedCategories.length > 0 ||
+    selectedProductTypes.length > 0 ||
+    selectedCareAreas.length > 0 ||
+    selectedSuitableFor.length > 0 ||
+    selectedIngredients.length > 0 ||
+    Boolean(priceMin) ||
+    Boolean(priceMax) ||
+    inStockOnly ||
+    featuredOnly;
+
   return (
     <div className="home-shell">
-      {!searchQuery && (
+      {!hasSearchResults && (
         <section className="hero-wrapper">
           {homeLoading ? (
             <div className="hero-skeleton">Loading hero...</div>
@@ -523,7 +575,7 @@ function HomePage() {
         {error && <p className="signin-error">{error}</p>}
         {notice && <p className="signin-success">{notice}</p>}
 
-        {!searchQuery &&
+        {!hasSearchResults &&
           sortedSections.map((section) => {
             const isExpanded = Boolean(expandedSections[section.id]);
             if (section.type === "CATEGORY") {
@@ -546,7 +598,7 @@ function HomePage() {
                   {items.map((item) => {
                     const img = normalizeImageUrl(item.imageUrl);
                     return (
-                      <a key={item.id} className="tile-card" href={item.linkTarget || "#"}>
+                      <a key={item.id} className="tile-card" href={resolveItemLink(item)}>
                         {item.badge && <span className="mini-pill">{item.badge}</span>}
                         <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
                         <div className="tile-body">
@@ -581,7 +633,7 @@ function HomePage() {
                   {items.map((item) => {
                     const img = normalizeImageUrl(item.imageUrl);
                     return (
-                      <a key={item.id} className="tile-card need" href={item.linkTarget || "#"}>
+                      <a key={item.id} className="tile-card need" href={resolveItemLink(item)}>
                         <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
                         <div className="tile-body">
                           <strong>{item.label}</strong>
@@ -606,7 +658,7 @@ function HomePage() {
                     {section.subtitle && <p className="muted">{section.subtitle}</p>}
                   </div>
                 </div>
-                <a className="featured-card" href={item.linkTarget || "#"} style={img ? { backgroundImage: `url(${img})` } : undefined}>
+                <a className="featured-card" href={resolveItemLink(item)} style={img ? { backgroundImage: `url(${img})` } : undefined}>
                   <div className="featured-overlay">
                     {item.badge && <span className="mini-pill">{item.badge}</span>}
                     <h2>{item.label}</h2>
@@ -720,7 +772,7 @@ function HomePage() {
                 </div>
                 <div className="tile-grid">
                   {items.map((item) => (
-                    <a key={item.id} className="tile-card price" href={item.linkTarget || "#"}>
+                    <a key={item.id} className="tile-card price" href={resolveItemLink(item)}>
                       <div className="tile-body">
                         <strong>{item.label}</strong>
                         {item.badge && <span className="mini-pill">{item.badge}</span>}
@@ -736,7 +788,7 @@ function HomePage() {
           return null;
           })}
 
-        {searchQuery && (
+        {hasSearchResults && (
           <>
             <div className="filter-chip-bar" aria-label="Quick filters">
               <button
@@ -1171,7 +1223,7 @@ function HomePage() {
           </>
         )}
 
-        {!searchQuery && !homeLoading && !homeSections.length && (
+        {!hasSearchResults && !homeLoading && !homeSections.length && (
           <div className="card">
             <div className="hero-eyebrow" style={{ marginBottom: "0.25rem" }}>
               Homepage sections
@@ -1183,7 +1235,7 @@ function HomePage() {
         )}
       </div>
 
-      {!searchQuery && (
+      {!hasSearchResults && (
         <footer className="site-footer">
           <div className="footer-grid">
             <div>

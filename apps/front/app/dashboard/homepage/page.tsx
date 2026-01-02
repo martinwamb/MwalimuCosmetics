@@ -25,6 +25,13 @@ type SectionItem = {
   file?: File | null;
 };
 
+type SectionItemForm = SectionItem & {
+  filterProductTypes: string[];
+  filterCareAreas: string[];
+  filterSuitableFor: string[];
+  filterIngredients: string[];
+};
+
 type Section = {
   id: string;
   type: "CATEGORY" | "NEED" | "FEATURED_COLLECTION" | "BEST_SELLERS" | "PRICE";
@@ -33,6 +40,20 @@ type Section = {
   enabled: boolean;
   sortOrder: number;
   items: SectionItem[];
+};
+
+type TagOption = {
+  id: string;
+  value: string;
+  label: string;
+  isSystem: boolean;
+};
+
+type TagGroup = {
+  id: string;
+  code: string;
+  name: string;
+  tags?: TagOption[];
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -49,19 +70,46 @@ const emptyBanner = {
   file: null as File | null
 };
 
+const EMPTY_FILTERS = {
+  filterProductTypes: [],
+  filterCareAreas: [],
+  filterSuitableFor: [],
+  filterIngredients: []
+};
+
+function blankItem(sectionType: Section["type"], order: number): SectionItemForm {
+  return {
+    label: "",
+    imageUrl: "",
+    linkType: sectionType === "CATEGORY" ? "FILTER" : sectionType === "BEST_SELLERS" ? "PRODUCT" : "URL",
+    linkTarget: "",
+    badge: "",
+    sortOrder: order,
+    file: null,
+    preview: null,
+    ...EMPTY_FILTERS
+  };
+}
+
+function buildDefaultItems(sectionType: Section["type"]) {
+  if (sectionType !== "CATEGORY") return [] as SectionItemForm[];
+  return Array.from({ length: 4 }, (_, idx) => blankItem(sectionType, idx));
+}
+
 const emptySection = {
   type: "CATEGORY" as Section["type"],
   title: "",
   subtitle: "",
   enabled: true,
   sortOrder: 0,
-  items: [] as SectionItem[]
+  items: buildDefaultItems("CATEGORY")
 };
 
 export default function HomepageAdminPage() {
   const [token, setToken] = useState<string | null>(null);
   const [banners, setBanners] = useState<Banner[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
+  const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -94,16 +142,20 @@ export default function HomepageAdminPage() {
     if (!token) return;
     setError(null);
     try {
-      const [bannerRes, sectionRes] = await Promise.all([
+      const [bannerRes, sectionRes, tagRes] = await Promise.all([
         fetch(`${apiBase}/homepage/banners`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
-        fetch(`${apiBase}/homepage/sections`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" })
+        fetch(`${apiBase}/homepage/sections`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" }),
+        fetch(`${apiBase}/tags/groups?includeTags=true`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" })
       ]);
       const bannerJson = await bannerRes.json().catch(() => ({}));
       const sectionJson = await sectionRes.json().catch(() => ({}));
+      const tagJson = await tagRes.json().catch(() => ({}));
       if (!bannerRes.ok) throw new Error((bannerJson?.error as string) ?? "Could not load banners");
       if (!sectionRes.ok) throw new Error((sectionJson?.error as string) ?? "Could not load sections");
+      if (!tagRes.ok) throw new Error((tagJson?.error as string) ?? "Could not load tag options");
       setBanners((bannerJson?.data as Banner[]) ?? []);
       setSections((sectionJson?.data as Section[]) ?? []);
+      setTagGroups((tagJson?.data as TagGroup[]) ?? []);
     } catch (err: any) {
       setError(err?.message ?? "Unable to load homepage content.");
     }
@@ -146,6 +198,66 @@ export default function HomepageAdminPage() {
     }
     return trimmed;
   }
+
+  function ensureCategoryItems(items: SectionItemForm[]) {
+    const next = [...items];
+    while (next.length < 4) {
+      next.push(blankItem("CATEGORY", next.length));
+    }
+    return next.slice(0, 4);
+  }
+
+  function updateItem(index: number, updates: Partial<SectionItemForm>) {
+    setSectionForm((prev) => {
+      const copy = [...prev.items];
+      copy[index] = { ...copy[index], ...updates };
+      return { ...prev, items: copy };
+    });
+  }
+
+  function toggleItemFilter(index: number, field: keyof SectionItemForm, value: string) {
+    setSectionForm((prev) => {
+      const copy = [...prev.items];
+      const list = (copy[index][field] as string[]) ?? [];
+      copy[index] = {
+        ...copy[index],
+        [field]: list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
+      };
+      return { ...prev, items: copy };
+    });
+  }
+
+  function parseFilterTarget(target?: string | null) {
+    const raw = target?.trim();
+    if (!raw) return { ...EMPTY_FILTERS };
+    const query = raw.includes("?") ? raw.split("?")[1] : raw;
+    const params = new URLSearchParams(query);
+    const parseList = (value: string | null) =>
+      value ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : [];
+    return {
+      filterProductTypes: parseList(params.get("productType")),
+      filterCareAreas: parseList(params.get("careArea")),
+      filterSuitableFor: parseList(params.get("suitableFor")),
+      filterIngredients: parseList(params.get("ingredient"))
+    };
+  }
+
+  function buildFilterTarget(item: SectionItemForm) {
+    const params = new URLSearchParams();
+    if (item.filterProductTypes.length) params.set("productType", item.filterProductTypes.join(","));
+    if (item.filterCareAreas.length) params.set("careArea", item.filterCareAreas.join(","));
+    if (item.filterSuitableFor.length) params.set("suitableFor", item.filterSuitableFor.join(","));
+    if (item.filterIngredients.length) params.set("ingredient", item.filterIngredients.join(","));
+    return params.toString();
+  }
+
+  const tagOptions = useMemo(() => {
+    const map: Record<string, TagOption[]> = {};
+    tagGroups.forEach((group) => {
+      map[group.code] = group.tags ?? [];
+    });
+    return map;
+  }, [tagGroups]);
 
   async function handleSaveBanner(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -259,6 +371,10 @@ export default function HomepageAdminPage() {
       setError("Section needs a title.");
       return;
     }
+    if (sectionForm.type === "CATEGORY" && sectionForm.items.length !== 4) {
+      setError("Category sections must have exactly 4 subcategories.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -269,11 +385,17 @@ export default function HomepageAdminPage() {
         if (item.file && item.preview) {
           imageUrl = await uploadImage(item.file, item.preview);
         }
+        const linkType = sectionForm.type === "CATEGORY" ? "FILTER" : item.linkType ?? "URL";
+        const linkTarget =
+          linkType === "FILTER" ? buildFilterTarget(item) : item.linkTarget?.trim() || "";
+        if (linkType === "FILTER" && !linkTarget) {
+          throw new Error(`Add at least one filter for item ${i + 1}.`);
+        }
         itemsPayload.push({
           label: item.label.trim(),
           imageUrl: imageUrl || undefined,
-          linkType: item.linkType ?? "URL",
-          linkTarget: item.linkTarget?.trim() || undefined,
+          linkType,
+          linkTarget: linkTarget || undefined,
           badge: item.badge?.trim() || undefined,
           sortOrder: item.sortOrder ?? i
         });
@@ -374,21 +496,28 @@ export default function HomepageAdminPage() {
 
   function editSection(section: Section) {
     setEditingSectionId(section.id);
-    setSectionForm({
-      type: section.type,
-      title: section.title,
-      subtitle: section.subtitle ?? "",
-      enabled: section.enabled,
-      sortOrder: section.sortOrder,
-      items: section.items.map((item) => ({
+    const mappedItems = section.items.map((item) => {
+      const filters = item.linkType === "FILTER" ? parseFilterTarget(item.linkTarget) : { ...EMPTY_FILTERS };
+      return {
         id: item.id,
         label: item.label,
         imageUrl: item.imageUrl ?? "",
         linkType: item.linkType ?? "URL",
         linkTarget: item.linkTarget ?? "",
         badge: item.badge ?? "",
-        sortOrder: item.sortOrder ?? 0
-      }))
+        sortOrder: item.sortOrder ?? 0,
+        file: null,
+        preview: null,
+        ...filters
+      };
+    });
+    setSectionForm({
+      type: section.type,
+      title: section.title,
+      subtitle: section.subtitle ?? "",
+      enabled: section.enabled,
+      sortOrder: section.sortOrder,
+      items: section.type === "CATEGORY" ? ensureCategoryItems(mappedItems) : mappedItems
     });
     setItemPreviews({});
   }
@@ -403,6 +532,12 @@ export default function HomepageAdminPage() {
     setSectionForm({ ...emptySection, sortOrder: sections.length });
     setItemPreviews({});
   }
+
+  const isCategorySection = sectionForm.type === "CATEGORY";
+  const productTypeOptions = tagOptions["product_type"] ?? [];
+  const careAreaOptions = tagOptions["care_area"] ?? [];
+  const suitableOptions = tagOptions["suitable_for"] ?? [];
+  const ingredientOptions = tagOptions["ingredient"] ?? [];
 
   return (
     <div className="grid" style={{ gridTemplateColumns: "minmax(340px, 400px) 1fr", gap: "1.25rem" }}>
@@ -571,7 +706,23 @@ export default function HomepageAdminPage() {
               <span>Section type</span>
               <select
                 value={sectionForm.type}
-                onChange={(e) => setSectionForm((prev) => ({ ...prev, type: e.target.value as Section["type"] }))}
+                onChange={(e) => {
+                  const nextType = e.target.value as Section["type"];
+                  setSectionForm((prev) => {
+                    const nextItems =
+                      nextType === "CATEGORY"
+                        ? ensureCategoryItems(
+                            prev.items.map((item, idx) => ({
+                              ...EMPTY_FILTERS,
+                              ...item,
+                              linkType: "FILTER",
+                              sortOrder: item.sortOrder ?? idx
+                            }))
+                          )
+                        : prev.items;
+                    return { ...prev, type: nextType, items: nextItems };
+                  });
+                }}
               >
                 <option value="CATEGORY">Shop by Category</option>
                 <option value="NEED">Shop by Need</option>
@@ -611,29 +762,23 @@ export default function HomepageAdminPage() {
             <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
               Items (cards / tiles)
             </div>
+            {isCategorySection && (
+              <p className="muted small" style={{ marginTop: 0 }}>
+                Category sections always show 4 subcategories. Use tag filters to pick which products appear for each tile.
+              </p>
+            )}
             <button
               className="button ghost"
               type="button"
+              disabled={isCategorySection}
               onClick={() =>
                 setSectionForm((prev) => ({
                   ...prev,
-                  items: [
-                    ...prev.items,
-                    {
-                      label: "",
-                      imageUrl: "",
-                      linkType: prev.type === "BEST_SELLERS" ? "PRODUCT" : "URL",
-                      linkTarget: "",
-                      badge: "",
-                      sortOrder: prev.items.length,
-                      file: null,
-                      preview: null
-                    }
-                  ]
+                  items: [...prev.items, blankItem(prev.type, prev.items.length)]
                 }))
               }
             >
-              Add item
+              {isCategorySection ? "Category sections use 4 items" : "Add item"}
             </button>
             <div style={{ display: "grid", gap: "0.6rem", marginTop: "0.6rem" }}>
               {sectionForm.items.map((item, idx) => (
@@ -643,13 +788,7 @@ export default function HomepageAdminPage() {
                       <span>Label</span>
                       <input
                         value={item.label}
-                        onChange={(e) =>
-                          setSectionForm((prev) => {
-                            const copy = [...prev.items];
-                            copy[idx] = { ...copy[idx], label: e.target.value };
-                            return { ...prev, items: copy };
-                          })
-                        }
+                        onChange={(e) => updateItem(idx, { label: e.target.value })}
                         required
                       />
                     </label>
@@ -657,13 +796,7 @@ export default function HomepageAdminPage() {
                       <span>Badge (optional)</span>
                       <input
                         value={item.badge ?? ""}
-                        onChange={(e) =>
-                          setSectionForm((prev) => {
-                            const copy = [...prev.items];
-                            copy[idx] = { ...copy[idx], badge: e.target.value };
-                            return { ...prev, items: copy };
-                          })
-                        }
+                        onChange={(e) => updateItem(idx, { badge: e.target.value })}
                       />
                     </label>
                   </div>
@@ -672,13 +805,8 @@ export default function HomepageAdminPage() {
                       <span>Link type</span>
                       <select
                         value={item.linkType ?? "URL"}
-                        onChange={(e) =>
-                          setSectionForm((prev) => {
-                            const copy = [...prev.items];
-                            copy[idx] = { ...copy[idx], linkType: e.target.value as SectionItem["linkType"] };
-                            return { ...prev, items: copy };
-                          })
-                        }
+                        onChange={(e) => updateItem(idx, { linkType: e.target.value as SectionItem["linkType"] })}
+                        disabled={isCategorySection}
                       >
                         <option value="URL">URL</option>
                         <option value="CATEGORY">Category</option>
@@ -689,15 +817,10 @@ export default function HomepageAdminPage() {
                     <label className="input-group">
                       <span>Link target</span>
                       <input
-                        value={item.linkTarget ?? ""}
-                        onChange={(e) =>
-                          setSectionForm((prev) => {
-                            const copy = [...prev.items];
-                            copy[idx] = { ...copy[idx], linkTarget: e.target.value };
-                            return { ...prev, items: copy };
-                          })
-                        }
-                        placeholder="/products?category=..."
+                        value={item.linkType === "FILTER" ? buildFilterTarget(item) : item.linkTarget ?? ""}
+                        onChange={(e) => updateItem(idx, { linkTarget: e.target.value })}
+                        placeholder={item.linkType === "FILTER" ? "Filters auto-generate the link" : "/products?category=..."}
+                        readOnly={item.linkType === "FILTER"}
                       />
                     </label>
                     <label className="input-group">
@@ -706,27 +829,91 @@ export default function HomepageAdminPage() {
                         type="number"
                         min={0}
                         value={item.sortOrder ?? idx}
-                        onChange={(e) =>
-                          setSectionForm((prev) => {
-                            const copy = [...prev.items];
-                            copy[idx] = { ...copy[idx], sortOrder: Number(e.target.value) };
-                            return { ...prev, items: copy };
-                          })
-                        }
+                        onChange={(e) => updateItem(idx, { sortOrder: Number(e.target.value) })}
                       />
                     </label>
                   </div>
+                  {(isCategorySection || item.linkType === "FILTER") && (
+                    <div className="card" style={{ padding: "0.6rem", background: "#fff" }}>
+                      <div className="hero-eyebrow" style={{ marginBottom: "0.25rem" }}>
+                        Filtered products
+                      </div>
+                      {!tagGroups.length && <p className="muted small">Tag options will appear here after loading.</p>}
+                      {Boolean(productTypeOptions.length) && (
+                        <div className="input-group">
+                          <span>Product type</span>
+                          <div className="filter-row">
+                            {productTypeOptions.map((option) => (
+                              <label key={option.id} className="filter-item">
+                                <input
+                                  type="checkbox"
+                                  checked={item.filterProductTypes.includes(option.value)}
+                                  onChange={() => toggleItemFilter(idx, "filterProductTypes", option.value)}
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {Boolean(careAreaOptions.length) && (
+                        <div className="input-group">
+                          <span>Care area</span>
+                          <div className="filter-row">
+                            {careAreaOptions.map((option) => (
+                              <label key={option.id} className="filter-item">
+                                <input
+                                  type="checkbox"
+                                  checked={item.filterCareAreas.includes(option.value)}
+                                  onChange={() => toggleItemFilter(idx, "filterCareAreas", option.value)}
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {Boolean(suitableOptions.length) && (
+                        <div className="input-group">
+                          <span>Suitable for</span>
+                          <div className="filter-row">
+                            {suitableOptions.map((option) => (
+                              <label key={option.id} className="filter-item">
+                                <input
+                                  type="checkbox"
+                                  checked={item.filterSuitableFor.includes(option.value)}
+                                  onChange={() => toggleItemFilter(idx, "filterSuitableFor", option.value)}
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {Boolean(ingredientOptions.length) && (
+                        <div className="input-group">
+                          <span>Ingredients</span>
+                          <div className="filter-row">
+                            {ingredientOptions.map((option) => (
+                              <label key={option.id} className="filter-item">
+                                <input
+                                  type="checkbox"
+                                  checked={item.filterIngredients.includes(option.value)}
+                                  onChange={() => toggleItemFilter(idx, "filterIngredients", option.value)}
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <label className="input-group">
                     <span>Image URL</span>
                     <input
                       value={item.imageUrl ?? ""}
-                      onChange={(e) =>
-                        setSectionForm((prev) => {
-                          const copy = [...prev.items];
-                          copy[idx] = { ...copy[idx], imageUrl: e.target.value };
-                          return { ...prev, items: copy };
-                        })
-                      }
+                      onChange={(e) => updateItem(idx, { imageUrl: e.target.value })}
                       placeholder="https://..."
                     />
                   </label>
@@ -737,11 +924,7 @@ export default function HomepageAdminPage() {
                       accept="image/*"
                       onChange={(e) => {
                         const file = e.target.files?.[0] ?? null;
-                        setSectionForm((prev) => {
-                          const copy = [...prev.items];
-                          copy[idx] = { ...copy[idx], file, preview: null };
-                          return { ...prev, items: copy };
-                        });
+                        updateItem(idx, { file, preview: null });
                         if (file) {
                           const reader = new FileReader();
                           reader.onload = (ev) => setItemPreviews((prev) => ({ ...prev, [idx]: ev.target?.result as string }));
@@ -772,6 +955,7 @@ export default function HomepageAdminPage() {
                     <button
                       className="button ghost"
                       type="button"
+                      disabled={isCategorySection}
                       onClick={() =>
                         setSectionForm((prev) => ({
                           ...prev,
@@ -779,7 +963,7 @@ export default function HomepageAdminPage() {
                         }))
                       }
                     >
-                      Remove
+                      {isCategorySection ? "Fixed slot" : "Remove"}
                     </button>
                   </div>
                 </div>
