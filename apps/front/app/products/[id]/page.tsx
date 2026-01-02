@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 
 type Variant = {
   id: string;
@@ -179,19 +180,24 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
                 type="button"
                 onClick={() => setActiveImage(src)}
                 aria-label="Change product image"
-                style={{ backgroundImage: `url(${src})` }}
-              />
+              >
+                <Image src={src} alt={`${product.name} thumbnail`} fill className="media-image" sizes="70px" />
+              </button>
             ))}
           </div>
-          <div
-            className="main-image"
-            style={
-              activeImage
-                ? { backgroundImage: `url(${activeImage})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
-                : undefined
-            }
-          >
-            {!activeImage && <span className="muted">Image coming soon</span>}
+          <div className="main-image">
+            {activeImage ? (
+              <Image
+                src={activeImage}
+                alt={product.name}
+                fill
+                priority
+                className="media-image"
+                sizes="(max-width: 1100px) 100vw, 40vw"
+              />
+            ) : (
+              <span className="muted">Image coming soon</span>
+            )}
           </div>
         </section>
 
@@ -303,15 +309,15 @@ export default function ProductDetailPage({ params }: { params: { id: string } }
               return (
                 <article key={v.id} className="product-card">
                   {vImg && (
-                    <div
-                      className="product-thumb"
-                      style={{
-                        backgroundImage: `url(${vImg})`,
-                        backgroundSize: "contain",
-                        backgroundRepeat: "no-repeat",
-                        backgroundPosition: "center"
-                      }}
-                    />
+                    <div className="product-thumb">
+                      <Image
+                        src={vImg}
+                        alt={v.name}
+                        fill
+                        className="media-image"
+                        sizes="(max-width: 1100px) 50vw, 25vw"
+                      />
+                    </div>
                   )}
                   <h3 style={{ margin: "0.25rem 0 0" }}>{v.name}</h3>
                   <p className="price">{v.price ? formatKES(v.price) : "Same price"}</p>

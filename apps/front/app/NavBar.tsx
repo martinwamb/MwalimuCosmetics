@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export function NavBar() {
@@ -164,11 +165,13 @@ export function NavBar() {
         </button>
         <a href="/" className="brand">
           {logoOk ? (
-            <img
+            <Image
               src="/logo.png?v=3"
               alt="Mwalimu Cosmetics"
               className="brand-logo"
-              loading="eager"
+              width={96}
+              height={32}
+              priority
               onError={() => setLogoOk(false)}
             />
           ) : (

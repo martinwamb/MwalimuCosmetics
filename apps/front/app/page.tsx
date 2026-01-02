@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 
 type Product = {
@@ -515,8 +516,17 @@ function HomePage() {
                   <article
                     key={`${banner.id}-${idx}`}
                     className={`hero-slide ${idx === activeSlide ? "active" : ""}`}
-                    style={bg ? { backgroundImage: `url(${bg})` } : undefined}
                   >
+                    {bg && (
+                      <Image
+                        src={bg}
+                        alt={banner.title}
+                        fill
+                        priority={idx === 0}
+                        className="hero-slide-bg"
+                        sizes="(max-width: 900px) 100vw, 1200px"
+                      />
+                    )}
                     <div className="hero-content">
                       <h1>{banner.title}</h1>
                       {banner.subtext && <p className="muted">{banner.subtext}</p>}
@@ -604,7 +614,17 @@ function HomePage() {
                     return (
                       <a key={item.id} className="tile-card" href={resolveItemLink(item)}>
                         {item.badge && <span className="mini-pill">{item.badge}</span>}
-                        <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
+                        <div className="tile-media">
+                          {img && (
+                            <Image
+                              src={img}
+                              alt={item.label}
+                              fill
+                              className="media-image"
+                              sizes="(max-width: 900px) 50vw, 25vw"
+                            />
+                          )}
+                        </div>
                         <div className="tile-body">
                           <strong>{item.label}</strong>
                           {shouldShowItemTarget(item) && <span className="muted small">{item.linkTarget}</span>}
@@ -638,7 +658,17 @@ function HomePage() {
                     const img = normalizeImageUrl(item.imageUrl);
                     return (
                       <a key={item.id} className="tile-card need" href={resolveItemLink(item)}>
-                        <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
+                        <div className="tile-media">
+                          {img && (
+                            <Image
+                              src={img}
+                              alt={item.label}
+                              fill
+                              className="media-image"
+                              sizes="(max-width: 900px) 50vw, 25vw"
+                            />
+                          )}
+                        </div>
                         <div className="tile-body">
                           <strong>{item.label}</strong>
                           {item.badge && <span className="muted small">{item.badge}</span>}
@@ -704,15 +734,18 @@ function HomePage() {
                         style={{ textDecoration: "none", color: "inherit" }}
                       >
                         {product.badge && <div className="badge">{product.badge}</div>}
-                        <div
-                          className="product-thumb"
-                          style={
-                            img
-                              ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
-                              : undefined
-                          }
-                        >
-                          {!img && (product.tagline ?? "New arrival")}
+                        <div className="product-thumb">
+                          {img ? (
+                            <Image
+                              src={img}
+                              alt={product.name}
+                              fill
+                              className="media-image"
+                              sizes="(max-width: 900px) 50vw, (max-width: 1200px) 33vw, 25vw"
+                            />
+                          ) : (
+                            (product.tagline ?? "New arrival")
+                          )}
                         </div>
                         <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
                         <p className="muted" style={{ margin: 0 }}>
@@ -1136,15 +1169,18 @@ function HomePage() {
                           href={`/products/${product.slug ?? product.id}`}
                           style={{ textDecoration: "none", color: "inherit" }}
                         >
-                          <div
-                            className="product-thumb"
-                            style={
-                              img
-                                ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
-                                : undefined
-                            }
-                          >
-                            {!img && (product.tagline ?? "New arrival")}
+                          <div className="product-thumb">
+                            {img ? (
+                              <Image
+                                src={img}
+                                alt={product.name}
+                                fill
+                                className="media-image"
+                                sizes="(max-width: 900px) 50vw, (max-width: 1200px) 33vw, 25vw"
+                              />
+                            ) : (
+                              (product.tagline ?? "New arrival")
+                            )}
                           </div>
                           <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
                           <p className="muted" style={{ margin: 0 }}>
@@ -1170,15 +1206,18 @@ function HomePage() {
                           href={`/products/${product.slug ?? product.id}`}
                           style={{ textDecoration: "none", color: "inherit" }}
                         >
-                          <div
-                            className="product-thumb"
-                            style={
-                              img
-                                ? { backgroundImage: `url(${img})`, backgroundSize: "contain", backgroundRepeat: "no-repeat", backgroundPosition: "center" }
-                                : undefined
-                            }
-                          >
-                            {!img && (product.tagline ?? "New arrival")}
+                          <div className="product-thumb">
+                            {img ? (
+                              <Image
+                                src={img}
+                                alt={product.name}
+                                fill
+                                className="media-image"
+                                sizes="(max-width: 900px) 50vw, (max-width: 1200px) 33vw, 25vw"
+                              />
+                            ) : (
+                              (product.tagline ?? "New arrival")
+                            )}
                           </div>
                           <h3 style={{ margin: "0.25rem 0 0" }}>{product.name}</h3>
                           <p className="muted" style={{ margin: 0 }}>
