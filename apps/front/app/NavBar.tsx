@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export function NavBar() {
@@ -10,6 +10,8 @@ export function NavBar() {
   const [cartCount, setCartCount] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoOk, setLogoOk] = useState(true);
+  const [headerHidden, setHeaderHidden] = useState(false);
+  const headerRef = useRef<HTMLElement | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -23,6 +25,57 @@ export function NavBar() {
       // ignore
     }
   }, []);
+
+  useEffect(() => {
+    const element = headerRef.current;
+    if (!element) return;
+
+    const updateOffset = () => {
+      const height = element.offsetHeight;
+      document.documentElement.style.setProperty("--header-offset", `${height}px`);
+    };
+
+    updateOffset();
+    window.addEventListener("resize", updateOffset);
+    return () => window.removeEventListener("resize", updateOffset);
+  }, [searchParams]);
+
+  useEffect(() => {
+    let ticking = false;
+    let lastScroll = window.scrollY;
+
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        const current = window.scrollY;
+        const delta = current - lastScroll;
+        if (current < 10) {
+          setHeaderHidden(false);
+        } else if (delta > 8) {
+          setHeaderHidden(true);
+        } else if (delta < -8) {
+          setHeaderHidden(false);
+        }
+        lastScroll = current;
+        ticking = false;
+      });
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (menuOpen) setHeaderHidden(false);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    document.body.classList.toggle("header-hidden", headerHidden);
+    return () => {
+      document.body.classList.remove("header-hidden");
+    };
+  }, [headerHidden]);
 
   useEffect(() => {
     const q = searchParams?.get("q") ?? "";
@@ -86,7 +139,7 @@ export function NavBar() {
   }
 
   return (
-    <header className="header">
+    <header className={`header ${headerHidden ? "is-hidden" : ""}`} ref={headerRef}>
       <div className="nav-primary">
         <button
           className="menu-toggle"

@@ -16,6 +16,10 @@ type Product = {
   tagline?: string;
   badge?: string;
   featured?: boolean;
+  productType?: string | null;
+  careAreas?: string[];
+  suitableFor?: string[];
+  ingredients?: string[];
 };
 
 type Banner = {
@@ -95,10 +99,15 @@ function HomePage() {
   const [slideDirection, setSlideDirection] = useState<"forward" | "back">("forward");
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedProductTypes, setSelectedProductTypes] = useState<string[]>([]);
+  const [selectedCareAreas, setSelectedCareAreas] = useState<string[]>([]);
+  const [selectedSuitableFor, setSelectedSuitableFor] = useState<string[]>([]);
+  const [selectedIngredients, setSelectedIngredients] = useState<string[]>([]);
   const [priceMin, setPriceMin] = useState<string>("");
   const [priceMax, setPriceMax] = useState<string>("");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [featuredOnly, setFeaturedOnly] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const searchParams = useSearchParams();
 
   useEffect(() => {
@@ -154,7 +163,11 @@ function HomePage() {
               stockQty: normalizedStock,
               tagline: item.category ?? "New arrival",
               badge: normalizedStock === 0 ? "Out of stock" : item.category ?? undefined,
-              featured: item.featured
+              featured: item.featured,
+              productType: item.productType ?? null,
+              careAreas: item.careAreas ?? [],
+              suitableFor: item.suitableFor ?? [],
+              ingredients: item.ingredients ?? []
             };
           })
         );
@@ -223,6 +236,9 @@ function HomePage() {
   const featuredRow = featured.length ? featured.slice(0, 3) : productsToShow.slice(0, 3);
   const searchQuery = useMemo(() => (searchParams?.get("q") ?? "").trim(), [searchParams]);
   const normalizedQuery = searchQuery.toLowerCase();
+  useEffect(() => {
+    if (!searchQuery) setMobileFiltersOpen(false);
+  }, [searchQuery]);
   const filteredProducts = useMemo(
     () =>
       normalizedQuery
@@ -241,10 +257,50 @@ function HomePage() {
     });
     return Array.from(set).sort();
   }, [productsToShow]);
+  const availableProductTypes = useMemo(() => {
+    const set = new Set<string>();
+    productsToShow.forEach((product) => {
+      if (product.productType) set.add(product.productType);
+    });
+    return Array.from(set).sort();
+  }, [productsToShow]);
+  const availableCareAreas = useMemo(() => {
+    const set = new Set<string>();
+    productsToShow.forEach((product) => {
+      (product.careAreas ?? []).forEach((area) => set.add(area));
+    });
+    return Array.from(set).sort();
+  }, [productsToShow]);
+  const availableSuitableFor = useMemo(() => {
+    const set = new Set<string>();
+    productsToShow.forEach((product) => {
+      (product.suitableFor ?? []).forEach((value) => set.add(value));
+    });
+    return Array.from(set).sort();
+  }, [productsToShow]);
+  const availableIngredients = useMemo(() => {
+    const set = new Set<string>();
+    productsToShow.forEach((product) => {
+      (product.ingredients ?? []).forEach((value) => set.add(value));
+    });
+    return Array.from(set).sort();
+  }, [productsToShow]);
   const filteredResults = useMemo(() => {
     let next = filteredProducts;
     if (selectedCategories.length) {
       next = next.filter((product) => product.category && selectedCategories.includes(product.category));
+    }
+    if (selectedProductTypes.length) {
+      next = next.filter((product) => product.productType && selectedProductTypes.includes(product.productType));
+    }
+    if (selectedCareAreas.length) {
+      next = next.filter((product) => product.careAreas?.some((area) => selectedCareAreas.includes(area)));
+    }
+    if (selectedSuitableFor.length) {
+      next = next.filter((product) => product.suitableFor?.some((value) => selectedSuitableFor.includes(value)));
+    }
+    if (selectedIngredients.length) {
+      next = next.filter((product) => product.ingredients?.some((value) => selectedIngredients.includes(value)));
     }
     const min = priceMin ? Number(priceMin) : null;
     const max = priceMax ? Number(priceMax) : null;
@@ -261,7 +317,18 @@ function HomePage() {
       next = next.filter((product) => product.featured);
     }
     return next;
-  }, [filteredProducts, selectedCategories, priceMin, priceMax, inStockOnly, featuredOnly]);
+  }, [
+    filteredProducts,
+    selectedCategories,
+    selectedProductTypes,
+    selectedCareAreas,
+    selectedSuitableFor,
+    selectedIngredients,
+    priceMin,
+    priceMax,
+    inStockOnly,
+    featuredOnly
+  ]);
   const recommendations = useMemo(() => {
     const pool = featured.length ? featured : productsToShow;
     return pool.slice(0, 4);
@@ -335,8 +402,16 @@ function HomePage() {
     setSelectedCategories((prev) => (prev.includes(category) ? prev.filter((item) => item !== category) : [...prev, category]));
   }
 
+  function toggleSelected(list: string[], value: string, setter: (values: string[]) => void) {
+    setter(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
+  }
+
   function resetFilters() {
     setSelectedCategories([]);
+    setSelectedProductTypes([]);
+    setSelectedCareAreas([]);
+    setSelectedSuitableFor([]);
+    setSelectedIngredients([]);
     setPriceMin("");
     setPriceMax("");
     setInStockOnly(false);
@@ -361,6 +436,13 @@ function HomePage() {
       return trimmed.replace("http://", "https://");
     }
     return trimmed;
+  }
+
+  function humanizeTag(value: string) {
+    return value
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase())
+      .trim();
   }
 
   return (
@@ -657,6 +739,13 @@ function HomePage() {
         {searchQuery && (
           <>
             <div className="filter-chip-bar" aria-label="Quick filters">
+              <button
+                className="filter-chip"
+                type="button"
+                onClick={() => setMobileFiltersOpen(true)}
+              >
+                Filters
+              </button>
               {availableCategories.map((category) => (
                 <button
                   key={category}
@@ -712,6 +801,143 @@ function HomePage() {
                 Featured
               </button>
             </div>
+            <div className={`filter-overlay ${mobileFiltersOpen ? "open" : ""}`} onClick={() => setMobileFiltersOpen(false)} />
+            <aside
+              className={`filter-panel ${mobileFiltersOpen ? "open" : ""}`}
+              aria-hidden={!mobileFiltersOpen}
+              aria-label="Filters"
+              role="dialog"
+            >
+              <div className="filter-panel-head">
+                <strong>Filters</strong>
+                <button className="nav-link-button" type="button" onClick={() => setMobileFiltersOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <div className="filter-panel-body">
+                <div className="filter-block">
+                  <div className="filter-title">Categories</div>
+                  {availableCategories.length === 0 && <p className="muted small">No categories yet.</p>}
+                  {availableCategories.map((category) => (
+                    <label key={category} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedCategories.includes(category)}
+                        onChange={() => toggleCategory(category)}
+                      />
+                      <span>{category}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Product type</div>
+                  {availableProductTypes.length === 0 && <p className="muted small">No product types yet.</p>}
+                  {availableProductTypes.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedProductTypes.includes(value)}
+                        onChange={() => toggleSelected(selectedProductTypes, value, setSelectedProductTypes)}
+                      />
+                      <span>{humanizeTag(value)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Care area</div>
+                  {availableCareAreas.length === 0 && <p className="muted small">No care areas yet.</p>}
+                  {availableCareAreas.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedCareAreas.includes(value)}
+                        onChange={() => toggleSelected(selectedCareAreas, value, setSelectedCareAreas)}
+                      />
+                      <span>{humanizeTag(value)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Suitable for</div>
+                  {availableSuitableFor.length === 0 && <p className="muted small">No suitability tags yet.</p>}
+                  {availableSuitableFor.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedSuitableFor.includes(value)}
+                        onChange={() => toggleSelected(selectedSuitableFor, value, setSelectedSuitableFor)}
+                      />
+                      <span>{humanizeTag(value)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Ingredients</div>
+                  {availableIngredients.length === 0 && <p className="muted small">No ingredient tags yet.</p>}
+                  {availableIngredients.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedIngredients.includes(value)}
+                        onChange={() => toggleSelected(selectedIngredients, value, setSelectedIngredients)}
+                      />
+                      <span>{humanizeTag(value)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Price (KES)</div>
+                  <div className="filter-row">
+                    <input
+                      className="filter-input"
+                      type="number"
+                      min={0}
+                      placeholder="Min"
+                      value={priceMin}
+                      onChange={(e) => setPriceMin(e.target.value)}
+                    />
+                    <input
+                      className="filter-input"
+                      type="number"
+                      min={0}
+                      placeholder="Max"
+                      value={priceMax}
+                      onChange={(e) => setPriceMax(e.target.value)}
+                    />
+                  </div>
+                  <div className="filter-quick">
+                    <button type="button" onClick={() => { setPriceMin(""); setPriceMax("500"); }}>
+                      Under 500
+                    </button>
+                    <button type="button" onClick={() => { setPriceMin("500"); setPriceMax("1500"); }}>
+                      500 - 1,500
+                    </button>
+                    <button type="button" onClick={() => { setPriceMin("1500"); setPriceMax(""); }}>
+                      1,500+
+                    </button>
+                  </div>
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Availability</div>
+                  <label className="filter-item">
+                    <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} />
+                    <span>In stock only</span>
+                  </label>
+                  <label className="filter-item">
+                    <input type="checkbox" checked={featuredOnly} onChange={(e) => setFeaturedOnly(e.target.checked)} />
+                    <span>Featured picks</span>
+                  </label>
+                </div>
+              </div>
+              <div className="filter-panel-actions">
+                <button className="button ghost full" type="button" onClick={resetFilters}>
+                  Clear filters
+                </button>
+                <button className="button full" type="button" onClick={() => setMobileFiltersOpen(false)}>
+                  View results
+                </button>
+              </div>
+            </aside>
             <section className="module search-module">
               <div className="section-head">
                 <div>
@@ -739,6 +965,62 @@ function HomePage() {
                         onChange={() => toggleCategory(category)}
                       />
                       <span>{category}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Product type</div>
+                  {availableProductTypes.length === 0 && <p className="muted small">No product types yet.</p>}
+                  {availableProductTypes.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedProductTypes.includes(value)}
+                        onChange={() => toggleSelected(selectedProductTypes, value, setSelectedProductTypes)}
+                      />
+                      <span>{humanizeTag(value)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Care area</div>
+                  {availableCareAreas.length === 0 && <p className="muted small">No care areas yet.</p>}
+                  {availableCareAreas.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedCareAreas.includes(value)}
+                        onChange={() => toggleSelected(selectedCareAreas, value, setSelectedCareAreas)}
+                      />
+                      <span>{humanizeTag(value)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Suitable for</div>
+                  {availableSuitableFor.length === 0 && <p className="muted small">No suitability tags yet.</p>}
+                  {availableSuitableFor.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedSuitableFor.includes(value)}
+                        onChange={() => toggleSelected(selectedSuitableFor, value, setSelectedSuitableFor)}
+                      />
+                      <span>{humanizeTag(value)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="filter-block">
+                  <div className="filter-title">Ingredients</div>
+                  {availableIngredients.length === 0 && <p className="muted small">No ingredient tags yet.</p>}
+                  {availableIngredients.map((value) => (
+                    <label key={value} className="filter-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedIngredients.includes(value)}
+                        onChange={() => toggleSelected(selectedIngredients, value, setSelectedIngredients)}
+                      />
+                      <span>{humanizeTag(value)}</span>
                     </label>
                   ))}
                 </div>
