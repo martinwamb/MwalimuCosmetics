@@ -23,7 +23,7 @@ function toLabel(value: string) {
     .trim();
 }
 
-router.get("/groups", requireRoles(["ADMIN"]), async (req, res) => {
+router.get("/groups", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
   await ensureSystemTaxonomy();
   const includeTags = req.query.includeTags === "true";
   if (includeTags) {

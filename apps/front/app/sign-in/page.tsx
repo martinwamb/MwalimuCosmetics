@@ -26,6 +26,12 @@ function friendlyRole(role: string | null) {
   }
 }
 
+function staffLanding(role: string | null) {
+  if (role === "ADMIN") return "/dashboard/admin";
+  if (role === "ACCOUNTS") return "/dashboard/products";
+  return "/dashboard";
+}
+
 export default function SignInPage() {
   const [phase, setPhase] = useState<Phase>("identifier");
   const [email, setEmail] = useState("");
@@ -215,7 +221,7 @@ export default function SignInPage() {
         setClockStatus("Ready for biometric verification.");
         // Redirect admins to workspace after a short delay
         setTimeout(() => {
-          window.location.href = "/dashboard/admin";
+          window.location.href = staffLanding(nextRole ?? null);
         }, 400);
       } else {
         setTimeout(() => {
@@ -401,8 +407,8 @@ export default function SignInPage() {
             {remembered && (
               <p className="muted small" style={{ marginTop: "0.35rem" }}>
                 Already signed in as {remembered.email}.{" "}
-                <a className="text-link" href="/dashboard/admin">
-                  Open admin
+                <a className="text-link" href={staffLanding(remembered.role ?? null)}>
+                  Open dashboard
                 </a>{" "}
                 or{" "}
                 <button className="link-button" type="button" onClick={resetFlow}>

@@ -126,7 +126,7 @@ router.get("/:id", async (req, res) => {
   res.json({ data: formatProduct(product, includeCost) });
 });
 
-router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
+router.post("/", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
   const parsed = productCreateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
@@ -189,7 +189,7 @@ router.post("/", requireRoles(["ADMIN"]), async (req, res) => {
   }
 });
 
-router.put("/:id", requireRoles(["ADMIN"]), async (req, res) => {
+router.put("/:id", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
   const parsed = productUpdateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });

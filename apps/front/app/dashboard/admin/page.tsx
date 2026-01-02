@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import MailDashboardPage from "../mail/page";
 
 type Product = {
   id: string;
@@ -41,10 +42,12 @@ export default function AdminDashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [staff, setStaff] = useState<StaffUser[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [tab, setTab] = useState<"products" | "reports" | "users">("products");
+  const [tab, setTab] = useState<"products" | "reports" | "users" | "mail">("products");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
   const [staffForm, setStaffForm] = useState({ email: "", password: "", role: "ADMIN" });
   const [staffStatus, setStaffStatus] = useState<string | null>(null);
   const [customerStatus, setCustomerStatus] = useState<string | null>(null);
@@ -52,7 +55,11 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     try {
       const saved = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null;
+      const savedRole = typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null;
+      const savedEmail = typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null;
       if (saved) setToken(saved);
+      setRole(savedRole);
+      setEmail(savedEmail);
     } catch {
       // ignore
     }
@@ -62,6 +69,11 @@ export default function AdminDashboardPage() {
     async function load() {
       if (!token) {
         setError("Sign in as admin to view the workspace.");
+        setLoading(false);
+        return;
+      }
+      if (role && role !== "ADMIN") {
+        setError("Admin access only.");
         setLoading(false);
         return;
       }
@@ -97,7 +109,9 @@ export default function AdminDashboardPage() {
     }
 
     load();
-  }, [token]);
+  }, [token, role]);
+
+  const canViewMail = Boolean(email && email.toLowerCase().endsWith("@mwalimucosmetics.com"));
 
   const stats = useMemo(() => {
     const totalProducts = products.length;
@@ -171,6 +185,23 @@ export default function AdminDashboardPage() {
     }
   }
 
+  if (role && role !== "ADMIN") {
+    return (
+      <div className="card">
+        <div className="hero-eyebrow" style={{ marginBottom: "0.3rem" }}>
+          Admin workspace
+        </div>
+        <h1 style={{ margin: 0 }}>Admins only</h1>
+        <p className="muted" style={{ marginTop: "0.35rem" }}>
+          Your account can add products from the catalog page.
+        </p>
+        <a className="button" href="/dashboard/products">
+          Go to products
+        </a>
+      </div>
+    );
+  }
+
   return (
     <div className="card">
       <div className="hero-eyebrow" style={{ marginBottom: "0.3rem" }}>
@@ -191,6 +222,11 @@ export default function AdminDashboardPage() {
         <button className={`button ${tab === "users" ? "" : "ghost"}`} onClick={() => setTab("users")}>
           Users
         </button>
+        {canViewMail && (
+          <button className={`button ${tab === "mail" ? "" : "ghost"}`} onClick={() => setTab("mail")}>
+            Messages
+          </button>
+        )}
       </div>
 
       {loading && <p className="muted" style={{ marginTop: "0.75rem" }}>Loading workspace data...</p>}
@@ -380,6 +416,12 @@ export default function AdminDashboardPage() {
               </ul>
             )}
           </section>
+        </div>
+      )}
+
+      {tab === "mail" && canViewMail && (
+        <div style={{ marginTop: "1rem" }}>
+          <MailDashboardPage />
         </div>
       )}
     </div>

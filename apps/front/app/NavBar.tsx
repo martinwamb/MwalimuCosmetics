@@ -120,6 +120,7 @@ export function NavBar() {
 
   const isLoggedIn = Boolean(token);
   const isAdmin = role === "ADMIN";
+  const isAccounts = role === "ACCOUNTS";
   const hasSearch = Boolean(
     (searchParams?.get("q") ?? "").trim() ||
       searchParams?.get("category") ||
@@ -205,6 +206,7 @@ export function NavBar() {
           {isLoggedIn ? (
             <>
               {isAdmin && <a href="/dashboard/admin">Dashboard</a>}
+              {!isAdmin && isAccounts && <a href="/dashboard/products">Dashboard</a>}
               <a href="/orders">Orders</a>
               <a href="/cart" className="cart-link">
                 Cart
@@ -267,6 +269,11 @@ export function NavBar() {
             <>
               {isAdmin && (
                 <a href="/dashboard/admin" onClick={closeMenu}>
+                  Dashboard
+                </a>
+              )}
+              {!isAdmin && isAccounts && (
+                <a href="/dashboard/products" onClick={closeMenu}>
                   Dashboard
                 </a>
               )}

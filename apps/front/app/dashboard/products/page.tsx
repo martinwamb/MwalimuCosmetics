@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import MailDashboardPage from "../mail/page";
 
 type Product = {
   id: string;
@@ -189,6 +190,8 @@ export default function ProductDashboardPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [token, setToken] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -200,6 +203,7 @@ export default function ProductDashboardPage() {
   const [variantPreviews, setVariantPreviews] = useState<Record<number, string | null>>({});
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
   const [tagError, setTagError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"products" | "mail">("products");
 
   const loadProducts = useCallback(async (authToken?: string | null) => {
     setFetching(true);
@@ -264,13 +268,28 @@ export default function ProductDashboardPage() {
 
   useEffect(() => {
     const savedToken = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null;
+    const savedRole = typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null;
+    const savedEmail = typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null;
     setToken(savedToken);
+    setRole(savedRole);
+    setEmail(savedEmail);
     loadProducts(savedToken);
   }, [loadProducts]);
 
+  const isAdmin = role === "ADMIN";
+  const isAccounts = role === "ACCOUNTS";
+  const canManageProducts = isAdmin || isAccounts;
+  const canViewMail = Boolean(email && email.toLowerCase().endsWith("@mwalimucosmetics.com"));
+
+  useEffect(() => {
+    if (!canViewMail && activeTab === "mail") {
+      setActiveTab("products");
+    }
+  }, [activeTab, canViewMail]);
+
   useEffect(() => {
     async function loadTags(authToken?: string | null) {
-      if (!authToken) return;
+      if (!authToken || !canManageProducts) return;
       setTagError(null);
       try {
         const res = await fetch(`${apiBase}/tags/groups?includeTags=true`, {
@@ -286,7 +305,7 @@ export default function ProductDashboardPage() {
     }
 
     loadTags(token);
-  }, [token]);
+  }, [token, canManageProducts]);
 
   function groupOptions(code: string, fallback: readonly string[]) {
     const group = tagGroups.find((item) => item.code === code);
@@ -326,8 +345,8 @@ export default function ProductDashboardPage() {
     setError(null);
     setStatus(null);
 
-    if (!token) {
-      setError("Sign in as an admin to add products.");
+    if (!token || !canManageProducts) {
+      setError("Sign in as an admin or accounts user to add products.");
       return;
     }
 
@@ -464,8 +483,8 @@ export default function ProductDashboardPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!token) {
-      setError("Sign in as an admin to delete products.");
+    if (!token || !isAdmin) {
+      setError("Only admins can delete products.");
       return;
     }
     setDeletingId(id);
@@ -499,8 +518,23 @@ export default function ProductDashboardPage() {
   }, [form.productType, form.careAreas]);
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "minmax(340px, 500px) 1fr", gap: "1.5rem" }}>
-      <section className="card">
+    <div>
+      {canViewMail && (
+        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+          <button className={`button ${activeTab === "products" ? "" : "ghost"}`} type="button" onClick={() => setActiveTab("products")}>
+            Products
+          </button>
+          <button className={`button ${activeTab === "mail" ? "" : "ghost"}`} type="button" onClick={() => setActiveTab("mail")}>
+            Messages
+          </button>
+        </div>
+      )}
+
+      {activeTab === "mail" && canViewMail ? (
+        <MailDashboardPage />
+      ) : (
+        <div className="grid" style={{ gridTemplateColumns: isAdmin ? "minmax(340px, 500px) 1fr" : "minmax(340px, 1fr)", gap: "1.5rem" }}>
+          <section className="card">
         <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
           Catalog management
         </div>
@@ -907,7 +941,7 @@ export default function ProductDashboardPage() {
         {status && <div className="signin-success">{status}</div>}
         {!token && (
           <p className="muted small" style={{ marginTop: "0.35rem" }}>
-            Sign in as an admin to submit. Viewing the catalog list is open.
+            Sign in as an admin or accounts user to submit.
           </p>
         )}
         {editingId && (
@@ -920,6 +954,7 @@ export default function ProductDashboardPage() {
         )}
       </section>
 
+      {isAdmin && (
       <section>
         <div className="hero-eyebrow" style={{ marginBottom: "0.35rem" }}>
           Catalog
@@ -1020,9 +1055,13 @@ export default function ProductDashboardPage() {
           ))}
         </div>
       </section>
+      )}
+    </div>
+      )}
     </div>
   );
 }
+
 
 
 
