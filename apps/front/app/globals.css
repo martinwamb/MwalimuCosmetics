@@ -1758,15 +1758,17 @@ a {
   .filter-chip-bar {
     display: flex;
     gap: 0.6rem;
-    padding: 0.5rem 1rem;
+    padding: 0.5rem 0;
     position: sticky;
     top: var(--header-offset);
     z-index: 110;
     background: #fff;
     color: #111;
-    left: 50%;
-    width: 100vw;
-    transform: translateX(-50%);
+    left: 0;
+    width: calc(100% + 1rem);
+    transform: none;
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
     border-bottom: 1px solid var(--border);
     margin-top: calc(-1 * var(--page-shell-pad));
   }
