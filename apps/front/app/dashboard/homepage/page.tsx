@@ -382,8 +382,9 @@ export default function HomepageAdminPage() {
       for (let i = 0; i < sectionForm.items.length; i++) {
         const item = sectionForm.items[i];
         let imageUrl = item.imageUrl?.trim() ?? "";
-        if (item.file && item.preview) {
-          imageUrl = await uploadImage(item.file, item.preview);
+        const preview = item.preview ?? itemPreviews[i] ?? null;
+        if (item.file && preview) {
+          imageUrl = await uploadImage(item.file, preview);
         }
         const linkType = sectionForm.type === "CATEGORY" ? "FILTER" : item.linkType ?? "URL";
         const linkTarget =

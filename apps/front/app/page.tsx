@@ -485,6 +485,10 @@ function HomePage() {
     return item.linkTarget || "#";
   }
 
+  function shouldShowItemTarget(item: SectionItem) {
+    return Boolean(item.linkTarget && item.linkType !== "FILTER");
+  }
+
   const hasSearchResults =
     Boolean(searchQuery) ||
     selectedCategories.length > 0 ||
@@ -603,7 +607,7 @@ function HomePage() {
                         <div className="tile-media" style={img ? { backgroundImage: `url(${img})` } : undefined} />
                         <div className="tile-body">
                           <strong>{item.label}</strong>
-                          {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
+                          {shouldShowItemTarget(item) && <span className="muted small">{item.linkTarget}</span>}
                         </div>
                       </a>
                     );
@@ -662,7 +666,7 @@ function HomePage() {
                   <div className="featured-overlay">
                     {item.badge && <span className="mini-pill">{item.badge}</span>}
                     <h2>{item.label}</h2>
-                    {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
+                    {shouldShowItemTarget(item) && <span className="muted small">{item.linkTarget}</span>}
                   </div>
                 </a>
               </section>
@@ -776,7 +780,7 @@ function HomePage() {
                       <div className="tile-body">
                         <strong>{item.label}</strong>
                         {item.badge && <span className="mini-pill">{item.badge}</span>}
-                        {item.linkTarget && <span className="muted small">{item.linkTarget}</span>}
+                        {shouldShowItemTarget(item) && <span className="muted small">{item.linkTarget}</span>}
                       </div>
                     </a>
                   ))}
