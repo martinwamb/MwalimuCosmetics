@@ -26,6 +26,12 @@ function friendlyRole(role: string | null) {
   }
 }
 
+function normalizeStoredValue(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 function staffLanding(role: string | null) {
   if (role === "ADMIN") return "/dashboard/admin";
   if (role === "ACCOUNTS") return "/dashboard/products";
@@ -81,9 +87,9 @@ export default function SignInPage() {
 
   useEffect(() => {
     try {
-      const savedToken = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null;
+      const savedToken = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null);
       const savedEmail = typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null;
-      const savedRole = typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null;
+      const savedRole = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null);
       if (savedToken && savedEmail) {
         setRemembered({ email: savedEmail, role: savedRole, token: savedToken });
         setEmail(savedEmail);
@@ -230,7 +236,11 @@ export default function SignInPage() {
       }
       try {
         localStorage.setItem("mwalimu_email", trimmedEmail);
-        localStorage.setItem("mwalimu_role", nextRole ?? "");
+        if (nextRole) {
+          localStorage.setItem("mwalimu_role", nextRole);
+        } else {
+          localStorage.removeItem("mwalimu_role");
+        }
       } catch {
         // ignore
       }

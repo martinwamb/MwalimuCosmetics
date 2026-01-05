@@ -38,6 +38,25 @@ type Customer = {
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export default function AdminDashboardPage() {
+  function decodeToken(tokenValue: string | null) {
+    if (!tokenValue) return null;
+    const parts = tokenValue.split(".");
+    if (parts.length < 2) return null;
+    const base = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base.padEnd(base.length + ((4 - (base.length % 4)) % 4), "=");
+    try {
+      return JSON.parse(atob(padded)) as { role?: string; email?: string };
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizeStoredValue(value: string | null) {
+    if (!value) return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [staff, setStaff] = useState<StaffUser[]>([]);
@@ -54,12 +73,21 @@ export default function AdminDashboardPage() {
 
   useEffect(() => {
     try {
-      const saved = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null;
-      const savedRole = typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null;
-      const savedEmail = typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null;
-      if (saved) setToken(saved);
-      setRole(savedRole);
-      setEmail(savedEmail);
+      const savedToken = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null);
+      const savedRole = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null);
+      const savedEmail = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null);
+      const payload = decodeToken(savedToken);
+      const resolvedRole = savedRole ?? payload?.role ?? null;
+      const resolvedEmail = savedEmail ?? payload?.email ?? null;
+      if (savedToken) setToken(savedToken);
+      setRole(resolvedRole);
+      setEmail(resolvedEmail);
+      if (resolvedRole && savedRole !== resolvedRole) {
+        localStorage.setItem("mwalimu_role", resolvedRole);
+      }
+      if (resolvedEmail && savedEmail !== resolvedEmail) {
+        localStorage.setItem("mwalimu_email", resolvedEmail);
+      }
     } catch {
       // ignore
     }

@@ -16,12 +16,36 @@ export function NavBar() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  function decodeToken(tokenValue: string | null) {
+    if (!tokenValue) return null;
+    const parts = tokenValue.split(".");
+    if (parts.length < 2) return null;
+    const base = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base.padEnd(base.length + ((4 - (base.length % 4)) % 4), "=");
+    try {
+      return JSON.parse(atob(padded)) as { role?: string; email?: string };
+    } catch {
+      return null;
+    }
+  }
+
+  function normalizeStoredValue(value: string | null) {
+    if (!value) return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
   useEffect(() => {
     try {
-      const savedToken = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null;
-      const savedRole = typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null;
+      const savedToken = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null);
+      const savedRole = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null);
+      const payload = decodeToken(savedToken);
+      const resolvedRole = savedRole ?? payload?.role ?? null;
       setToken(savedToken);
-      setRole(savedRole);
+      setRole(resolvedRole);
+      if (resolvedRole && savedRole !== resolvedRole) {
+        localStorage.setItem("mwalimu_role", resolvedRole);
+      }
     } catch {
       // ignore
     }
