@@ -63,6 +63,7 @@ jobs:
           NEXT_SKIP_LOCKFILE_PATCH=1 npm run build --workspace=@mwalimu/front
           pushd packages/db >/dev/null
           npx prisma generate --schema prisma/schema.prisma
+          npx prisma migrate deploy --schema prisma/schema.prisma
           popd >/dev/null
           npm run build --workspace=@mwalimu/back
 

@@ -4,11 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+type PriceTier = "RETAIL" | "WHOLESALE" | "SPECIAL";
+
 type Product = {
   id: string;
   name: string;
   sku: string;
   price: number;
+  wholesalePrice: number | null;
+  specialPrice: number | null;
   currency: string;
   stockQty: number;
   imageUrl?: string | null;
@@ -17,6 +21,7 @@ type Product = {
 type CartItem = {
   product: Product;
   qty: number;
+  unitPrice: number;
   discount: number;
 };
 
@@ -27,6 +32,12 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   CARD: "Card",
   MOBILE_MONEY: "M-Pesa",
   BANK_TRANSFER: "Bank Transfer",
+};
+
+const TIER_LABELS: Record<PriceTier, string> = {
+  RETAIL: "Retail",
+  WHOLESALE: "Wholesale",
+  SPECIAL: "Special",
 };
 
 function fmt(n: number) {
@@ -42,6 +53,18 @@ function normalizeImageUrl(url?: string | null) {
   return t;
 }
 
+function getPrice(product: Product, tier: PriceTier): number {
+  if (tier === "WHOLESALE" && product.wholesalePrice != null) return product.wholesalePrice;
+  if (tier === "SPECIAL" && product.specialPrice != null) return product.specialPrice;
+  return product.price;
+}
+
+function tierAvailable(product: Product, tier: PriceTier): boolean {
+  if (tier === "WHOLESALE") return product.wholesalePrice != null;
+  if (tier === "SPECIAL") return product.specialPrice != null;
+  return true;
+}
+
 export default function POSPage() {
   const [token, setToken] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -50,6 +73,7 @@ export default function POSPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [priceTier, setPriceTier] = useState<PriceTier>("RETAIL");
 
   // Payment modal state
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -59,7 +83,7 @@ export default function POSPage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [lastReceipt, setLastReceipt] = useState<{ orderId: string; total: number; method: PaymentMethod; change: number } | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<{ orderId: string; total: number; method: PaymentMethod; change: number; tier: PriceTier } | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -85,6 +109,13 @@ export default function POSPage() {
     );
   }, [query, products]);
 
+  // When tier changes, update unit prices of existing cart items
+  useEffect(() => {
+    setCart((prev) =>
+      prev.map((item) => ({ ...item, unitPrice: getPrice(item.product, priceTier) }))
+    );
+  }, [priceTier]);
+
   async function loadProducts(authToken?: string | null) {
     setFetchError(null);
     setLoading(true);
@@ -99,6 +130,8 @@ export default function POSPage() {
         name: p.name,
         sku: p.sku,
         price: Number(p.price),
+        wholesalePrice: p.wholesalePrice != null ? Number(p.wholesalePrice) : null,
+        specialPrice: p.specialPrice != null ? Number(p.specialPrice) : null,
         currency: p.currency ?? "KES",
         stockQty: Number(p.stockQty ?? 0),
         imageUrl: p.imageUrl ?? null,
@@ -112,15 +145,16 @@ export default function POSPage() {
     }
   }
 
-  const addToCart = useCallback((product: Product) => {
+  const addToCart = useCallback((product: Product, tier: PriceTier) => {
     if (product.stockQty <= 0) return;
+    const unitPrice = getPrice(product, tier);
     setCart((prev) => {
       const existing = prev.find((i) => i.product.id === product.id);
       if (existing) {
         if (existing.qty >= product.stockQty) return prev;
         return prev.map((i) => i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i);
       }
-      return [...prev, { product, qty: 1, discount: 0 }];
+      return [...prev, { product, qty: 1, unitPrice, discount: 0 }];
     });
   }, []);
 
@@ -133,10 +167,14 @@ export default function POSPage() {
   }
 
   function setDiscount(productId: string, discount: number) {
-    setCart((prev) => prev.map((i) => i.product.id === productId ? { ...i, discount: Math.max(0, Math.min(discount, i.product.price * i.qty)) } : i));
+    setCart((prev) => prev.map((i) =>
+      i.product.id === productId
+        ? { ...i, discount: Math.max(0, Math.min(discount, i.unitPrice * i.qty)) }
+        : i
+    ));
   }
 
-  const subtotal = cart.reduce((sum, i) => sum + i.product.price * i.qty - i.discount, 0);
+  const subtotal = cart.reduce((sum, i) => sum + i.unitPrice * i.qty - i.discount, 0);
   const cashTenderedNum = parseFloat(cashTendered) || 0;
   const change = cashTenderedNum - subtotal;
 
@@ -172,7 +210,8 @@ export default function POSPage() {
             productId: i.product.id,
             name: i.product.name,
             qty: i.qty,
-            unitPrice: i.product.price,
+            unitPrice: i.unitPrice,
+            discount: i.discount,
           })),
           customer: customerName || customerPhone
             ? { name: customerName || undefined, phone: customerPhone || undefined }
@@ -183,7 +222,7 @@ export default function POSPage() {
       if (!res.ok) throw new Error(data?.error ?? "Order failed");
 
       const orderId = data?.data?.id ?? "—";
-      setLastReceipt({ orderId, total: subtotal, method: payMethod, change: payMethod === "CASH" ? change : 0 });
+      setLastReceipt({ orderId, total: subtotal, method: payMethod, change: payMethod === "CASH" ? change : 0, tier: priceTier });
       setCart([]);
       setCustomerName("");
       setCustomerPhone("");
@@ -197,11 +236,39 @@ export default function POSPage() {
     }
   }
 
+  const tierColor: Record<PriceTier, string> = {
+    RETAIL: "#0f5ba7",
+    WHOLESALE: "#7c3aed",
+    SPECIAL: "#b45309",
+  };
+
   return (
     <div className="pos-shell">
       {/* Left: product grid */}
       <div className="pos-products">
         <div className="pos-search-bar">
+          {/* Price tier selector */}
+          <div style={{ display: "flex", gap: "0.3rem", alignItems: "center" }}>
+            {(["RETAIL", "WHOLESALE", "SPECIAL"] as PriceTier[]).map((tier) => (
+              <button
+                key={tier}
+                onClick={() => setPriceTier(tier)}
+                style={{
+                  padding: "0.35rem 0.7rem",
+                  borderRadius: "6px",
+                  border: `2px solid ${priceTier === tier ? tierColor[tier] : "var(--border)"}`,
+                  background: priceTier === tier ? tierColor[tier] : "#f8fafc",
+                  color: priceTier === tier ? "#fff" : "var(--text)",
+                  fontWeight: 700,
+                  fontSize: "0.78rem",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {TIER_LABELS[tier]}
+              </button>
+            ))}
+          </div>
           <input
             ref={searchRef}
             className="pos-search-input"
@@ -209,6 +276,7 @@ export default function POSPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
+            style={{ flex: 1 }}
           />
           {query && (
             <button className="button ghost" style={{ padding: "0.5rem 0.75rem" }} onClick={() => setQuery("")}>
@@ -240,11 +308,13 @@ export default function POSPage() {
             {filtered.map((p) => {
               const imgUrl = normalizeImageUrl(p.imageUrl);
               const inCart = cart.find((i) => i.product.id === p.id);
+              const displayPrice = getPrice(p, priceTier);
+              const hasTierPrice = tierAvailable(p, priceTier) && priceTier !== "RETAIL";
               return (
                 <div
                   key={p.id}
                   className={`pos-product-tile ${p.stockQty <= 0 ? "out-of-stock" : ""}`}
-                  onClick={() => addToCart(p)}
+                  onClick={() => addToCart(p, priceTier)}
                   title={p.stockQty <= 0 ? "Out of stock" : `Add ${p.name} to cart`}
                 >
                   {imgUrl ? (
@@ -255,7 +325,14 @@ export default function POSPage() {
                     </div>
                   )}
                   <div className="pos-tile-name">{p.name}</div>
-                  <div className="pos-tile-price">{fmt(p.price)}</div>
+                  <div className="pos-tile-price" style={{ color: hasTierPrice ? tierColor[priceTier] : undefined }}>
+                    {fmt(displayPrice)}
+                    {hasTierPrice && (
+                      <span style={{ fontSize: "0.65rem", marginLeft: "0.25rem", opacity: 0.75 }}>
+                        ({TIER_LABELS[priceTier]})
+                      </span>
+                    )}
+                  </div>
                   <div className="pos-tile-stock">
                     {p.stockQty <= 0 ? "Out of stock" : `${p.stockQty} in stock`}
                     {inCart && <span style={{ marginLeft: "0.35rem", color: "#0f5ba7", fontWeight: 700 }}>({inCart.qty} in cart)</span>}
@@ -270,7 +347,21 @@ export default function POSPage() {
       {/* Right: cart */}
       <div className="pos-cart">
         <div className="pos-cart-head">
-          <span className="pos-cart-title">Cart {cart.length > 0 && `(${cart.reduce((s, i) => s + i.qty, 0)} items)`}</span>
+          <span className="pos-cart-title">
+            Cart {cart.length > 0 && `(${cart.reduce((s, i) => s + i.qty, 0)} items)`}
+          </span>
+          <span
+            style={{
+              fontSize: "0.72rem",
+              fontWeight: 700,
+              padding: "0.2rem 0.5rem",
+              borderRadius: "4px",
+              background: tierColor[priceTier],
+              color: "#fff",
+            }}
+          >
+            {TIER_LABELS[priceTier]}
+          </span>
           {cart.length > 0 && (
             <button
               className="pos-clear-btn"
@@ -293,7 +384,7 @@ export default function POSPage() {
               <div>
                 <div className="pos-cart-row-name">{item.product.name}</div>
                 <div className="pos-cart-row-price">
-                  {fmt(item.product.price)} × {item.qty}
+                  {fmt(item.unitPrice)} × {item.qty}
                   {item.discount > 0 && (
                     <span style={{ color: "#16a34a", marginLeft: "0.35rem" }}>− {fmt(item.discount)}</span>
                   )}
@@ -414,6 +505,10 @@ export default function POSPage() {
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--muted)" }}>Order ID</span>
                 <span style={{ fontWeight: 700 }}>{lastReceipt.orderId}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--muted)" }}>Price tier</span>
+                <span style={{ fontWeight: 700, color: tierColor[lastReceipt.tier] }}>{TIER_LABELS[lastReceipt.tier]}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--muted)" }}>Total</span>

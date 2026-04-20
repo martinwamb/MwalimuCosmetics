@@ -21,6 +21,8 @@ const productCreateSchema = z.object({
   sku: z.string().min(1),
   slug: z.string().min(1).optional(),
   price: z.number().positive(),
+  wholesalePrice: z.number().positive().optional(),
+  specialPrice: z.number().positive().optional(),
   compareAtPrice: z.number().positive().optional(),
   currency: z.string().min(1).default("KES"),
   cost: z.number().nonnegative(),
@@ -153,6 +155,8 @@ router.post("/", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
           imageUrl: parsed.data.imageUrl,
           galleryImages: parsed.data.galleryImages ?? [],
           price: parsed.data.price,
+          wholesalePrice: parsed.data.wholesalePrice,
+          specialPrice: parsed.data.specialPrice,
           compareAtPrice: parsed.data.compareAtPrice,
           currency: parsed.data.currency ?? "KES",
           cost: parsed.data.cost,
@@ -213,6 +217,12 @@ router.put("/:id", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
 
   if (typeof parsed.data.price === "number") {
     updates.price = parsed.data.price;
+  }
+  if (typeof parsed.data.wholesalePrice === "number") {
+    updates.wholesalePrice = parsed.data.wholesalePrice;
+  }
+  if (typeof parsed.data.specialPrice === "number") {
+    updates.specialPrice = parsed.data.specialPrice;
   }
   if (typeof parsed.data.cost === "number") {
     updates.cost = parsed.data.cost;

@@ -1,4 +1,6 @@
-import { HomepageRuleType, HomepageSort, Prisma, TagSelection } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import prismaClientPkg from "@prisma/client";
+const { HomepageRuleType, HomepageSort, TagSelection } = prismaClientPkg as any;
 
 import { prisma } from "./prisma.js";
 
@@ -369,6 +371,8 @@ export function formatProduct(product: any, includeCost = false) {
     imageUrl: product.imageUrl,
     galleryImages: product.galleryImages ?? [],
     price,
+    wholesalePrice: product.wholesalePrice ? parseFloat(product.wholesalePrice.toString()) : null,
+    specialPrice: product.specialPrice ? parseFloat(product.specialPrice.toString()) : null,
     compareAtPrice: compareAt,
     onSale,
     currency: product.currency ?? "KES",

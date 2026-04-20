@@ -34,7 +34,9 @@ model Product {
   galleryImages String[] @db.Text
   category    Category? @relation(fields: [categoryId], references: [id])
   categoryId  String?
-  price       Decimal  @db.Decimal(12, 2)
+  price          Decimal  @db.Decimal(12, 2)
+  wholesalePrice Decimal? @db.Decimal(12, 2)
+  specialPrice   Decimal? @db.Decimal(12, 2)
   compareAtPrice Decimal? @db.Decimal(12, 2)
   currency    String   @default("KES")
   cost        Decimal  @db.Decimal(12, 2)
