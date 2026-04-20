@@ -15,6 +15,10 @@ import { router as homepageRouter } from "./routes/homepage.js";
 import { router as tagRouter } from "./routes/tags.js";
 import { router as customerRouter } from "./routes/customers.js";
 import { router as clockingRouter } from "./routes/clockings.js";
+import { router as purchaseRouter } from "./routes/purchases.js";
+import { router as supplierRouter } from "./routes/suppliers.js";
+import { router as inventoryRouter } from "./routes/inventory.js";
+import { router as reportsRouter } from "./routes/reports.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
@@ -46,6 +50,10 @@ app.use("/homepage", homepageRouter);
 app.use("/tags", tagRouter);
 app.use("/customers", customerRouter);
 app.use("/clockings", clockingRouter);
+app.use("/purchases", purchaseRouter);
+app.use("/suppliers", supplierRouter);
+app.use("/inventory", inventoryRouter);
+app.use("/reports", reportsRouter);
 
 seedAdmin()
   .catch((err) => {

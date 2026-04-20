@@ -229,8 +229,8 @@ export function NavBar() {
           </div>
           {isLoggedIn ? (
             <>
-              {isAdmin && <a href="/dashboard/admin">Dashboard</a>}
-              {!isAdmin && isAccounts && <a href="/dashboard/products">Dashboard</a>}
+              <a href="/dashboard">Dashboard</a>
+              {(isAdmin || role === "SALES") && <a href="/pos">POS</a>}
               <a href="/orders">Orders</a>
               <a href="/cart" className="cart-link">
                 Cart
@@ -291,25 +291,11 @@ export function NavBar() {
           <div className="drawer-title">Account</div>
           {isLoggedIn ? (
             <>
-              {isAdmin && (
-                <a href="/dashboard/admin" onClick={closeMenu}>
-                  Dashboard
-                </a>
-              )}
-              {!isAdmin && isAccounts && (
-                <a href="/dashboard/products" onClick={closeMenu}>
-                  Dashboard
-                </a>
-              )}
-              <a href="/orders" onClick={closeMenu}>
-                Orders
-              </a>
-              <a href="/cart" onClick={closeMenu}>
-                Cart
-              </a>
-              <button className="nav-link-button" type="button" onClick={handleSignOut}>
-                Sign out
-              </button>
+              <a href="/dashboard" onClick={closeMenu}>Dashboard</a>
+              {(isAdmin || role === "SALES") && <a href="/pos" onClick={closeMenu}>POS</a>}
+              <a href="/orders" onClick={closeMenu}>Orders</a>
+              <a href="/cart" onClick={closeMenu}>Cart</a>
+              <button className="nav-link-button" type="button" onClick={handleSignOut}>Sign out</button>
             </>
           ) : (
             <>
