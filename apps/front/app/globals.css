@@ -2467,3 +2467,228 @@ a {
   }
 }
 
+/* ── Coming soon page ───────────────────────────────────── */
+.coming-soon-root {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: linear-gradient(135deg, #fef9e7 0%, #eef4ff 100%);
+}
+
+.coming-soon-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2.5rem 2rem;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.09);
+  text-align: center;
+}
+
+.coming-soon-brand {
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: var(--teal);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1.25rem;
+}
+
+.coming-soon-title {
+  margin: 0 0 0.75rem;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.coming-soon-body {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.coming-soon-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 1.75rem 0 1.25rem;
+}
+
+.coming-soon-staff-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
+/* ── Simple top bar ─────────────────────────────────────── */
+.simple-header {
+  background: var(--night);
+  color: #f6f7f8;
+  padding: 0.85rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 120;
+}
+
+.simple-brand {
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--gold);
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.simple-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.simple-nav a,
+.simple-nav button {
+  color: #f6f7f8;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.simple-nav a:hover,
+.simple-nav button:hover {
+  color: var(--gold);
+}
+
+/* ── Dashboard page-level coming soon ───────────────────── */
+.dash-coming-soon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  text-align: center;
+  gap: 1rem;
+  padding: 2rem;
+}
+
+.dash-coming-soon-icon {
+  font-size: 3rem;
+  opacity: 0.35;
+}
+
+.dash-coming-soon h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.dash-coming-soon p {
+  color: var(--muted);
+  margin: 0;
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+/* ── Single dashboard page ──────────────────────────────── */
+.dash-single-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--cloud);
+}
+
+.dash-single-topbar {
+  background: var(--night);
+  color: #f6f7f8;
+  padding: 0.85rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.dash-single-brand {
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--gold);
+  letter-spacing: -0.01em;
+}
+
+.dash-single-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.dash-single-email {
+  font-size: 0.85rem;
+  color: rgba(246, 247, 248, 0.7);
+}
+
+.dash-single-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.dash-single-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3rem 2.5rem;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.08);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.dash-single-icon {
+  font-size: 3rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.dash-single-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+.dash-single-body-text {
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.6;
+  max-width: 340px;
+}
+
+.dash-single-meta {
+  font-size: 0.85rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+  width: 100%;
+}
+

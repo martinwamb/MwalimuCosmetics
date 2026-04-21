@@ -5,7 +5,7 @@ import { NavBar } from "./NavBar";
 
 export const metadata = {
   title: "Mwalimu Cosmetics",
-  description: "Ecommerce and retail operations for Mwalimu Cosmetics"
+  description: "Mwalimu Cosmetics — coming soon"
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -15,7 +15,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Suspense fallback={null}>
           <NavBar />
         </Suspense>
-        <main className="page-shell">{children}</main>
+        <main>{children}</main>
       </body>
     </html>
   );

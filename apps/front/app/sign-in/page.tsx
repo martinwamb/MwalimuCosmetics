@@ -1,204 +1,38 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-
-type Phase = "identifier" | "password" | "clock";
+import { useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-function isStaffRole(role: string | null) {
-  return Boolean(role && role !== "CUSTOMER");
-}
-
-function friendlyRole(role: string | null) {
-  if (!role) return "Role will load after lookup";
-  switch (role) {
-    case "ADMIN":
-      return "Admin";
-    case "ACCOUNTS":
-      return "Accounts";
-    case "SALES":
-      return "Sales";
-    case "CUSTOMER":
-      return "Customer";
-    default:
-      return role;
-  }
-}
-
-function normalizeStoredValue(value: string | null) {
-  if (!value) return null;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function staffLanding(role: string | null) {
+function staffLanding(role: string) {
   if (role === "ADMIN") return "/dashboard/admin";
   if (role === "ACCOUNTS") return "/dashboard/products";
   return "/dashboard";
 }
 
 export default function SignInPage() {
-  const [phase, setPhase] = useState<Phase>("identifier");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [exists, setExists] = useState(false);
-  const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [clockStatus, setClockStatus] = useState<string | null>(null);
-  const [clockedIn, setClockedIn] = useState(false);
-  const [forgotStatus, setForgotStatus] = useState<string | null>(null);
-  const [remembered, setRemembered] = useState<{ email: string; role: string | null; token: string | null } | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
-  const [marketingOptIn, setMarketingOptIn] = useState(false);
-  const [selfieData, setSelfieData] = useState<string | null>(null);
-  const [oauthRedirect, setOauthRedirect] = useState<string>("https://mwalimucosmetics.com/sign-in");
+  const [forgotSent, setForgotSent] = useState(false);
 
-  const heading = useMemo(() => {
-    if (phase === "identifier") return "Sign in or create account";
-    if (phase === "clock") return "Verify identity to clock in";
-    return exists ? "Enter your password" : "Create a password to finish";
-  }, [phase, exists]);
-
-  const subhead = useMemo(() => {
-    if (phase === "identifier") {
-      return "Enter your email to continue. New customers will create an account; staff are matched to their admin-created profile.";
-    }
-    if (phase === "clock") {
-      return "Take a selfie to confirm it is you. This counts as your clock-in/out event.";
-    }
-    if (exists) return "Staff sign-ins unlock the workspace and clock-in with a selfie.";
-    return "Create your customer account to track orders and delivery status.";
-  }, [phase, exists]);
-
-  function resetFlow() {
-    setPhase("identifier");
-    setPassword("");
-    setError(null);
-    setMessage(null);
-    setRole(null);
-    setExists(false);
-    setClockStatus(null);
-    setClockedIn(false);
-    setForgotStatus(null);
-  }
-
-  useEffect(() => {
-    try {
-      const savedToken = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null);
-      const savedEmail = typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null;
-      const savedRole = normalizeStoredValue(typeof window !== "undefined" ? localStorage.getItem("mwalimu_role") : null);
-      if (savedToken && savedEmail) {
-        setRemembered({ email: savedEmail, role: savedRole, token: savedToken });
-        setEmail(savedEmail);
-        setAuthToken(savedToken);
-        setExists(true);
-        setRole(savedRole);
-        setPhase("password");
-        setMessage("You are already signed in. Continue to dashboard or switch account.");
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setOauthRedirect(`${window.location.origin}/sign-in`);
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
-    const roleParam = params.get("role");
-    const emailParam = params.get("email");
-    const oauthError = params.get("error");
-    if (oauthError) {
-      setError("Social sign-in failed. Please try again.");
-    }
-    if (token && emailParam) {
-      try {
-        localStorage.setItem("mwalimu_token", token);
-        localStorage.setItem("mwalimu_email", emailParam);
-        if (roleParam) localStorage.setItem("mwalimu_role", roleParam);
-      } catch {
-        // ignore
-      }
-      setAuthToken(token);
-      setEmail(emailParam);
-      setRole(roleParam);
-      setExists(true);
-      setMessage("Signed in with social account.");
-      window.history.replaceState({}, document.title, "/sign-in");
-      if (isStaffRole(roleParam)) {
-        setPhase("clock");
-      } else {
-        setTimeout(() => {
-          window.location.href = "/orders";
-        }, 400);
-      }
-    }
-  }, []);
-
-  async function handleLookup(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    setMessage(null);
-    setClockStatus(null);
-    setForgotStatus(null);
-
-    const trimmed = email.trim();
-    if (!trimmed) {
-      setError("Enter your email to continue.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await fetch(`${apiBase}/auth/identify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmed })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error((data?.error as string) ?? "Could not look up that email.");
-      }
-
-      setExists(Boolean(data.exists));
-      setRole(data.role ?? null);
-      setPhase("password");
-      setMessage(data.exists ? `We found your ${friendlyRole(data.role ?? null)} account.` : "New customer account. Set a password to continue.");
-    } catch (err: any) {
-      setError(err?.message ?? "Unable to continue. Try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handlePassword(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setMessage(null);
-    setClockStatus(null);
-    setForgotStatus(null);
 
     const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      setError("Email is missing. Go back and enter it again.");
-      return;
-    }
-    if (!password) {
-      setError("Enter your password to continue.");
+    if (!trimmedEmail || !password) {
+      setError("Enter your email and password to continue.");
       return;
     }
 
     setLoading(true);
     try {
-      const path = exists ? "/auth/login" : "/auth/register";
-      const res = await fetch(`${apiBase}${path}`, {
+      const res = await fetch(`${apiBase}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: trimmedEmail, password, marketingOptIn })
+        body: JSON.stringify({ email: trimmedEmail, password })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -206,294 +40,106 @@ export default function SignInPage() {
         throw new Error(detail);
       }
 
-      const nextRole = (data?.user?.role as string | undefined) ?? role ?? (exists ? null : "CUSTOMER");
-      setRole(nextRole ?? null);
-      setExists(true);
-      if (data?.token) {
-        try {
-          localStorage.setItem("mwalimu_token", data.token as string);
-          localStorage.setItem("mwalimu_email", trimmedEmail);
-          if (nextRole) localStorage.setItem("mwalimu_role", nextRole);
-          setAuthToken(data.token as string);
-        } catch {
-          // best-effort only
-        }
+      const role = (data?.user?.role as string | undefined) ?? null;
+      if (!role || role === "CUSTOMER") {
+        throw new Error("This portal is for staff only. Contact your administrator.");
       }
 
-      setMessage(exists ? "Signed in successfully." : "Account created and signed in.");
-
-      if (isStaffRole(nextRole ?? null)) {
-        setPhase("clock");
-        setClockStatus("Ready for biometric verification.");
-        // Redirect admins to workspace after a short delay
-        setTimeout(() => {
-          window.location.href = staffLanding(nextRole ?? null);
-        }, 400);
-      } else {
-        setTimeout(() => {
-          window.location.href = "/orders";
-        }, 400);
-      }
       try {
+        localStorage.setItem("mwalimu_token", data.token as string);
         localStorage.setItem("mwalimu_email", trimmedEmail);
-        if (nextRole) {
-          localStorage.setItem("mwalimu_role", nextRole);
-        } else {
-          localStorage.removeItem("mwalimu_role");
-        }
+        localStorage.setItem("mwalimu_role", role);
       } catch {
         // ignore
       }
-    } catch (err: any) {
-      setError(err?.message ?? "Unable to sign in. Try again.");
+
+      window.location.href = staffLanding(role);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unable to sign in. Try again.");
     } finally {
       setLoading(false);
     }
-  }
-
-  function handleBiometricCapture(event: React.MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    handleClockWithSelfie();
-  }
-
-  async function handleClockWithSelfie() {
-    if (!authToken) {
-      setError("Sign in again to clock in.");
-      return;
-    }
-    if (!selfieData) {
-      setError("Capture a selfie first.");
-      return;
-    }
-    setError(null);
-    setMessage(null);
-    setClockStatus("Uploading selfie...");
-    try {
-      const res = await fetch(`${apiBase}/clockings`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ selfieData, deviceRef: "selfie" })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error((data?.error as string) ?? "Clocking failed");
-      }
-      const nextClockedIn = data?.status === "CLOCKED_IN";
-      setClockedIn(nextClockedIn);
-      setClockStatus(nextClockedIn ? "Clocked in with selfie." : "Clocked out with selfie.");
-      setMessage("Clocking event recorded.");
-    } catch (err: any) {
-      setError(err?.message ?? "Clocking failed. Try again.");
-    }
-  }
-
-
-  function handleSelfieChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setSelfieData(typeof reader.result === "string" ? reader.result : null);
-    };
-    reader.readAsDataURL(file);
   }
 
   async function handleForgot(event: React.MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
-    setError(null);
-    setForgotStatus(null);
-    setMessage(null);
-
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setError("Enter your email first so we can send reset instructions.");
+      setError("Enter your email address first.");
       return;
     }
-
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(`${apiBase}/auth/forgot`, {
+      await fetch(`${apiBase}/auth/forgot`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmedEmail })
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error((data?.error as string) ?? "Could not start password reset.");
-      }
-      setForgotStatus(data?.message ?? "If that account exists, reset instructions are on the way.");
-    } catch (err: any) {
-      setError(err?.message ?? "Could not start password reset. Try again.");
+      setForgotSent(true);
+    } catch {
+      // fail silently — don't leak whether the email exists
+      setForgotSent(true);
     } finally {
       setLoading(false);
     }
   }
 
-  const staffBadge = isStaffRole(role);
-
   return (
-    <div className="signin-stack">
+    <div className="signin-stack" style={{ maxWidth: 440, margin: "3rem auto" }}>
       <div className="signin-card">
         <div className="brand-lockup">Mwalimu Cosmetics</div>
-        <h1 className="signin-title">{heading}</h1>
-        <p className="muted" style={{ margin: "0 0 0.5rem" }}>
-          {subhead}
+        <h1 className="signin-title">Staff Login</h1>
+        <p className="muted" style={{ margin: "0 0 1rem" }}>
+          Sign in with your staff credentials to access the workspace.
         </p>
 
-        <form onSubmit={phase === "identifier" ? handleLookup : handlePassword} className="signin-form">
-          {phase !== "identifier" && (
-            <div className="signin-identity">
-              <div>
-                <strong>{email}</strong>
-                <div className="pill subtle">{friendlyRole(role)}</div>
-              </div>
-              <button type="button" className="link-button" onClick={resetFlow}>
-                Change
-              </button>
-            </div>
-          )}
-
-          {phase === "identifier" ? (
-            <label className="input-group">
-              <span>Enter email</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-              />
-            </label>
-          ) : (
-            <label className="input-group">
-              <span>Password</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="********"
-                autoComplete={exists ? "current-password" : "new-password"}
-              />
-              <button className="link-button" type="button" onClick={handleForgot}>
-                Forgot password?
-              </button>
-            </label>
-          )}
-
-          {!exists && phase !== "identifier" && (
-            <label className="filter-item">
-              <input
-                type="checkbox"
-                checked={marketingOptIn}
-                onChange={(event) => setMarketingOptIn(event.target.checked)}
-              />
-              <span>Send me marketing updates by email</span>
-            </label>
-          )}
+        <form onSubmit={handleSubmit} className="signin-form">
+          <label className="input-group">
+            <span>Email</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@mwalimucosmetics.com"
+              autoComplete="email"
+              required
+            />
+          </label>
+          <label className="input-group">
+            <span>Password</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="current-password"
+              required
+            />
+            <button className="link-button" type="button" onClick={handleForgot} disabled={loading}>
+              Forgot password?
+            </button>
+          </label>
 
           <button className="button full" type="submit" disabled={loading}>
-            {loading ? "Working..." : phase === "identifier" ? "Continue" : exists ? "Sign in" : "Create account"}
+            {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
 
         {error && <div className="signin-error">{error}</div>}
-        {message && <div className="signin-success">{message}</div>}
-        {forgotStatus && <div className="signin-success">{forgotStatus}</div>}
-
-        {phase === "identifier" && (
-          <div className="signin-foot">
-            <p className="muted small">By continuing, you agree to the workspace terms for staff and store terms for shoppers.</p>
-            <div style={{ display: "grid", gap: "0.5rem", marginTop: "0.65rem" }}>
-              <a className="button ghost" href={`${apiBase}/auth/oauth/google/start?redirect=${encodeURIComponent(oauthRedirect)}`}>
-                Continue with Google
-              </a>
-              <a className="button ghost" href={`${apiBase}/auth/oauth/facebook/start?redirect=${encodeURIComponent(oauthRedirect)}`}>
-                Continue with Facebook
-              </a>
-            </div>
-            {remembered && (
-              <p className="muted small" style={{ marginTop: "0.35rem" }}>
-                Already signed in as {remembered.email}.{" "}
-                <a className="text-link" href={staffLanding(remembered.role ?? null)}>
-                  Open dashboard
-                </a>{" "}
-                or{" "}
-                <button className="link-button" type="button" onClick={resetFlow}>
-                  switch account
-                </button>
-              </p>
-            )}
+        {forgotSent && (
+          <div className="signin-success">
+            If that email is registered, reset instructions are on the way.
           </div>
         )}
-      </div>
 
-      <div className="card signin-sidecard">
-        <div className="hero-eyebrow" style={{ marginBottom: "0.3rem" }}>
-          What happens after sign-in
-        </div>
-        <p className="muted" style={{ margin: 0 }}>
-          Customers land on orders and delivery history. Staff land on their workspace and will be prompted to clock in with a selfie
-          before work begins.
-        </p>
-        <div className="sidecard-grid">
-          <div>
-            <strong>Role from database</strong>
-            <p className="muted" style={{ margin: "0.15rem 0 0" }}>
-              {friendlyRole(role)}
-            </p>
-          </div>
-          <div>
-            <strong>Account type</strong>
-            <p className="muted" style={{ margin: "0.15rem 0 0" }}>
-              {exists ? "Existing profile" : "New customer will be created"}
-            </p>
-          </div>
-          <div>
-            <strong>Biometric clock-in</strong>
-            <p className="muted" style={{ margin: "0.15rem 0 0" }}>
-              {staffBadge ? "Shown after password for staff" : "Hidden for customers"}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {phase === "clock" && staffBadge && (
-        <div className="signin-card">
-          <div className="hero-eyebrow" style={{ marginBottom: "0.25rem" }}>
-            Staff clock-in (selfie)
-          </div>
-          <h2 style={{ margin: "0 0 0.3rem" }}>Finish with selfie check</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            You are signed in as {friendlyRole(role)}. Capture a selfie to clock in before opening the workspace.
+        <div className="signin-foot">
+          <p className="muted small">
+            This portal is for authorised staff only.{" "}
+            <a className="text-link" href="/">Back to home</a>
           </p>
-          <div className="signin-identity" style={{ margin: "0.5rem 0" }}>
-            <div>
-              <strong>{email}</strong>
-              <div className="pill subtle">Staff</div>
-            </div>
-            <button type="button" className="link-button" onClick={resetFlow}>
-              Use another account
-            </button>
-          </div>
-          <div style={{ display: "grid", gap: "0.5rem" }}>
-            <label className="input-group">
-              <span>Selfie fallback</span>
-              <input type="file" accept="image/*" capture="user" onChange={handleSelfieChange} />
-            </label>
-            <button className="button ghost full" type="button" onClick={handleBiometricCapture} disabled={loading}>
-              {clockedIn ? "Clock out with selfie" : "Clock in with selfie"}
-            </button>
-          </div>
-          {clockStatus && (
-            <p className="muted" style={{ marginTop: "0.5rem" }}>
-              {clockStatus}
-            </p>
-          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
