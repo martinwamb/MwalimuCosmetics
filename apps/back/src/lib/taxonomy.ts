@@ -1,6 +1,4 @@
-import type { Prisma } from "@prisma/client";
-import prismaClientPkg from "@prisma/client";
-const { HomepageRuleType, HomepageSort, TagSelection } = prismaClientPkg as any;
+import { HomepageRuleType, HomepageSort, Prisma, TagSelection } from "@prisma/client";
 
 import { prisma } from "./prisma.js";
 
