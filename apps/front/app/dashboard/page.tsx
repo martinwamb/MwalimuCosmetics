@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const POLL_MS = 2 * 60 * 1000; // re-fetch every 2 minutes
 
 type PaymentBreakdown = { name: string; transactions: number; total: number };
 type TopProduct       = { code: string; name: string; qtySold: number; revenue: number };
@@ -21,18 +22,29 @@ function fmt(n: number) {
 }
 
 export default function DashboardPage() {
-  const [token, setToken]   = useState("");
-  const [snap, setSnap]     = useState<Snapshot | null>(null);
+  const [token, setToken]     = useState("");
+  const [snap, setSnap]       = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastFetch, setLastFetch] = useState<Date | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => { setToken(localStorage.getItem("mwalimu_token") ?? ""); }, []);
 
   useEffect(() => {
     if (!token) return;
-    fetch(`${apiBase}/sync/metrics/latest`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => { setSnap(d); setLoading(false); })
-      .catch(() => setLoading(false));
+
+    function fetchMetrics(showLoading = false) {
+      if (showLoading) setLoading(true);
+      fetch(`${apiBase}/sync/metrics/latest`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => { setSnap(d); setLastFetch(new Date()); })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+
+    fetchMetrics(true);
+    timerRef.current = setInterval(() => fetchMetrics(false), POLL_MS);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [token]);
 
   const avg = snap && snap.transactions > 0 ? snap.totalSales / snap.transactions : 0;
@@ -63,7 +75,10 @@ export default function DashboardPage() {
             {new Date(snap.forDate).toLocaleDateString("en-KE", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}
           </h2>
           <p className="muted" style={{ margin:0, fontSize:"0.82rem" }}>
-            Last synced: {new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" })}
+            POS synced at {new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" })}
+            {lastFetch && (
+              <> &middot; Dashboard updated {lastFetch.toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" })} &middot; <span style={{ color:"var(--teal)" }}>auto-refreshes every 2 min</span></>
+            )}
           </p>
         </div>
       </div>
