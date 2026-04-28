@@ -104,21 +104,19 @@ async function pushMetrics(conn) {
 async function syncProducts(conn) {
   log("Syncing product catalogue…");
 
+  // Get product catalogue (recent 90 days = actively sold items)
   const products = await query(conn,
-    `SELECT
-       pd.code AS sku,
-       MAX(pd.description) AS name,
-       MAX(pd.price) AS price,
-       MAX(pd.icateg) AS category,
-       COALESCE((
-         SELECT SUM(CASE WHEN s.transign='P' THEN s.qty WHEN s.transign='N' THEN -s.qty ELSE 0 END)
-         FROM stran s WHERE s.CODE = pd.code
-       ), 0) AS stockQty
+    `SELECT pd.code AS sku, MAX(pd.description) AS name,
+            MAX(pd.price) AS price, MAX(pd.icateg) AS category,
+            SUM(pd.qty) AS totalSold
      FROM pos_details pd
-     WHERE pd.code IS NOT NULL AND pd.code != '' AND pd.code != '0' AND pd.price > 0
+     JOIN pos_header ph ON pd.receiptno = ph.receiptno
+     WHERE pd.code IS NOT NULL AND pd.code != '' AND pd.code != '0'
+       AND pd.price > 0 AND ph.trandate >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+       AND (ph.is_return = 0 OR ph.is_return IS NULL)
      GROUP BY pd.code
-     ORDER BY name
-     LIMIT 5000`);
+     ORDER BY totalSold DESC
+     LIMIT 3000`);
 
   if (!products.length) { log("No products found."); return; }
 
@@ -127,7 +125,7 @@ async function syncProducts(conn) {
     name:     p.name,
     price:    Number(p.price),
     category: p.category || "Uncategorised",
-    stockQty: Number(p.stockQty),
+    stockQty: Number(p.totalSold) > 0 ? 999 : 0, // placeholder until proper stock sync
   })) }, SECRET);
 
   log(r.status === 200 ? `Products synced: ${products.length}` : `Product sync failed: ${r.body}`);
