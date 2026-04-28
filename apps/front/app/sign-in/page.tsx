@@ -4,9 +4,7 @@ import { useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-function staffLanding(role: string) {
-  if (role === "ADMIN") return "/dashboard/admin";
-  if (role === "ACCOUNTS") return "/dashboard/products";
+function staffLanding(_role: string) {
   return "/dashboard";
 }
 
