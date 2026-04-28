@@ -416,3 +416,17 @@ enum TagSelection {
   SINGLE
   MULTI
 }
+
+model MetricsSnapshot {
+  id           String   @id @default(cuid())
+  capturedAt   DateTime @default(now())
+  forDate      String   // "2026-04-28"
+  transactions Int
+  totalSales   Float
+  cashSales    Float
+  mpesaSales   Float
+  otherSales   Float
+  paymentBreakdown Json // [{name, transactions, total}]
+  topProducts  Json     // [{code, name, qtySold, revenue}]
+  byStaff      Json     // [{staff, transactions, total}]
+}

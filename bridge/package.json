@@ -1,0 +1,12 @@
+{
+  "name": "mwalimu-sync-agent",
+  "version": "1.0.0",
+  "description": "Pushes POS metrics from MySQL to Hetzner every 10 minutes",
+  "main": "pusher.js",
+  "scripts": {
+    "start": "node pusher.js"
+  },
+  "dependencies": {
+    "mysql": "^2.18.1"
+  }
+}
