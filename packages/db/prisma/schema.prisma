@@ -131,6 +131,12 @@ model SalesOrder {
   tax            Decimal         @db.Decimal(12, 2) @default(0)
   discount       Decimal         @db.Decimal(12, 2) @default(0)
   total          Decimal         @db.Decimal(12, 2)
+  amountPaid     Decimal         @db.Decimal(12, 2) @default(0)
+  changeDue      Decimal         @db.Decimal(12, 2) @default(0)
+  paymentDetails Json?
+  notes          String?
+  mysqlSynced    Boolean         @default(false)
+  mysqlReceiptNo String?
   createdAt      DateTime        @default(now())
   items          SalesOrderItem[]
   payments       Payment[]

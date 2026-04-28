@@ -20,6 +20,7 @@ import { router as supplierRouter } from "./routes/suppliers.js";
 import { router as inventoryRouter } from "./routes/inventory.js";
 import { router as reportsRouter } from "./routes/reports.js";
 import { router as syncRouter } from "./routes/sync.js";
+import { router as posRouter }  from "./routes/pos.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
@@ -56,6 +57,7 @@ app.use("/suppliers", supplierRouter);
 app.use("/inventory", inventoryRouter);
 app.use("/reports", reportsRouter);
 app.use("/sync", syncRouter);
+app.use("/pos",  posRouter);
 
 seedAdmin()
   .catch((err) => {
