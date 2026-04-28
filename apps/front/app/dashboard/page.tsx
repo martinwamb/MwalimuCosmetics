@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const POLL_MS = 2 * 60 * 1000; // re-fetch every 2 minutes
+const POLL_MS = 60 * 1000; // re-fetch every 60 seconds
 
 type PaymentBreakdown = { name: string; transactions: number; total: number };
 type TopProduct       = { code: string; name: string; qtySold: number; revenue: number };
@@ -22,29 +22,48 @@ function fmt(n: number) {
 }
 
 export default function DashboardPage() {
-  const [token, setToken]     = useState("");
-  const [snap, setSnap]       = useState<Snapshot | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [token, setToken]         = useState("");
+  const [snap, setSnap]           = useState<Snapshot | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [countdown, setCountdown] = useState(POLL_MS / 1000);
+  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tokenRef    = useRef("");
 
-  useEffect(() => { setToken(localStorage.getItem("mwalimu_token") ?? ""); }, []);
+  useEffect(() => {
+    const t = localStorage.getItem("mwalimu_token") ?? "";
+    setToken(t);
+    tokenRef.current = t;
+  }, []);
+
+  function fetchMetrics(isManual = false) {
+    if (!tokenRef.current) return;
+    if (isManual) setRefreshing(true);
+    fetch(`${apiBase}/sync/metrics/latest`, {
+      headers: { Authorization: `Bearer ${tokenRef.current}` },
+      cache: "no-store",
+    })
+      .then(r => r.json())
+      .then(d => { setSnap(d); setLastFetch(new Date()); setCountdown(POLL_MS / 1000); })
+      .catch(() => {})
+      .finally(() => { setLoading(false); setRefreshing(false); });
+  }
 
   useEffect(() => {
     if (!token) return;
 
-    function fetchMetrics(showLoading = false) {
-      if (showLoading) setLoading(true);
-      fetch(`${apiBase}/sync/metrics/latest`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => { setSnap(d); setLastFetch(new Date()); })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    }
+    fetchMetrics();
 
-    fetchMetrics(true);
-    timerRef.current = setInterval(() => fetchMetrics(false), POLL_MS);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    timerRef.current = setInterval(() => fetchMetrics(), POLL_MS);
+    countRef.current = setInterval(() => setCountdown(c => c <= 1 ? POLL_MS / 1000 : c - 1), 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (countRef.current) clearInterval(countRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   const avg = snap && snap.transactions > 0 ? snap.totalSales / snap.transactions : 0;
@@ -69,17 +88,28 @@ export default function DashboardPage() {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:"1.25rem" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"0.5rem" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:"0.75rem" }}>
         <div>
           <h2 style={{ margin:0, fontWeight:800, letterSpacing:"-0.02em" }}>
             {new Date(snap.forDate).toLocaleDateString("en-KE", { weekday:"long", day:"numeric", month:"long", year:"numeric" })}
           </h2>
           <p className="muted" style={{ margin:0, fontSize:"0.82rem" }}>
-            POS synced at {new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" })}
-            {lastFetch && (
-              <> &middot; Dashboard updated {lastFetch.toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" })} &middot; <span style={{ color:"var(--teal)" }}>auto-refreshes every 2 min</span></>
-            )}
+            POS data as of {new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" })}
+            {lastFetch && <> &middot; page fetched {lastFetch.toLocaleTimeString("en-KE", { hour:"2-digit", minute:"2-digit" })}</>}
           </p>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:"0.75rem" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"0.4rem", fontSize:"0.82rem", color:"var(--muted)" }}>
+            <span style={{ display:"inline-block", width:8, height:8, borderRadius:"50%", background: refreshing ? "#f59e0b" : "#10b981", animation: refreshing ? "pulse 1s infinite" : "none" }} />
+            {refreshing ? "Refreshing…" : `Next refresh in ${countdown}s`}
+          </div>
+          <button
+            className="button ghost"
+            style={{ padding:"0.3rem 0.75rem", fontSize:"0.82rem" }}
+            disabled={refreshing}
+            onClick={() => fetchMetrics(true)}>
+            ↺ Refresh now
+          </button>
         </div>
       </div>
 
