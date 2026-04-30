@@ -12,3 +12,10 @@ yarn.lock
 *.log
 
 mwalimu/
+
+# Claude Code local settings
+.claude/
+
+# Bridge build artifacts and sensitive scripts
+bridge/MwalimuSyncAgent.zip
+bridge/fix-mysql-privileges.bat
