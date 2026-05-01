@@ -108,9 +108,9 @@ async function getSyncToken() {
   throw new Error("Auth failed: " + r.body);
 }
 
-// ── 1. Push today's metrics ───────────────────────────────────
-async function pushMetrics(conn, today) {
-  log("Syncing metrics…");
+// ── 1. Build metrics from MySQL (read-only) ───────────────────
+async function buildMetrics(conn, today) {
+  log("Reading metrics from MySQL…");
 
   // Confirmed paid sales only (posted=1)
   const [paid] = await query(conn,
@@ -217,7 +217,7 @@ async function pushMetrics(conn, today) {
      GROUP BY staff ORDER BY sales DESC`,
     [today]);
 
-  const r = await apiPost("/sync/metrics", {
+  return {
     forDate:           today,
     transactions:      Number(paid.transactions),
     totalSales:        Number(paid.totalSales),
@@ -232,19 +232,23 @@ async function pushMetrics(conn, today) {
     paymentBreakdown:  breakdown.map(b => ({ name: b.name, transactions: Number(b.transactions), total: Number(b.total) })),
     topProducts:       topProducts.map(p => ({ code: p.code, name: p.name, qtySold: Number(p.qtySold), revenue: Number(p.revenue) })),
     byStaff:           byStaff.map(s => ({ staff: s.staff, transactions: Number(s.transactions), total: Number(s.sales), returns: Number(s.returns) })),
-  }, SECRET);
+  };
+}
 
+async function pushMetrics(data) {
+  log("Pushing metrics to server…");
+  const r = await apiPost("/sync/metrics", data, SECRET);
   if (r.status === 200) {
-    log(`Metrics pushed — ${paid.transactions} txns, KES ${Number(paid.totalSales).toLocaleString("en-KE")} sales, KES ${profit.toLocaleString("en-KE")} profit`);
+    log(`Metrics pushed — ${data.transactions} txns, KES ${data.totalSales.toLocaleString("en-KE")} sales, KES ${data.profit.toLocaleString("en-KE")} profit`);
   } else {
     log(`Metrics push failed [${r.status}]: ${r.body}`);
   }
 }
 
-// ── 2. Sync full product catalogue with real stock ────────────
+// ── 2. Build product catalogue from MySQL (read-only) ─────────
 // Heavy queries — runs at most once per hour to protect MySQL.
-async function syncProducts(conn) {
-  log("Syncing product catalogue…");
+async function buildProducts(conn) {
+  log("Reading product catalogue from MySQL…");
 
   // All unique SKUs ever sold: name, price, category
   const soldProducts = await query(conn,
@@ -254,7 +258,7 @@ async function syncProducts(conn) {
      WHERE pd.code IS NOT NULL AND pd.code != '' AND pd.code != '0' AND pd.price > 0
      GROUP BY pd.code`);
 
-  if (!soldProducts.length) { log("No products found."); return; }
+  if (!soldProducts.length) { log("No products found."); return null; }
 
   // Full stock ledger — SUM(qty) over all movements
   const stockRows = await query(conn,
@@ -263,13 +267,17 @@ async function syncProducts(conn) {
   const stockMap = Object.create(null);
   for (const s of stockRows) stockMap[s.sku] = Number(s.stockQty);
 
-  const products = soldProducts.map(p => ({
+  return soldProducts.map(p => ({
     sku:      p.sku,
     name:     p.name,
     price:    Number(p.price),
     category: p.category || "Uncategorised",
     stockQty: Math.max(0, Math.round(stockMap[p.sku] ?? 0)),
   }));
+}
+
+async function syncProducts(products) {
+  log("Pushing product catalogue to server…");
 
   // Smaller batches (200) with a 2-minute timeout each — avoids ECONNRESET
   // on slow shop internet when uploading thousands of products.
@@ -380,43 +388,65 @@ async function writeBackSales(conn, token) {
   }
 }
 
+function openConn() {
+  return new Promise((res, rej) => {
+    const c = mysql.createConnection(MYSQL);
+    c.connect(e => e ? rej(e) : res(c));
+  });
+}
+
 // ── Main ─────────────────────────────────────────────────────
 async function run() {
   log(`=== Mwalimu Sync Agent v${AGENT_VERSION} starting ===`);
-
-  // Check for update before doing anything else
   await checkForUpdate();
 
   const today = kenyanDate();
-  const conn  = mysql.createConnection(MYSQL);
-  await new Promise((res, rej) => conn.connect(e => e ? rej(e) : res()));
+  const cp    = loadCheckpoint();
+  const nowMs = Date.now();
+
+  // ── Phase 1: read from MySQL, close connection before long uploads ──
+  const conn1 = await openConn();
   log("Connected to MySQL on server-pc.");
 
-  const [countRow] = await query(conn,
+  const [countRow] = await query(conn1,
     `SELECT COUNT(*) AS cnt FROM pos_header WHERE DATE(trandate) = ? AND posted = 1`, [today]);
   const currentCount = Number(countRow.cnt);
-  const cp           = loadCheckpoint();
   const hasNewData   = currentCount !== cp.txCount || cp.date !== today;
 
-  let token;
-  try { token = await getSyncToken(); } catch (e) { log("Auth failed: " + e.message); }
-
+  let metricsData = null;
   if (hasNewData) {
-    await pushMetrics(conn, today).catch(e => log("Metrics error: " + e.message));
+    metricsData = await buildMetrics(conn1, today).catch(e => { log("Metrics build error: " + e.message); return null; });
   } else {
     log(`No new transactions (${currentCount} posted today). Metrics skipped.`);
   }
 
-  // Products + stock: at most once per hour (heavy stran aggregate)
-  const nowMs          = Date.now();
   const productSyncDue = cp.date !== today || nowMs - (cp.lastProductSync || 0) > 60 * 60 * 1000;
+  let productsData = null;
   if (productSyncDue) {
-    await syncProducts(conn).catch(e => log("Products error: " + e.message));
+    productsData = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
   }
 
+  conn1.end(); // Close MySQL before long API uploads — prevents server-side timeout
+
+  // ── Phase 2: push to API (no MySQL needed) ──
+  let token;
+  try { token = await getSyncToken(); } catch (e) { log("Auth failed: " + e.message); }
+
+  if (metricsData) {
+    await pushMetrics(metricsData).catch(e => log("Metrics push error: " + e.message));
+  }
+  if (productsData) {
+    await syncProducts(productsData).catch(e => log("Products push error: " + e.message));
+  }
+
+  // ── Phase 3: reconnect MySQL for write-back (pending changes + web sales) ──
   if (token) {
-    await applyPendingChanges(conn, token).catch(e => log("PendingChanges error: " + e.message));
-    await writeBackSales(conn, token).catch(e => log("Writeback error: " + e.message));
+    const conn2 = await openConn().catch(e => { log("MySQL reconnect failed: " + e.message); return null; });
+    if (conn2) {
+      await applyPendingChanges(conn2, token).catch(e => log("PendingChanges error: " + e.message));
+      await writeBackSales(conn2, token).catch(e => log("Writeback error: " + e.message));
+      conn2.end();
+    }
   }
 
   saveCheckpoint({
@@ -424,8 +454,6 @@ async function run() {
     date:            today,
     lastProductSync: productSyncDue ? nowMs : (cp.lastProductSync || 0),
   });
-
-  conn.end();
   log("=== Sync complete ===");
 }
 
