@@ -42,7 +42,7 @@ function query(conn, sql, params) {
   );
 }
 
-function apiRequest(method, path, body, secret, token) {
+function apiRequest(method, path, body, secret, token, timeoutMs) {
   return new Promise((res, rej) => {
     const data = body ? JSON.stringify(body) : null;
     const req  = https.request({
@@ -59,14 +59,15 @@ function apiRequest(method, path, body, secret, token) {
       r.on("end", () => res({ status: r.statusCode, body: Buffer.concat(chunks).toString() }));
     });
     req.on("error", rej);
-    req.setTimeout(20000, () => req.destroy(new Error("timeout")));
+    req.setTimeout(timeoutMs || 20000, () => req.destroy(new Error("timeout")));
     if (data) req.write(data);
     req.end();
   });
 }
 
-const apiPost = (path, body, secret, token) => apiRequest("POST", path, body, secret, token);
-const apiGet  = (path, token)               => apiRequest("GET",  path, null,  null,   token);
+const apiPost      = (path, body, secret, token) => apiRequest("POST", path, body, secret, token);
+const apiPostLarge = (path, body, secret)        => apiRequest("POST", path, body, secret, null, 120000);
+const apiGet       = (path, token)               => apiRequest("GET",  path, null,  null,  token);
 
 function loadCheckpoint() {
   try { return JSON.parse(fs.readFileSync(CHECKPOINT_FILE, "utf8")); }
@@ -287,14 +288,21 @@ async function syncProducts(conn) {
     stockQty: Math.max(0, Math.round(stockMap[p.sku] ?? 0)),
   }));
 
-  const BATCH = 500;
+  // Smaller batches (200) with a 2-minute timeout each — avoids ECONNRESET
+  // on slow shop internet when uploading thousands of products.
+  const BATCH = 200;
   let synced = 0;
   for (let i = 0; i < products.length; i += BATCH) {
-    const r = await apiPost("/sync/products", { products: products.slice(i, i + BATCH) }, SECRET);
-    if (r.status === 200) synced += BATCH;
-    else log(`Product batch ${Math.floor(i / BATCH) + 1} failed: ${r.body}`);
+    const batchNum = Math.floor(i / BATCH) + 1;
+    const r = await apiPostLarge("/sync/products", { products: products.slice(i, i + BATCH) }, SECRET);
+    if (r.status === 200) {
+      synced += Math.min(BATCH, products.length - i);
+      log(`  Batch ${batchNum} OK (${synced}/${products.length})`);
+    } else {
+      log(`  Batch ${batchNum} failed [${r.status}]: ${r.body.slice(0, 120)}`);
+    }
   }
-  log(`Products synced: ${Math.min(synced, products.length)} of ${products.length}`);
+  log(`Products synced: ${synced} of ${products.length}`);
 }
 
 // ── 3. Apply pending changes from cloud ──────────────────────
