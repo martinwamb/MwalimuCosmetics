@@ -172,7 +172,8 @@ async function pushMetrics(conn, today) {
     profit = Math.round(profit);
   }
 
-  // Payment breakdown from pos_payment_details (primary source)
+  // Payment breakdown — all posted=1 transactions have a ppd entry (verified).
+  // No fallback needed: every confirmed sale records its payment method.
   const breakdown = await query(conn,
     `SELECT ppd.payname AS name,
             COUNT(DISTINCT ppd.receiptno) AS transactions,
@@ -185,17 +186,6 @@ async function pushMetrics(conn, today) {
      ORDER BY total DESC`,
     [today]);
 
-  // Fallback for receipts missing from pos_payment_details
-  const missing = await query(conn,
-    `SELECT ph.tyype, COALESCE(SUM(ph.amount), 0) AS total
-     FROM pos_header ph
-     LEFT JOIN pos_payment_details ppd ON ph.receiptno = ppd.receiptno
-     WHERE DATE(ph.trandate) = ? AND ph.posted = 1
-       AND (ph.is_return = 0 OR ph.is_return IS NULL)
-       AND ppd.receiptno IS NULL
-     GROUP BY ph.tyype`,
-    [today]);
-
   let cashSales = 0, mpesaSales = 0, otherSales = 0;
   for (const b of breakdown) {
     const t = Number(b.total);
@@ -203,13 +193,6 @@ async function pushMetrics(conn, today) {
     if (n === "CASH") cashSales += t;
     else if (n === "MPESA") mpesaSales += t;
     else otherSales += t;
-  }
-  for (const m of missing) {
-    const t    = Number(m.total);
-    const type = (m.tyype || "").toLowerCase();
-    if (type === "cash sale")        cashSales  += t;
-    else if (type === "mobile money") mpesaSales += t;
-    else                              otherSales += t;
   }
 
   // Top 10 products by revenue (posted sales only)

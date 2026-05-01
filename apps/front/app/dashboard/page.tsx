@@ -83,10 +83,8 @@ export default function DashboardPage() {
   );
 
   const avg        = snap.transactions > 0 ? snap.totalSales / snap.transactions : 0;
-  const posTime    = new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const ppdTotal   = snap.paymentBreakdown?.reduce((s, p) => s + p.total, 0) ?? 0;
-  const untracked  = snap.totalSales - ppdTotal;
-  const hasDrafts  = (snap.draftTransactions ?? 0) > 0;
+  const posTime   = new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const hasDrafts = (snap.draftTransactions ?? 0) > 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -185,11 +183,6 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
-          {untracked > 1 && (
-            <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.8rem" }}>
-              {fmt(Math.round(untracked))} in transactions where the terminal did not record a payment method.
-            </p>
-          )}
         </div>
       )}
 
