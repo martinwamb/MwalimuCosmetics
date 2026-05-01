@@ -12,13 +12,15 @@ type Snapshot = {
   forDate: string; capturedAt: string;
   transactions: number; totalSales: number; tax: number;
   cashSales: number; mpesaSales: number; otherSales: number;
+  draftTransactions: number; draftSales: number;
+  purchases: number; profit: number;
   paymentBreakdown: PaymentBreakdown[];
   topProducts: TopProduct[];
   byStaff: StaffRow[];
 };
 
 function fmt(n: number) {
-  return "KES " + n.toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return "KES " + (n ?? 0).toLocaleString("en-KE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 export default function DashboardPage() {
@@ -28,14 +30,13 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastFetch, setLastFetch]   = useState<Date | null>(null);
   const [countdown, setCountdown]   = useState(POLL_MS / 1000);
-  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const countRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const tokenRef  = useRef("");
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tokenRef = useRef("");
 
   useEffect(() => {
     const t = localStorage.getItem("mwalimu_token") ?? "";
-    setToken(t);
-    tokenRef.current = t;
+    setToken(t); tokenRef.current = t;
   }, []);
 
   function fetchMetrics(isManual = false) {
@@ -63,10 +64,6 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const avg = snap && snap.transactions > 0 ? snap.totalSales / snap.transactions : 0;
-  // Net sales = total collected; tax is embedded in that total (not additive)
-  const netSales = snap ? snap.totalSales : 0;
-
   if (loading) return (
     <div className="dash-coming-soon">
       <div className="dash-coming-soon-icon" style={{ fontSize: "2rem" }}>⏳</div>
@@ -85,11 +82,16 @@ export default function DashboardPage() {
     </div>
   );
 
-  // POS data timestamp shown in Kenyan time
-  const posTime = new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const avg        = snap.transactions > 0 ? snap.totalSales / snap.transactions : 0;
+  const posTime    = new Date(snap.capturedAt).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const ppdTotal   = snap.paymentBreakdown?.reduce((s, p) => s + p.total, 0) ?? 0;
+  const untracked  = snap.totalSales - ppdTotal;
+  const hasDrafts  = (snap.draftTransactions ?? 0) > 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+
+      {/* Header row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
         <div>
           <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>
@@ -97,45 +99,65 @@ export default function DashboardPage() {
           </h2>
           <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
             POS data as of {posTime}
-            {lastFetch && <> &middot; page fetched {lastFetch.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</>}
+            {lastFetch && <> &middot; fetched {lastFetch.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</>}
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.82rem", color: "var(--muted)" }}>
-            <span style={{
-              display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-              background: refreshing ? "#f59e0b" : "#10b981",
-              animation: refreshing ? "pulse 1s infinite" : "none",
-            }} />
+            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: refreshing ? "#f59e0b" : "#10b981", animation: refreshing ? "pulse 1s infinite" : "none" }} />
             {refreshing ? "Refreshing…" : `Next refresh in ${countdown}s`}
           </div>
-          <button
-            className="button ghost"
-            style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
-            disabled={refreshing}
-            onClick={() => fetchMetrics(true)}>
+          <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }} disabled={refreshing} onClick={() => fetchMetrics(true)}>
             ↺ Refresh now
           </button>
         </div>
       </div>
 
-      {/* Primary metrics */}
-      <div className="stat-grid">
-        {[
-          { label: "Total Sales",    value: fmt(netSales) },
-          { label: "Transactions",   value: snap.transactions.toLocaleString() },
-          { label: "Average Sale",   value: fmt(avg) },
-          { label: "VAT Collected",  value: fmt(snap.tax ?? 0) },
-          { label: "Cash",           value: fmt(snap.cashSales) },
-          { label: "M-Pesa",         value: fmt(snap.mpesaSales) },
-          { label: "Bank / Other",   value: fmt(snap.otherSales) },
-        ].map(s => (
-          <div key={s.label} className="stat-card">
-            <div className="stat-label">{s.label}</div>
-            <div className="stat-value">{s.value}</div>
+      {/* Primary 4-card row */}
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+        <div className="stat-card">
+          <div className="stat-label">Total Sales</div>
+          <div className="stat-value">{fmt(snap.totalSales)}</div>
+          <div className="muted" style={{ fontSize: "0.75rem", marginTop: "0.2rem" }}>{snap.transactions} transactions</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Avg per Transaction</div>
+          <div className="stat-value">{fmt(avg)}</div>
+          <div className="muted" style={{ fontSize: "0.75rem", marginTop: "0.2rem" }}>VAT collected: {fmt(snap.tax ?? 0)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Purchases (Stock In)</div>
+          <div className="stat-value">{fmt(snap.purchases ?? 0)}</div>
+          <div className="muted" style={{ fontSize: "0.75rem", marginTop: "0.2rem" }}>goods received today</div>
+        </div>
+        <div className="stat-card" style={{ borderLeft: "3px solid var(--teal)" }}>
+          <div className="stat-label">Gross Profit</div>
+          <div className="stat-value" style={{ color: (snap.profit ?? 0) >= 0 ? "var(--teal)" : "#dc2626" }}>
+            {fmt(snap.profit ?? 0)}
           </div>
-        ))}
+          <div className="muted" style={{ fontSize: "0.75rem", marginTop: "0.2rem" }}>
+            {snap.totalSales > 0 ? Math.round((snap.profit ?? 0) / snap.totalSales * 100) : 0}% margin on posted sales
+          </div>
+        </div>
       </div>
+
+      {/* Draft sales warning card */}
+      {hasDrafts && (
+        <div className="card" style={{ borderLeft: "3px solid #f59e0b", background: "#fffbeb" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "#92400e" }}>Draft Sales (unposted)</div>
+              <div className="muted" style={{ fontSize: "0.82rem", marginTop: "0.15rem" }}>
+                These transactions are in the POS but payment has not been confirmed yet. They are not included in Total Sales.
+              </div>
+            </div>
+            <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+              <div style={{ fontWeight: 800, fontSize: "1.25rem", color: "#92400e" }}>{fmt(snap.draftSales ?? 0)}</div>
+              <div className="muted" style={{ fontSize: "0.78rem" }}>{snap.draftTransactions ?? 0} unposted transactions</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payment breakdown */}
       {snap.paymentBreakdown?.length > 0 && (
@@ -143,7 +165,7 @@ export default function DashboardPage() {
           <h3 style={{ margin: "0 0 0.75rem", fontSize: "0.95rem", fontWeight: 700 }}>Payment Breakdown</h3>
           <div className="table-wrap">
             <table className="data-table">
-              <thead><tr><th>Method</th><th>Transactions</th><th>Total</th><th>Share of POS total</th></tr></thead>
+              <thead><tr><th>Method</th><th>Transactions</th><th>Total</th><th>Share of sales</th></tr></thead>
               <tbody>
                 {snap.paymentBreakdown.map(p => (
                   <tr key={p.name}>
@@ -155,9 +177,7 @@ export default function DashboardPage() {
                         <div style={{ flex: 1, height: 6, background: "#f3f4f6", borderRadius: 99 }}>
                           <div style={{ width: `${Math.min(100, Math.round(p.total / snap.totalSales * 100))}%`, height: "100%", background: "var(--teal)", borderRadius: 99 }} />
                         </div>
-                        <span style={{ fontSize: "0.82rem", minWidth: 34 }}>
-                          {Math.round(p.total / snap.totalSales * 100)}%
-                        </span>
+                        <span style={{ fontSize: "0.82rem", minWidth: 34 }}>{Math.round(p.total / snap.totalSales * 100)}%</span>
                       </div>
                     </td>
                   </tr>
@@ -165,15 +185,11 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
-          {(() => {
-            const ppdTotal = snap.paymentBreakdown.reduce((s, p) => s + p.total, 0);
-            const untracked = snap.totalSales - ppdTotal;
-            return untracked > 1 ? (
-              <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.8rem" }}>
-                KES {Math.round(untracked).toLocaleString("en-KE")} in transactions where the payment terminal did not record a payment method.
-              </p>
-            ) : null;
-          })()}
+          {untracked > 1 && (
+            <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.8rem" }}>
+              {fmt(Math.round(untracked))} in transactions where the terminal did not record a payment method.
+            </p>
+          )}
         </div>
       )}
 

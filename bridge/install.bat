@@ -70,22 +70,32 @@ if exist "%OLD_VBS%" (
 )
 
 :: Remove any old scheduled tasks
-schtasks /delete /tn "MwalimuSync"     /f >nul 2>&1
-schtasks /delete /tn "MwalimuSyncLoop" /f >nul 2>&1
+schtasks /delete /tn "MwalimuSync"       /f >nul 2>&1
+schtasks /delete /tn "MwalimuSyncLoop"   /f >nul 2>&1
+schtasks /delete /tn "MwalimuDailyBackup" /f >nul 2>&1
 
-:: Register Task Scheduler task — runs as SYSTEM at boot, restarts on failure.
-:: This survives log-offs, user switches, and doesn't depend on who is logged in.
+:: Register sync loop — runs at every boot under SYSTEM account
 echo.
-echo Registering Windows Task Scheduler task...
+echo Registering sync loop task...
 schtasks /create /tn "MwalimuSyncLoop" /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\MwalimuSync\loop.ps1" /sc ONSTART /ru SYSTEM /rl HIGHEST /f >nul
 if %errorlevel% equ 0 (
-  echo [OK] Task registered: runs at every boot under SYSTEM account.
+  echo [OK] Sync loop: starts at every boot.
 ) else (
-  echo [WARNING] Task Scheduler registration failed. Falling back to startup folder.
+  echo [WARNING] Task Scheduler registration failed. Falling back to Startup folder.
   set STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\MwalimuSync.vbs
   echo Set objShell = CreateObject("WScript.Shell") > "%STARTUP%"
   echo objShell.Run "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\MwalimuSync\loop.ps1", 0, False >> "%STARTUP%"
-  echo [OK] Auto-start on login configured via Startup folder.
+  echo [OK] Startup folder fallback configured.
+)
+
+:: Register daily backup — runs at 17:00 Kenya time under SYSTEM account
+echo.
+echo Registering daily backup task (5:00 PM)...
+schtasks /create /tn "MwalimuDailyBackup" /tr "\"C:\Program Files\nodejs\node.exe\" C:\MwalimuSync\daily-backup.js" /sc DAILY /st 17:00 /ru SYSTEM /rl HIGHEST /f >nul
+if %errorlevel% equ 0 (
+  echo [OK] Daily backup: runs at 17:00 every day.
+) else (
+  echo [WARNING] Daily backup task registration failed.
 )
 
 :: Run a first sync now so we can confirm connectivity

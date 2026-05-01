@@ -424,18 +424,22 @@ enum TagSelection {
 }
 
 model MetricsSnapshot {
-  id               String   @id @default(cuid())
-  capturedAt       DateTime @default(now())
-  forDate          String   // "2026-04-28"
-  transactions     Int
-  totalSales       Float
-  tax              Float    @default(0)
-  cashSales        Float
-  mpesaSales       Float
-  otherSales       Float
-  paymentBreakdown Json     // [{name, transactions, total}]
-  topProducts      Json     // [{code, name, qtySold, revenue}]
-  byStaff          Json     // [{staff, transactions, total, returns}]
+  id                String   @id @default(cuid())
+  capturedAt        DateTime @default(now())
+  forDate           String   // "2026-04-28"
+  transactions      Int
+  totalSales        Float
+  tax               Float    @default(0)
+  cashSales         Float
+  mpesaSales        Float
+  otherSales        Float
+  draftTransactions Int      @default(0)  // posted=0 (unconfirmed, money not yet received)
+  draftSales        Float    @default(0)
+  purchases         Float    @default(0)  // GRN total for the day (cost of stock received)
+  profit            Float    @default(0)  // gross profit: revenue minus COGS from grn_d
+  paymentBreakdown  Json     // [{name, transactions, total}]
+  topProducts       Json     // [{code, name, qtySold, revenue}]
+  byStaff           Json     // [{staff, transactions, total, returns}]
 }
 
 model PendingChange {

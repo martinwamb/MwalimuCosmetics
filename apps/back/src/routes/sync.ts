@@ -18,13 +18,17 @@ function checkSecret(req: any, res: any): boolean {
 // ── Metrics ──────────────────────────────────────────────────
 
 const metricsSchema = z.object({
-  forDate:      z.string(),
-  transactions: z.number(),
-  totalSales:   z.number(),
-  tax:          z.number().default(0),
-  cashSales:    z.number(),
-  mpesaSales:   z.number(),
-  otherSales:   z.number(),
+  forDate:           z.string(),
+  transactions:      z.number(),
+  totalSales:        z.number(),
+  tax:               z.number().default(0),
+  cashSales:         z.number(),
+  mpesaSales:        z.number(),
+  otherSales:        z.number(),
+  draftTransactions: z.number().default(0),
+  draftSales:        z.number().default(0),
+  purchases:         z.number().default(0),
+  profit:            z.number().default(0),
   paymentBreakdown: z.array(z.object({
     name:         z.string(),
     transactions: z.number(),
@@ -248,4 +252,23 @@ router.get("/backup/list", requireAuth, async (_req, res) => {
   } catch {
     return res.json([]);
   }
+});
+
+// ── Agent self-update endpoints ───────────────────────────────
+// Bridge PCs call /sync/agent-version on every startup.
+// If the version differs from their embedded constant they fetch
+// /sync/agent/pusher.js, overwrite themselves, and restart.
+
+const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
+const AGENT_VERSION = "20260501-2";
+
+router.get("/agent-version", (_req, res) => {
+  res.json({ version: AGENT_VERSION });
+});
+
+router.get("/agent/pusher.js", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "pusher.js");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "agent not found" });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
 });
