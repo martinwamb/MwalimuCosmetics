@@ -424,15 +424,26 @@ enum TagSelection {
 }
 
 model MetricsSnapshot {
-  id           String   @id @default(cuid())
-  capturedAt   DateTime @default(now())
-  forDate      String   // "2026-04-28"
-  transactions Int
-  totalSales   Float
-  cashSales    Float
-  mpesaSales   Float
-  otherSales   Float
-  paymentBreakdown Json // [{name, transactions, total}]
-  topProducts  Json     // [{code, name, qtySold, revenue}]
-  byStaff      Json     // [{staff, transactions, total}]
+  id               String   @id @default(cuid())
+  capturedAt       DateTime @default(now())
+  forDate          String   // "2026-04-28"
+  transactions     Int
+  totalSales       Float
+  tax              Float    @default(0)
+  cashSales        Float
+  mpesaSales       Float
+  otherSales       Float
+  paymentBreakdown Json     // [{name, transactions, total}]
+  topProducts      Json     // [{code, name, qtySold, revenue}]
+  byStaff          Json     // [{staff, transactions, total, returns}]
+}
+
+model PendingChange {
+  id          String    @id @default(cuid())
+  type        String    // "stock_adjustment" | "price_update" | "sale_void"
+  payload     Json      // type-specific data
+  status      String    @default("pending") // pending | applied | failed
+  createdAt   DateTime  @default(now())
+  appliedAt   DateTime?
+  failReason  String?
 }
