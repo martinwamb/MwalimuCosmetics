@@ -58,33 +58,18 @@ router.post("/metrics", async (req, res) => {
   let data = parsed.data;
 
   // Old agent detection: tax=0, profit=0, purchases=0, draftTransactions=0.
-  // Old agents don't filter posted=1, so their totalSales includes unposted drafts
-  // and they zero-out the richer fields the new agent computed.
-  // When detected, preserve ALL meaningful values from the existing accurate snapshot —
-  // only accept the old agent's paymentBreakdown, topProducts, byStaff (still useful).
+  // Old agents lack posted=1 filtering so totalSales includes drafts, and their
+  // paymentBreakdown covers all transactions — meaning breakdown and totalSales
+  // will never reconcile with each other.
+  // When detected: reject everything from the old agent and keep the entire
+  // existing accurate snapshot intact. Nothing the old agent sends is usable.
   const isOldAgent = data.tax === 0 && data.profit === 0 && data.purchases === 0 && data.draftTransactions === 0;
   if (isOldAgent) {
     const existing = await prisma.metricsSnapshot.findFirst({ where: { forDate: data.forDate } });
     const ex = existing as any;
     if (existing && (existing.tax > 0 || ex.profit > 0 || ex.purchases > 0)) {
-      data = {
-        ...data,
-        // Lock in the accurate figures from the new agent
-        transactions:      existing.transactions,
-        totalSales:        existing.totalSales,
-        tax:               existing.tax,
-        cashSales:         existing.cashSales,
-        mpesaSales:        existing.mpesaSales,
-        otherSales:        existing.otherSales,
-        profit:            ex.profit            ?? 0,
-        purchases:         ex.purchases         ?? 0,
-        draftTransactions: ex.draftTransactions ?? 0,
-        draftSales:        ex.draftSales        ?? 0,
-        // Still use old agent's fresh breakdown/products/staff lists
-        paymentBreakdown:  data.paymentBreakdown,
-        topProducts:       data.topProducts,
-        byStaff:           data.byStaff,
-      };
+      // Silently ignore the old agent push — accurate data is already stored
+      return res.json({ ok: true });
     }
   }
 
