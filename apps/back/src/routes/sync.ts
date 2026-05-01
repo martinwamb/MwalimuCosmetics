@@ -55,7 +55,26 @@ router.post("/metrics", async (req, res) => {
   const parsed = metricsSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const data = parsed.data;
+  let data = parsed.data;
+
+  // Old agent signature: tax=0, profit=0, purchases=0, draftTransactions=0.
+  // When detected, preserve any richer values already stored for those fields
+  // so an old agent running on a shop PC can't zero-out what the new agent computed.
+  const isOldAgent = data.tax === 0 && data.profit === 0 && data.purchases === 0 && data.draftTransactions === 0;
+  if (isOldAgent) {
+    const existing = await prisma.metricsSnapshot.findFirst({ where: { forDate: data.forDate } });
+    if (existing && (existing.tax > 0 || (existing as any).profit > 0 || (existing as any).purchases > 0)) {
+      data = {
+        ...data,
+        tax:               existing.tax,
+        profit:            (existing as any).profit            ?? 0,
+        purchases:         (existing as any).purchases         ?? 0,
+        draftTransactions: (existing as any).draftTransactions ?? 0,
+        draftSales:        (existing as any).draftSales        ?? 0,
+      };
+    }
+  }
+
   await prisma.metricsSnapshot.deleteMany({ where: { forDate: data.forDate } });
   await prisma.metricsSnapshot.create({ data });
 
