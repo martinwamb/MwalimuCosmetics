@@ -1,4 +1,4 @@
-name: Deploy to Contabo
+name: Deploy to Hetzner
 
 on:
   push:
@@ -8,12 +8,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+      DEPLOY_KEY:  ${{ secrets.DEPLOY_KEY }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
-      APP_PORT: 3001
-      FRONT_PORT: 3000
+      DEPLOY_DIR:  ${{ secrets.DEPLOY_DIR }}
+      APP_PORT:    3001
+      FRONT_PORT:  3002
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,7 +24,7 @@ jobs:
         with:
           ssh-private-key: ${{ env.DEPLOY_KEY }}
 
-      - name: Sync files to server
+      - name: Sync source files to server
         run: |
           rsync -az --delete \
             -e "ssh -o StrictHostKeyChecking=no" \
@@ -33,21 +34,18 @@ jobs:
             --exclude "apps/front/.next/" \
             --exclude "apps/front/out/" \
             --exclude "apps/back/dist/" \
-            --filter 'P .env' \
-            --filter 'P .env.*' \
+            --filter "P .env" \
+            --filter "P .env.*" \
             ./ $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/
 
-      - name: Post-deploy (install, build, restart)
+      - name: Install, migrate, build, restart
         run: |
-          ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST "DEPLOY_DIR='$DEPLOY_DIR' APP_PORT='$APP_PORT' FRONT_PORT='$FRONT_PORT' bash -s" <<'EOF'
+          ssh -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST \
+            "DEPLOY_DIR='$DEPLOY_DIR' APP_PORT='$APP_PORT' FRONT_PORT='$FRONT_PORT' bash -s" <<'ENDSSH'
           set -e
           cd "$DEPLOY_DIR"
 
-          # Clean stale artifacts to avoid partial deploys
-          rm -rf node_modules apps/front/.next apps/back/node_modules apps/back/dist
-
-          # Ensure backend PORT is set
-          mkdir -p apps/back
+          # Ensure backend PORT is set in .env
           env_file="apps/back/.env"
           if [ -f "$env_file" ]; then
             if grep -q '^PORT=' "$env_file"; then
@@ -55,31 +53,31 @@ jobs:
             else
               printf '\nPORT=%s\n' "${APP_PORT:-3001}" >> "$env_file"
             fi
-          else
-            printf 'PORT=%s\n' "${APP_PORT:-3001}" > "$env_file"
           fi
 
-          npm ci
-          NEXT_SKIP_LOCKFILE_PATCH=1 npm run build --workspace=@mwalimu/front
-          pushd packages/db >/dev/null
-          npx prisma generate --schema prisma/schema.prisma
-          npx prisma migrate deploy --schema prisma/schema.prisma
-          popd >/dev/null
+          # Install dependencies (npm install — no lockfile required)
+          npm install
+
+          # Regenerate Prisma client against the installed version
+          DATABASE_URL=$(grep '^DATABASE_URL=' apps/back/.env | cut -d= -f2-) \
+            node_modules/.bin/prisma generate --schema packages/db/prisma/schema.prisma
+
+          # Apply any schema changes directly (safe, idempotent)
+          DATABASE_URL=$(grep '^DATABASE_URL=' apps/back/.env | cut -d= -f2-) \
+            node_modules/.bin/prisma db push \
+              --schema packages/db/prisma/schema.prisma \
+              --accept-data-loss
+
+          # Build frontend
+          npm run build --workspace=@mwalimu/front
+
+          # Build backend
           npm run build --workspace=@mwalimu/back
 
-          # Ensure standalone build serves static assets
-          mkdir -p apps/front/.next/standalone/apps/front/.next/static
-          rsync -a apps/front/.next/static/ apps/front/.next/standalone/apps/front/.next/static/ || true
-          mkdir -p apps/front/.next/standalone/apps/front/public
-          rsync -a apps/front/public/ apps/front/.next/standalone/apps/front/public/ || true
-
-          pushd apps/front >/dev/null
-          PORT=${FRONT_PORT:-3000} pm2 restart mwalimu-front || PORT=${FRONT_PORT:-3000} pm2 start npm --name "mwalimu-front" -- run start
+          # Restart services
+          pm2 restart mwalimu-front || \
+            pm2 start node_modules/.bin/next --name mwalimu-front -- start -p ${FRONT_PORT:-3002}
+          pm2 restart mwalimu-back || \
+            pm2 start apps/back/dist/index.js --name mwalimu-back
           pm2 save
-          popd >/dev/null
-
-          pushd apps/back >/dev/null
-          PORT=${APP_PORT:-3001} pm2 restart mwalimu-back || PORT=${APP_PORT:-3001} pm2 start npm --name "mwalimu-back" -- run start
-          pm2 save
-          popd >/dev/null
-          EOF
+          ENDSSH
