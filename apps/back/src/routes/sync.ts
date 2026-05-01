@@ -57,20 +57,33 @@ router.post("/metrics", async (req, res) => {
 
   let data = parsed.data;
 
-  // Old agent signature: tax=0, profit=0, purchases=0, draftTransactions=0.
-  // When detected, preserve any richer values already stored for those fields
-  // so an old agent running on a shop PC can't zero-out what the new agent computed.
+  // Old agent detection: tax=0, profit=0, purchases=0, draftTransactions=0.
+  // Old agents don't filter posted=1, so their totalSales includes unposted drafts
+  // and they zero-out the richer fields the new agent computed.
+  // When detected, preserve ALL meaningful values from the existing accurate snapshot —
+  // only accept the old agent's paymentBreakdown, topProducts, byStaff (still useful).
   const isOldAgent = data.tax === 0 && data.profit === 0 && data.purchases === 0 && data.draftTransactions === 0;
   if (isOldAgent) {
     const existing = await prisma.metricsSnapshot.findFirst({ where: { forDate: data.forDate } });
-    if (existing && (existing.tax > 0 || (existing as any).profit > 0 || (existing as any).purchases > 0)) {
+    const ex = existing as any;
+    if (existing && (existing.tax > 0 || ex.profit > 0 || ex.purchases > 0)) {
       data = {
         ...data,
+        // Lock in the accurate figures from the new agent
+        transactions:      existing.transactions,
+        totalSales:        existing.totalSales,
         tax:               existing.tax,
-        profit:            (existing as any).profit            ?? 0,
-        purchases:         (existing as any).purchases         ?? 0,
-        draftTransactions: (existing as any).draftTransactions ?? 0,
-        draftSales:        (existing as any).draftSales        ?? 0,
+        cashSales:         existing.cashSales,
+        mpesaSales:        existing.mpesaSales,
+        otherSales:        existing.otherSales,
+        profit:            ex.profit            ?? 0,
+        purchases:         ex.purchases         ?? 0,
+        draftTransactions: ex.draftTransactions ?? 0,
+        draftSales:        ex.draftSales        ?? 0,
+        // Still use old agent's fresh breakdown/products/staff lists
+        paymentBreakdown:  data.paymentBreakdown,
+        topProducts:       data.topProducts,
+        byStaff:           data.byStaff,
       };
     }
   }
