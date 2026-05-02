@@ -18,56 +18,70 @@ echo.
 :: Create install directory if it doesn't exist
 if not exist "C:\MwalimuSync" mkdir "C:\MwalimuSync"
 
-echo Downloading latest agent...
+:: Find Node.js
+set NODE=
+if exist "C:\Program Files\nodejs\node.exe"       set NODE=C:\Program Files\nodejs\node.exe
+if exist "C:\Program Files (x86)\nodejs\node.exe"  set NODE=C:\Program Files (x86)\nodejs\node.exe
+if "%NODE%"=="" (
+  for /f "delims=" %%i in ('where node 2^>nul') do set NODE=%%i
+)
+if "%NODE%"=="" (
+  echo [ERROR] Node.js not found. Please install from nodejs.org then try again.
+  pause
+  exit /b 1
+)
+echo [OK] Node.js: %NODE%
 
-:: Force TLS 1.2 (older Windows defaults to TLS 1.0 which server rejects)
+echo Downloading latest agent files...
+
+:: Download pusher.js (force TLS 1.2)
 powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://api.mwalimucosmetics.com/sync/agent/pusher.js' -OutFile 'C:\MwalimuSync\pusher.js' -UseBasicParsing" >nul 2>&1
+if %errorlevel% neq 0 (
+  bitsadmin /transfer MW1 /download /priority normal "https://api.mwalimucosmetics.com/sync/agent/pusher.js" "C:\MwalimuSync\pusher.js" >nul 2>&1
+)
+if not exist "C:\MwalimuSync\pusher.js" (
+  echo [ERROR] Could not download pusher.js. Check internet connection.
+  pause
+  exit /b 1
+)
+echo [OK] pusher.js downloaded.
 
-if %errorlevel% equ 0 goto downloaded
+:: Download loop.ps1 (the loop runner — also gets the node-finder fix)
+powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://api.mwalimucosmetics.com/sync/agent/loop.ps1' -OutFile 'C:\MwalimuSync\loop.ps1' -UseBasicParsing" >nul 2>&1
+if %errorlevel% neq 0 (
+  bitsadmin /transfer MW2 /download /priority normal "https://api.mwalimucosmetics.com/sync/agent/loop.ps1" "C:\MwalimuSync\loop.ps1" >nul 2>&1
+)
+if exist "C:\MwalimuSync\loop.ps1" (
+  echo [OK] loop.ps1 downloaded.
+) else (
+  echo [WARNING] Could not download loop.ps1. Using existing copy.
+)
 
-:: Fallback: bitsadmin (works on all Windows, no TLS issue)
-echo Trying alternate download method...
-bitsadmin /transfer MwalimuUpdate /download /priority normal "https://api.mwalimucosmetics.com/sync/agent/pusher.js" "C:\MwalimuSync\pusher.js" >nul 2>&1
+:: Delete stale checkpoint so agent pushes fresh data immediately
+del /f /q "C:\MwalimuSync\checkpoint.json" >nul 2>&1
+echo [OK] Checkpoint cleared.
 
-if %errorlevel% equ 0 goto downloaded
-
-echo [ERROR] Both download methods failed.
-echo         Confirm this PC can reach: api.mwalimucosmetics.com
-pause
-exit /b 1
-
-:downloaded
-echo [OK] Agent downloaded.
-
-:: Kill any existing loop processes to avoid running two at once
-taskkill /f /im powershell.exe /fi "WINDOWTITLE eq MwalimuSyncLoop*" >nul 2>&1
-
-:: Stop Task Scheduler task if registered
-schtasks /end /tn "MwalimuSyncLoop" >nul 2>&1
+:: Stop any running loops and tasks
+taskkill /f /fi "IMAGENAME eq powershell.exe" /fi "WINDOWTITLE eq*MwalimuSync*" >nul 2>&1
+schtasks /end    /tn "MwalimuSyncLoop" >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-:: Delete stale checkpoint so agent pushes immediately regardless of saved state
-del /f /q "C:\MwalimuSync\checkpoint.json" >nul 2>&1
-echo [OK] Checkpoint cleared — will push fresh data immediately.
-
-:: Re-register Task Scheduler task (works whether or not it existed before)
+:: Re-register Task Scheduler task with the exact node path found above
 schtasks /delete /tn "MwalimuSyncLoop" /f >nul 2>&1
 schtasks /create /tn "MwalimuSyncLoop" /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\MwalimuSync\loop.ps1" /sc ONSTART /ru SYSTEM /rl HIGHEST /f >nul 2>&1
 if %errorlevel% equ 0 (
-  echo [OK] Task Scheduler task registered.
-) else (
-  echo [OK] Task registration skipped ^(non-fatal^).
+  echo [OK] Task Scheduler: registered ^(starts at every boot^).
 )
 
-:: Always start the loop immediately as a hidden background process
+:: Start loop immediately
 powershell -Command "Start-Process powershell -ArgumentList '-WindowStyle Hidden -ExecutionPolicy Bypass -File C:\MwalimuSync\loop.ps1' -WindowStyle Hidden"
 echo [OK] Sync loop started in background.
 
-:: Run one sync right now so data appears within seconds
+:: Run one sync immediately using the found node path
 echo Running first sync now...
-"C:\Program Files\nodejs\node.exe" "C:\MwalimuSync\pusher.js"
+"%NODE%" "C:\MwalimuSync\pusher.js"
 if %errorlevel% equ 0 (
-  echo [OK] First sync complete — dashboard will update within 15 seconds.
+  echo [OK] Sync complete — dashboard will update within 15 seconds.
 ) else (
   echo [OK] Loop is running — dashboard will update within 30 seconds.
 )

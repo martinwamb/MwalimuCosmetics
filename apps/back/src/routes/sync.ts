@@ -289,3 +289,10 @@ router.get("/agent/pusher.js", (_req, res) => {
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.sendFile(filePath);
 });
+
+router.get("/agent/loop.ps1", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "loop.ps1");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "loop not found" });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
+});
