@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+// tokenRef keeps the token accessible inside fetchMetrics without re-subscribing
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const POLL_MS = 15 * 1000;
 
 type PaymentBreakdown = { name: string; transactions: number; total: number };
 type TopProduct       = { code: string; name: string; qtySold: number; revenue: number };
@@ -29,9 +29,6 @@ export default function DashboardPage() {
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastFetch, setLastFetch]   = useState<Date | null>(null);
-  const [countdown, setCountdown]   = useState(POLL_MS / 1000);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const countRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tokenRef = useRef("");
 
   useEffect(() => {
@@ -39,28 +36,23 @@ export default function DashboardPage() {
     setToken(t); tokenRef.current = t;
   }, []);
 
-  function fetchMetrics(isManual = false) {
+  function fetchMetrics() {
     if (!tokenRef.current) return;
-    if (isManual) setRefreshing(true);
+    setRefreshing(true);
     fetch(`${apiBase}/sync/metrics/latest`, {
       headers: { Authorization: `Bearer ${tokenRef.current}` },
       cache: "no-store",
     })
       .then(r => r.json())
-      .then(d => { setSnap(d); setLastFetch(new Date()); setCountdown(POLL_MS / 1000); })
+      .then(d => { setSnap(d); setLastFetch(new Date()); })
       .catch(() => {})
       .finally(() => { setLoading(false); setRefreshing(false); });
   }
 
+  // Load once on login — no automatic polling
   useEffect(() => {
     if (!token) return;
     fetchMetrics();
-    timerRef.current = setInterval(() => fetchMetrics(), POLL_MS);
-    countRef.current = setInterval(() => setCountdown(c => c <= 1 ? POLL_MS / 1000 : c - 1), 1000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (countRef.current) clearInterval(countRef.current);
-    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -101,11 +93,10 @@ export default function DashboardPage() {
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.82rem", color: "var(--muted)" }}>
-            <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: refreshing ? "#f59e0b" : "#10b981", animation: refreshing ? "pulse 1s infinite" : "none" }} />
-            {refreshing ? "Refreshing…" : `Next refresh in ${countdown}s`}
-          </div>
-          <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }} disabled={refreshing} onClick={() => fetchMetrics(true)}>
+          {refreshing && (
+            <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>Refreshing…</span>
+          )}
+          <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }} disabled={refreshing} onClick={() => fetchMetrics()}>
             ↺ Refresh now
           </button>
         </div>
