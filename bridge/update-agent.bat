@@ -57,6 +57,19 @@ if exist "C:\MwalimuSync\loop.ps1" (
   echo [WARNING] Could not download loop.ps1. Using existing copy.
 )
 
+:: Install mysql npm package if node_modules is missing or incomplete
+if not exist "C:\MwalimuSync\node_modules\mysql" (
+  echo Installing mysql dependency ^(first time only — may take a minute^)...
+  cd /d "C:\MwalimuSync"
+  "%NODE%" "%NODE%\..\npm.cmd" install mysql --save 2>nul || "%NODE%" "%NODE%\..\npm" install mysql --save
+  if exist "C:\MwalimuSync\node_modules\mysql" (
+    echo [OK] mysql package installed.
+  ) else (
+    echo [WARNING] npm install failed. Trying with npx...
+    "%NODE%" "%NODE%\..\npx.cmd" --yes npm install mysql --prefix "C:\MwalimuSync" 2>nul
+  )
+)
+
 :: Delete stale checkpoint so agent pushes fresh data immediately
 del /f /q "C:\MwalimuSync\checkpoint.json" >nul 2>&1
 echo [OK] Checkpoint cleared.
