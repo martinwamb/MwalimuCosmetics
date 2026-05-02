@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260501-3";
+const AGENT_VERSION   = "20260501-4";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -240,9 +240,10 @@ async function pushMetrics(data) {
   const r = await apiPost("/sync/metrics", data, SECRET);
   if (r.status === 200) {
     log(`Metrics pushed — ${data.transactions} txns, KES ${data.totalSales.toLocaleString("en-KE")} sales, KES ${data.profit.toLocaleString("en-KE")} profit`);
-  } else {
-    log(`Metrics push failed [${r.status}]: ${r.body}`);
+    return true;
   }
+  log(`Metrics push failed [${r.status}]: ${r.body}`);
+  return false;
 }
 
 // ── 2. Build product catalogue from MySQL (read-only) ─────────
@@ -438,9 +439,15 @@ async function run() {
   let token;
   try { token = await getSyncToken(); } catch (e) { log("Auth failed: " + e.message); }
 
+  // Only advance the checkpoint txCount if metrics actually pushed successfully.
+  // If push fails, next cycle will retry rather than silently skipping.
+  let metricsPushed = false;
   if (metricsData) {
-    await pushMetrics(metricsData).catch(e => log("Metrics push error: " + e.message));
+    metricsPushed = await pushMetrics(metricsData).catch(e => { log("Metrics push error: " + e.message); return false; });
+  } else if (!hasNewData) {
+    metricsPushed = true; // nothing to push = already up to date
   }
+
   if (productsData) {
     await syncProducts(productsData).catch(e => log("Products push error: " + e.message));
   }
@@ -456,8 +463,9 @@ async function run() {
   }
 
   saveCheckpoint({
-    txCount:         currentCount,
-    date:            today,
+    // Only lock in current count if we actually pushed — otherwise retry next cycle
+    txCount:         metricsPushed ? currentCount : cp.txCount,
+    date:            metricsPushed ? today : cp.date,
     lastProductSync: productSyncDue ? nowMs : (cp.lastProductSync || 0),
   });
   log("=== Sync complete ===");
