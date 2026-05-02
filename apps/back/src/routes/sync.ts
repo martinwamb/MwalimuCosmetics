@@ -277,7 +277,7 @@ router.get("/backup/list", requireAuth, async (_req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260501-4";
+const AGENT_VERSION = "20260501-5";
 
 router.get("/agent-version", (_req, res) => {
   res.json({ version: AGENT_VERSION });

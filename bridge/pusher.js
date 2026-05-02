@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260501-4";
+const AGENT_VERSION   = "20260501-5";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -77,9 +77,10 @@ function saveCheckpoint(cp) {
   try { fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify(cp)); } catch {}
 }
 
-// ── Self-update ───────────────────────────────────────────────
-// Fetches the server's current agent version. If different, downloads
-// the new pusher.js, overwrites this file, and re-spawns the process.
+// ── Self-update (write-only, no restart) ─────────────────────
+// Downloads new pusher.js if the server has a newer version and writes it
+// to disk. Does NOT restart — the loop.ps1 will pick up the new file on
+// the next 30-second cycle naturally, avoiding concurrent-instance races.
 async function checkForUpdate() {
   try {
     const r = await apiGet("/sync/agent-version", null);
@@ -92,13 +93,10 @@ async function checkForUpdate() {
     if (dl.status !== 200) { log("Download failed: " + dl.status); return; }
 
     fs.writeFileSync(SELF_PATH, dl.body, "utf8");
-    log("Agent updated. Restarting…");
-    require("child_process").spawn(process.execPath, [SELF_PATH], {
-      detached: true, stdio: "inherit",
-    }).unref();
-    process.exit(0);
+    log(`Agent updated to ${version}. New version runs on next cycle.`);
+    // No spawn/restart — loop.ps1 picks up the new file in 30 seconds
   } catch (e) {
-    log("Update check failed (non-fatal): " + e.message);
+    log("Update check skipped (non-fatal): " + e.message);
   }
 }
 
