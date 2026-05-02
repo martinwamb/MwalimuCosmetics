@@ -87,6 +87,31 @@ router.get("/metrics/latest", requireAuth, async (_req, res) => {
   return res.json(snapshot ?? null);
 });
 
+// ── On-demand sync trigger ────────────────────────────────────
+// Dashboard posts here when user clicks Refresh. The shop PC polls
+// /sync/pending-refresh every few seconds and runs MySQL sync when triggered.
+
+router.post("/request", requireAuth, async (_req, res) => {
+  const record = await prisma.syncRequest.create({ data: {} });
+  return res.json({ id: record.id, requestedAt: record.requestedAt });
+});
+
+// Shop PC polls this (with sync secret) every 5 seconds — no MySQL involved.
+// Returns { pending: true } once, then marks it fulfilled so it only fires once.
+router.get("/pending-refresh", async (req, res) => {
+  if (!checkSecret(req, res)) return;
+  const pending = await prisma.syncRequest.findFirst({
+    where:   { fulfilledAt: null },
+    orderBy: { requestedAt: "asc" },
+  });
+  if (!pending) return res.json({ pending: false });
+  await prisma.syncRequest.update({
+    where: { id: pending.id },
+    data:  { fulfilledAt: new Date() },
+  });
+  return res.json({ pending: true });
+});
+
 // ── Product catalogue sync ────────────────────────────────────
 
 router.post("/products", async (req, res) => {
@@ -277,7 +302,7 @@ router.get("/backup/list", requireAuth, async (_req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260501-6";
+const AGENT_VERSION = "20260502-1";
 
 router.get("/agent-version", (_req, res) => {
   res.json({ version: AGENT_VERSION });

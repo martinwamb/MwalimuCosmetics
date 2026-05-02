@@ -1,5 +1,6 @@
 # Mwalimu Cosmetics - Sync Loop
-# Runs every 30 seconds.
+# Polls the server every 5 seconds for a refresh request.
+# MySQL is only touched when the dashboard user clicks Refresh Now.
 $PUSHER = "C:\MwalimuSync\pusher.js"
 $LOG    = "C:\MwalimuSync\sync.log"
 
@@ -14,7 +15,6 @@ function Find-Node {
   foreach ($c in $candidates) {
     if (Test-Path $c) { return $c }
   }
-  # Try PATH as last resort
   $fromPath = (Get-Command node -ErrorAction SilentlyContinue).Source
   if ($fromPath) { return $fromPath }
   return $null
@@ -22,7 +22,7 @@ function Find-Node {
 
 $NODE = Find-Node
 if (-not $NODE) {
-  "$(Get-Date -Format 'u') FATAL: node.exe not found. Install Node.js from nodejs.org." | Add-Content $LOG
+  "$(Get-Date -Format 'u') FATAL: node.exe not found." | Add-Content $LOG
   exit 1
 }
 
@@ -40,10 +40,11 @@ function Trim-Log {
 while ($true) {
   try {
     $output = & $NODE $PUSHER 2>&1
-    $output | Add-Content $LOG
+    # Only log when something actually happened (non-empty output)
+    if ($output) { $output | Add-Content $LOG }
   } catch {
     "$(Get-Date -Format 'u') ERROR: $_" | Add-Content $LOG
   }
   Trim-Log
-  Start-Sleep -Seconds 30
+  Start-Sleep -Seconds 5
 }

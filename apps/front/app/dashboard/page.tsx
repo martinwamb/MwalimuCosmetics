@@ -36,9 +36,9 @@ export default function DashboardPage() {
     setToken(t); tokenRef.current = t;
   }, []);
 
-  function fetchMetrics() {
+  // Load cached snapshot once on login (no MySQL hit)
+  function loadSnapshot() {
     if (!tokenRef.current) return;
-    setRefreshing(true);
     fetch(`${apiBase}/sync/metrics/latest`, {
       headers: { Authorization: `Bearer ${tokenRef.current}` },
       cache: "no-store",
@@ -46,13 +46,42 @@ export default function DashboardPage() {
       .then(r => r.json())
       .then(d => { setSnap(d); setLastFetch(new Date()); })
       .catch(() => {})
-      .finally(() => { setLoading(false); setRefreshing(false); });
+      .finally(() => setLoading(false));
   }
 
-  // Load once on login — no automatic polling
+  // Refresh: signal shop PC to run MySQL sync, wait for fresh data
+  async function requestRefresh() {
+    if (!tokenRef.current || refreshing) return;
+    setRefreshing(true);
+    try {
+      // Ask server to queue a sync request for the shop PC
+      const reqRes = await fetch(`${apiBase}/sync/request`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokenRef.current}` },
+      });
+      const { requestedAt } = await reqRes.json();
+
+      // Poll until the snapshot is newer than our request (shop PC has synced)
+      const deadline = Date.now() + 90000; // 90s timeout
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 3000));
+        const snap = await fetch(`${apiBase}/sync/metrics/latest`, {
+          headers: { Authorization: `Bearer ${tokenRef.current}` },
+          cache: "no-store",
+        }).then(r => r.json()).catch(() => null);
+        if (snap && new Date(snap.capturedAt) > new Date(requestedAt)) {
+          setSnap(snap);
+          setLastFetch(new Date());
+          break;
+        }
+      }
+    } catch {}
+    setRefreshing(false);
+  }
+
   useEffect(() => {
     if (!token) return;
-    fetchMetrics();
+    loadSnapshot();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -94,9 +123,11 @@ export default function DashboardPage() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {refreshing && (
-            <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>Refreshing…</span>
+            <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+              Syncing with POS… (up to 30s)
+            </span>
           )}
-          <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }} disabled={refreshing} onClick={() => fetchMetrics()}>
+          <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }} disabled={refreshing} onClick={requestRefresh}>
             ↺ Refresh now
           </button>
         </div>

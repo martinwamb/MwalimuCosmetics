@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260501-6";
+const AGENT_VERSION   = "20260502-1";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -400,63 +400,64 @@ function openConn() {
 
 // ── Main ─────────────────────────────────────────────────────
 async function run() {
-  log(`=== Mwalimu Sync Agent v${AGENT_VERSION} starting ===`);
   await checkForUpdate();
+
+  // Check if a refresh was requested from the dashboard (cheap — no MySQL)
+  const refreshCheck = await apiRequest("GET", "/sync/pending-refresh", null, SECRET, null)
+    .catch(() => ({ status: 0, body: "{}" }));
+
+  if (refreshCheck.status !== 200) {
+    log("Could not reach server. Skipping.");
+    return;
+  }
+
+  const { pending } = JSON.parse(refreshCheck.body);
+  if (!pending) {
+    // No refresh requested — exit immediately, MySQL untouched
+    return;
+  }
+
+  log(`=== Refresh requested — Mwalimu Sync Agent v${AGENT_VERSION} ===`);
 
   const today = kenyanDate();
   const cp    = loadCheckpoint();
   const nowMs = Date.now();
 
-  // ── Phase 1: read from MySQL, close connection before long uploads ──
+  // ── Phase 1: read from MySQL, close before uploads ────────────
   const conn1 = await openConn();
   log("Connected to MySQL on server-pc.");
 
-  const [countRow] = await query(conn1,
-    `SELECT COUNT(*) AS cnt FROM pos_header WHERE DATE(trandate) = ? AND posted = 1`, [today]);
-  const currentCount = Number(countRow.cnt);
-  const hasNewData   = currentCount !== cp.txCount || cp.date !== today;
-
-  // Product + stock sync: heavy stran + grn_d aggregate.
-  // Run at most every 4 hours AND only during off-peak hours (before 7 AM or after 7 PM).
-  // This also rebuilds the cost map used for profit — keeping grn_d off the 30s cycle.
-  const kenyanHour  = new Date(Date.now() + 3 * 60 * 60 * 1000).getUTCHours();
-  const isOffPeak   = kenyanHour < 7 || kenyanHour >= 19;
-  const productSyncDue = isOffPeak &&
-    (cp.date !== today || nowMs - (cp.lastProductSync || 0) > 4 * 60 * 60 * 1000);
+  // Always do a full product sync when user requests refresh if cost map is stale
+  const productSyncDue = cp.date !== today || nowMs - (cp.lastProductSync || 0) > 4 * 60 * 60 * 1000;
 
   let productsData = null;
-  let costMap      = cp.costMap || null; // reuse last known cost map between cycles
+  let costMap      = cp.costMap || null;
 
   if (productSyncDue) {
     const result = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
     if (result) { productsData = result.products; costMap = result.costMap; }
   }
 
-  let metricsData = null;
-  if (hasNewData) {
-    metricsData = await buildMetrics(conn1, today, costMap).catch(e => { log("Metrics build error: " + e.message); return null; });
-  } else {
-    log(`No new transactions (${currentCount} posted today). Metrics skipped.`);
-  }
+  const metricsData = await buildMetrics(conn1, today, costMap)
+    .catch(e => { log("Metrics build error: " + e.message); return null; });
 
-  conn1.end(); // Close MySQL before long API uploads — prevents server-side timeout
+  conn1.end();
 
-  // ── Phase 2: push to API (no MySQL needed) ──
+  // ── Phase 2: push to server ────────────────────────────────────
   let token;
   try { token = await getSyncToken(); } catch (e) { log("Auth failed: " + e.message); }
 
   let metricsPushed = false;
   if (metricsData) {
-    metricsPushed = await pushMetrics(metricsData).catch(e => { log("Metrics push error: " + e.message); return false; });
-  } else if (!hasNewData) {
-    metricsPushed = true;
+    metricsPushed = await pushMetrics(metricsData)
+      .catch(e => { log("Metrics push error: " + e.message); return false; });
   }
 
   if (productsData) {
     await syncProducts(productsData).catch(e => log("Products push error: " + e.message));
   }
 
-  // ── Phase 3: reconnect MySQL for write-back (pending changes + web sales) ──
+  // ── Phase 3: write-back (pending changes + web sales) ─────────
   if (token) {
     const conn2 = await openConn().catch(e => { log("MySQL reconnect failed: " + e.message); return null; });
     if (conn2) {
@@ -467,10 +468,9 @@ async function run() {
   }
 
   saveCheckpoint({
-    txCount:         metricsPushed ? currentCount : cp.txCount,
+    txCount:         metricsPushed ? 0 : cp.txCount, // reset so next refresh always pushes
     date:            metricsPushed ? today : cp.date,
     lastProductSync: productSyncDue ? nowMs : (cp.lastProductSync || 0),
-    // Persist cost map so profit calculation survives between 30-second cycles
     costMap:         costMap || cp.costMap || null,
   });
   log("=== Sync complete ===");

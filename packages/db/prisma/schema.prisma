@@ -442,6 +442,12 @@ model MetricsSnapshot {
   byStaff           Json     // [{staff, transactions, total, returns}]
 }
 
+model SyncRequest {
+  id          String    @id @default(cuid())
+  requestedAt DateTime  @default(now())
+  fulfilledAt DateTime?
+}
+
 model PendingChange {
   id          String    @id @default(cuid())
   type        String    // "stock_adjustment" | "price_update" | "sale_void"
