@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260501-2";
+const AGENT_VERSION   = "20260501-3";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -420,7 +420,13 @@ async function run() {
     log(`No new transactions (${currentCount} posted today). Metrics skipped.`);
   }
 
-  const productSyncDue = cp.date !== today || nowMs - (cp.lastProductSync || 0) > 60 * 60 * 1000;
+  // Product + stock sync: heavy stran aggregate — run at most every 4 hours
+  // AND only during off-peak hours (before 7 AM or after 7 PM Kenya time)
+  // so the old server PC isn't competing with the live POS.
+  const kenyanHour  = new Date(Date.now() + 3 * 60 * 60 * 1000).getUTCHours();
+  const isOffPeak   = kenyanHour < 7 || kenyanHour >= 19;
+  const productSyncDue = isOffPeak &&
+    (cp.date !== today || nowMs - (cp.lastProductSync || 0) > 4 * 60 * 60 * 1000);
   let productsData = null;
   if (productSyncDue) {
     productsData = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
