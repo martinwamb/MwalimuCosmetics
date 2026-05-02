@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260501-5";
+const AGENT_VERSION   = "20260501-6";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -107,7 +107,9 @@ async function getSyncToken() {
 }
 
 // ── 1. Build metrics from MySQL (read-only) ───────────────────
-async function buildMetrics(conn, today) {
+// costMap: { sku → latestCostPrice } built during hourly product sync.
+// Passing null is safe — profit will show 0 until first hourly sync runs.
+async function buildMetrics(conn, today, costMap) {
   log("Reading metrics from MySQL…");
 
   // Confirmed paid sales only (posted=1)
@@ -132,7 +134,9 @@ async function buildMetrics(conn, today) {
      FROM grn WHERE DATE(ddate) = ? AND posted = 1`,
     [today]);
 
-  // Gross profit — 2-step to avoid N correlated subqueries
+  // Gross profit — uses the cached cost map built during the hourly product sync.
+  // We do NOT query grn_d on every 30-second cycle (it can be a large table scan).
+  // costMap is passed in from the hourly buildProducts() run.
   const soldItems = await query(conn,
     `SELECT pd.code, SUM(pd.qty) AS qty, ROUND(SUM(pd.total), 0) AS revenue
      FROM pos_details pd
@@ -144,28 +148,11 @@ async function buildMetrics(conn, today) {
     [today]);
 
   let profit = 0;
-  if (soldItems.length > 0) {
-    const codes = soldItems.map(i => i.code);
-    // Get the most-recent cost per code from GRN receipts
-    const costRows = await query(conn,
-      `SELECT d.code, d.uprice AS cost
-       FROM grn_d d JOIN grn g ON d.no = g.no
-       WHERE d.code IN (?) AND g.posted = 1
-       ORDER BY g.ddate DESC`,
-      [codes]);
-
-    const costMap = Object.create(null);
-    for (const r of costRows) {
-      if (!(r.code in costMap)) costMap[r.code] = Number(r.cost);
-    }
-
+  if (soldItems.length > 0 && costMap) {
     for (const item of soldItems) {
-      const revenue = Number(item.revenue);
-      const qty     = Number(item.qty);
       if (item.code in costMap) {
-        profit += revenue - costMap[item.code] * qty;
+        profit += Number(item.revenue) - costMap[item.code] * Number(item.qty);
       }
-      // No cost data → exclude from profit (conservative; don't guess)
     }
     profit = Math.round(profit);
   }
@@ -245,11 +232,12 @@ async function pushMetrics(data) {
 }
 
 // ── 2. Build product catalogue from MySQL (read-only) ─────────
-// Heavy queries — runs at most once per hour to protect MySQL.
+// Heavy queries — runs at most once per hour (off-peak only) to protect MySQL.
+// Also builds the cost map used by buildMetrics for profit calculation,
+// so grn_d is queried here (hourly) rather than on every 30-second cycle.
 async function buildProducts(conn) {
   log("Reading product catalogue from MySQL…");
 
-  // All unique SKUs ever sold: name, price, category
   const soldProducts = await query(conn,
     `SELECT pd.code AS sku, MAX(pd.description) AS name,
             MAX(pd.price) AS price, MAX(pd.icateg) AS category
@@ -259,20 +247,36 @@ async function buildProducts(conn) {
 
   if (!soldProducts.length) { log("No products found."); return null; }
 
-  // Full stock ledger — SUM(qty) over all movements
+  // Stock ledger — SUM(qty) over all stran movements
   const stockRows = await query(conn,
     `SELECT CODE AS sku, COALESCE(SUM(qty), 0) AS stockQty FROM stran GROUP BY CODE`);
 
   const stockMap = Object.create(null);
   for (const s of stockRows) stockMap[s.sku] = Number(s.stockQty);
 
-  return soldProducts.map(p => ({
+  // Latest cost per SKU from GRN receipts — used for profit calculation.
+  // Done here (hourly) not on every 30s metrics cycle so grn_d isn't hit constantly.
+  const costRows = await query(conn,
+    `SELECT d.code, d.uprice AS cost
+     FROM grn_d d JOIN grn g ON d.no = g.no
+     WHERE g.posted = 1
+     ORDER BY g.ddate DESC`);
+
+  const costMap = Object.create(null);
+  for (const r of costRows) {
+    if (!(r.code in costMap)) costMap[r.code] = Number(r.cost);
+  }
+  log(`Cost map built: ${Object.keys(costMap).length} SKUs with known cost.`);
+
+  const products = soldProducts.map(p => ({
     sku:      p.sku,
     name:     p.name,
     price:    Number(p.price),
     category: p.category || "Uncategorised",
     stockQty: Math.max(0, Math.round(stockMap[p.sku] ?? 0)),
   }));
+
+  return { products, costMap };
 }
 
 async function syncProducts(products) {
@@ -412,23 +416,27 @@ async function run() {
   const currentCount = Number(countRow.cnt);
   const hasNewData   = currentCount !== cp.txCount || cp.date !== today;
 
-  let metricsData = null;
-  if (hasNewData) {
-    metricsData = await buildMetrics(conn1, today).catch(e => { log("Metrics build error: " + e.message); return null; });
-  } else {
-    log(`No new transactions (${currentCount} posted today). Metrics skipped.`);
-  }
-
-  // Product + stock sync: heavy stran aggregate — run at most every 4 hours
-  // AND only during off-peak hours (before 7 AM or after 7 PM Kenya time)
-  // so the old server PC isn't competing with the live POS.
+  // Product + stock sync: heavy stran + grn_d aggregate.
+  // Run at most every 4 hours AND only during off-peak hours (before 7 AM or after 7 PM).
+  // This also rebuilds the cost map used for profit — keeping grn_d off the 30s cycle.
   const kenyanHour  = new Date(Date.now() + 3 * 60 * 60 * 1000).getUTCHours();
   const isOffPeak   = kenyanHour < 7 || kenyanHour >= 19;
   const productSyncDue = isOffPeak &&
     (cp.date !== today || nowMs - (cp.lastProductSync || 0) > 4 * 60 * 60 * 1000);
+
   let productsData = null;
+  let costMap      = cp.costMap || null; // reuse last known cost map between cycles
+
   if (productSyncDue) {
-    productsData = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
+    const result = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
+    if (result) { productsData = result.products; costMap = result.costMap; }
+  }
+
+  let metricsData = null;
+  if (hasNewData) {
+    metricsData = await buildMetrics(conn1, today, costMap).catch(e => { log("Metrics build error: " + e.message); return null; });
+  } else {
+    log(`No new transactions (${currentCount} posted today). Metrics skipped.`);
   }
 
   conn1.end(); // Close MySQL before long API uploads — prevents server-side timeout
@@ -437,13 +445,11 @@ async function run() {
   let token;
   try { token = await getSyncToken(); } catch (e) { log("Auth failed: " + e.message); }
 
-  // Only advance the checkpoint txCount if metrics actually pushed successfully.
-  // If push fails, next cycle will retry rather than silently skipping.
   let metricsPushed = false;
   if (metricsData) {
     metricsPushed = await pushMetrics(metricsData).catch(e => { log("Metrics push error: " + e.message); return false; });
   } else if (!hasNewData) {
-    metricsPushed = true; // nothing to push = already up to date
+    metricsPushed = true;
   }
 
   if (productsData) {
@@ -461,10 +467,11 @@ async function run() {
   }
 
   saveCheckpoint({
-    // Only lock in current count if we actually pushed — otherwise retry next cycle
     txCount:         metricsPushed ? currentCount : cp.txCount,
     date:            metricsPushed ? today : cp.date,
     lastProductSync: productSyncDue ? nowMs : (cp.lastProductSync || 0),
+    // Persist cost map so profit calculation survives between 30-second cycles
+    costMap:         costMap || cp.costMap || null,
   });
   log("=== Sync complete ===");
 }
