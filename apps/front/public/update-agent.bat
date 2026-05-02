@@ -59,14 +59,15 @@ if exist "C:\MwalimuSync\loop.ps1" (
 
 :: Install mysql npm package if node_modules is missing or incomplete
 if not exist "C:\MwalimuSync\node_modules\mysql" (
-  echo Installing mysql dependency ^(first time only — may take a minute^)...
+  echo Installing mysql dependency ^(first time — may take a minute^)...
   cd /d "C:\MwalimuSync"
-  "%NODE%" "%NODE%\..\npm.cmd" install mysql --save 2>nul || "%NODE%" "%NODE%\..\npm" install mysql --save
+  npm install mysql --save
   if exist "C:\MwalimuSync\node_modules\mysql" (
     echo [OK] mysql package installed.
   ) else (
-    echo [WARNING] npm install failed. Trying with npx...
-    "%NODE%" "%NODE%\..\npx.cmd" --yes npm install mysql --prefix "C:\MwalimuSync" 2>nul
+    echo [ERROR] npm install failed. Please run manually: cd C:\MwalimuSync ^&^& npm install mysql
+    pause
+    exit /b 1
   )
 )
 
