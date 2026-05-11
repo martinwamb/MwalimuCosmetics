@@ -110,6 +110,36 @@ router.get("/", async (req, res) => {
   res.json({ data: products.map((product: any) => formatProduct(product, includeCost)) });
 });
 
+// Fast product search for the stock adjustment UI
+router.get("/search", requireRoles("ADMIN", "ACCOUNTS", "SALES"), async (req, res) => {
+  const q = ((req.query.q as string) ?? "").trim();
+  if (q.length < 2) return res.json([]);
+  const products = await prisma.product.findMany({
+    where: {
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { sku:  { contains: q, mode: "insensitive" } },
+      ],
+      status: { not: "ARCHIVED" },
+    },
+    select: {
+      id: true, sku: true, name: true,
+      price: true, stockQty: true,
+      category: { select: { name: true } },
+    },
+    orderBy: { stockQty: "desc" },
+    take: 10,
+  });
+  return res.json(products.map(p => ({
+    id:       p.id,
+    sku:      p.sku,
+    name:     p.name,
+    price:    Number(p.price),
+    stockQty: p.stockQty,
+    category: p.category?.name ?? "Uncategorised",
+  })));
+});
+
 router.get("/:id", async (req, res) => {
   const requester = verifyAuth(req.headers.authorization);
   const includeCost = requester?.role === "ADMIN";

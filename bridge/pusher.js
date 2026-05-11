@@ -311,14 +311,49 @@ async function applyPendingChanges(conn, token) {
   for (const change of changes) {
     try {
       if (change.type === "stock_adjustment") {
+        // Single product quantity adjustment — writes to stran ledger
         const { sku, delta, name, reason } = change.payload;
         await query(conn,
           `INSERT INTO stran (CODE, descr, stdate, qty, tt, trandesc, staff, source)
            VALUES (?, ?, CURDATE(), ?, 'ADJ', ?, 'WEB', 'WEB')`,
           [sku, name || sku, Number(delta), reason || "Web stock adjustment"]);
+
+      } else if (change.type === "goods_received") {
+        // Goods received note — writes grn header, grn_d lines, and stran entries
+        const { supplierName, lines } = change.payload;
+
+        // Generate a unique WEB-prefixed GRN number (separate from POS GRN sequence)
+        const [maxGrn] = await query(conn,
+          "SELECT MAX(CAST(SUBSTRING(no, 4) AS UNSIGNED)) AS maxno FROM grn WHERE no LIKE 'WEB%'");
+        const grnNo = `WEB${String((Number(maxGrn?.maxno) || 0) + 1).padStart(6, "0")}`;
+        const today = kenyanDate();
+        const total = lines.reduce((s, l) => s + Number(l.qty) * Number(l.costPrice), 0);
+
+        // GRN header
+        await query(conn,
+          `INSERT INTO grn (no, scode, sname, ddate, posted, screate, dcreate, gtotal, exclvat)
+           VALUES (?, 'WEB', ?, ?, 1, 'WEB', NOW(), ?, ?)`,
+          [grnNo, supplierName || "Web Entry", today, Math.round(total), Math.round(total)]);
+
+        for (const line of lines) {
+          const lineTotal = Number(line.qty) * Number(line.costPrice);
+          // GRN detail line
+          await query(conn,
+            `INSERT INTO grn_d (no, code, descr, qty, uprice, total) VALUES (?, ?, ?, ?, ?, ?)`,
+            [grnNo, line.sku, line.name, Number(line.qty),
+             Number(line.costPrice), Math.round(lineTotal)]);
+          // Stock movement — positive qty = stock received
+          await query(conn,
+            `INSERT INTO stran (CODE, descr, stdate, qty, price, total, tt, trandesc, staff, source)
+             VALUES (?, ?, ?, ?, ?, ?, 'r', 'Goods Received', 'WEB', 'WEB')`,
+            [line.sku, line.name, today, Number(line.qty),
+             Number(line.costPrice), Math.round(lineTotal)]);
+        }
+        log(`  GRN ${grnNo}: ${lines.length} line(s), KES ${Math.round(total).toLocaleString("en-KE")}`);
       }
+
       await apiPost("/sync/mark-change-applied", { id: change.id }, SECRET);
-      log(`  Applied [${change.type}]: ${JSON.stringify(change.payload)}`);
+      log(`  Applied [${change.type}]`);
     } catch (e) {
       await apiPost("/sync/mark-change-failed", { id: change.id, error: e.message }, SECRET);
       log(`  Failed change ${change.id}: ${e.message}`);

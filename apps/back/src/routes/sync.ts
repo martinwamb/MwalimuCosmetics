@@ -214,7 +214,7 @@ router.get("/pending-changes", requireAuth, async (_req, res) => {
   return res.json(changes);
 });
 
-// Web dashboard creates a pending change (stock adj, price update, etc.)
+// Web dashboard creates a pending change (stock adj, GRN, price update, etc.)
 router.post("/pending-changes", requireAuth, async (req, res) => {
   const { type, payload } = req.body as { type: string; payload: object };
   if (!type || !payload) return res.status(400).json({ error: "type and payload required" });
@@ -223,6 +223,15 @@ router.post("/pending-changes", requireAuth, async (req, res) => {
     data: { type, payload },
   });
   return res.json(change);
+});
+
+// History of all changes (pending + applied + failed) for the stock UI
+router.get("/pending-changes/history", requireAuth, async (_req, res) => {
+  const changes = await prisma.pendingChange.findMany({
+    orderBy: { createdAt: "desc" },
+    take:    100,
+  });
+  return res.json(changes);
 });
 
 // Bridge marks a change as successfully applied to MySQL
