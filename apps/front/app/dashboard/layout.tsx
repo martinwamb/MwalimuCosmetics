@@ -7,7 +7,8 @@ const navItems = [
   { label: "Overview",   href: "/dashboard",        icon: "◈", roles: ["ADMIN","ACCOUNTS","SALES"] },
   { label: "POS",        href: "/dashboard/pos",    icon: "⊡", roles: ["ADMIN","SALES"] },
   { label: "Sales",      href: "/dashboard/sales",  icon: "↗", roles: ["ADMIN","ACCOUNTS","SALES"] },
-  { label: "Stock",      href: "/dashboard/stock",  icon: "⊞", roles: ["ADMIN","ACCOUNTS"] },
+  { label: "Stock",      href: "/dashboard/stock",   icon: "⊞", roles: ["ADMIN","ACCOUNTS"] },
+  { label: "History",   href: "/dashboard/history", icon: "◷", roles: ["ADMIN","ACCOUNTS"] },
   { label: "Admin",      href: "/dashboard/admin",  icon: "⚙", roles: ["ADMIN"] },
 ];
 

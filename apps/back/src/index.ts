@@ -19,8 +19,9 @@ import { router as purchaseRouter } from "./routes/purchases.js";
 import { router as supplierRouter } from "./routes/suppliers.js";
 import { router as inventoryRouter } from "./routes/inventory.js";
 import { router as reportsRouter } from "./routes/reports.js";
-import { router as syncRouter } from "./routes/sync.js";
-import { router as posRouter }  from "./routes/pos.js";
+import { router as syncRouter }    from "./routes/sync.js";
+import { router as posRouter }     from "./routes/pos.js";
+import { router as historyRouter } from "./routes/history.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
@@ -56,8 +57,9 @@ app.use("/purchases", purchaseRouter);
 app.use("/suppliers", supplierRouter);
 app.use("/inventory", inventoryRouter);
 app.use("/reports", reportsRouter);
-app.use("/sync", syncRouter);
-app.use("/pos",  posRouter);
+app.use("/sync",    syncRouter);
+app.use("/pos",     posRouter);
+app.use("/history", historyRouter);
 
 seedAdmin()
   .catch((err) => {

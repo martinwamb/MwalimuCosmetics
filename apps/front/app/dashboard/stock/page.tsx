@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-type Product = { id: string; sku: string; name: string; price: number; stockQty: number; category: string };
+type Product = { id: string; sku: string; name: string; price: number; cost: number; wholesalePrice: number | null; specialPrice: number | null; stockQty: number; category: string };
 type GrnLine = { sku: string; name: string; qty: number; costPrice: number };
 type Change  = { id: string; type: string; payload: any; status: string; createdAt: string; appliedAt: string | null; failReason: string | null };
 
@@ -121,13 +121,19 @@ function AdjustTab({ token }: { token: string }) {
 
       {product && (
         <div className="card" style={{ padding: "0.75rem 1rem", background: "#f0fdf4", border: "1px solid #86efac" }}>
-          <div style={{ fontWeight: 700 }}>{product.name}</div>
-          <div style={{ fontSize: "0.82rem", color: "var(--muted)", marginTop: 2 }}>
+          <div style={{ fontWeight: 700, fontSize: "1rem" }}>{product.name}</div>
+          <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: 2 }}>
             SKU: {product.sku} &middot; Category: {product.category}
           </div>
-          <div style={{ marginTop: "0.5rem", display: "flex", gap: "1.5rem" }}>
-            <span>Current stock: <strong>{product.stockQty} units</strong></span>
-            <span>Price: <strong>{fmt(product.price)}</strong></span>
+          <div style={{ marginTop: "0.6rem", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "0.4rem 1rem" }}>
+            <div><span className="muted" style={{ fontSize: "0.75rem" }}>Stock</span><br /><strong>{product.stockQty} units</strong></div>
+            <div><span className="muted" style={{ fontSize: "0.75rem" }}>Retail price</span><br /><strong>{fmt(product.price)}</strong></div>
+            {product.wholesalePrice && <div><span className="muted" style={{ fontSize: "0.75rem" }}>Wholesale</span><br /><strong>{fmt(product.wholesalePrice)}</strong></div>}
+            {product.specialPrice   && <div><span className="muted" style={{ fontSize: "0.75rem" }}>Special price</span><br /><strong style={{ color: "#dc2626" }}>{fmt(product.specialPrice)}</strong></div>}
+            <div><span className="muted" style={{ fontSize: "0.75rem" }}>Cost (last GRN)</span><br /><strong>{product.cost > 0 ? fmt(product.cost) : "—"}</strong></div>
+            {product.price > 0 && product.cost > 0 && (
+              <div><span className="muted" style={{ fontSize: "0.75rem" }}>Margin</span><br /><strong style={{ color: "#16a34a" }}>{Math.round((product.price - product.cost) / product.price * 100)}%</strong></div>
+            )}
           </div>
         </div>
       )}

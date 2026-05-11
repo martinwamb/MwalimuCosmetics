@@ -124,19 +124,24 @@ router.get("/search", requireRoles(["ADMIN", "ACCOUNTS", "SALES"]), async (req, 
     },
     select: {
       id: true, sku: true, name: true,
-      price: true, stockQty: true,
+      price: true, cost: true,
+      wholesalePrice: true, specialPrice: true,
+      stockQty: true,
       category: { select: { name: true } },
     },
     orderBy: { stockQty: "desc" },
     take: 10,
   });
   return res.json(products.map(p => ({
-    id:       p.id,
-    sku:      p.sku,
-    name:     p.name,
-    price:    Number(p.price),
-    stockQty: p.stockQty,
-    category: p.category?.name ?? "Uncategorised",
+    id:             p.id,
+    sku:            p.sku,
+    name:           p.name,
+    price:          Number(p.price),
+    cost:           Number(p.cost ?? 0),
+    wholesalePrice: p.wholesalePrice ? Number(p.wholesalePrice) : null,
+    specialPrice:   p.specialPrice   ? Number(p.specialPrice)   : null,
+    stockQty:       p.stockQty,
+    category:       p.category?.name ?? "Uncategorised",
   })));
 });
 
