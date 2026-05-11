@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260502-1";
+const AGENT_VERSION   = "20260511-1";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -268,12 +268,32 @@ async function buildProducts(conn) {
   }
   log(`Cost map built: ${Object.keys(costMap).length} SKUs with known cost.`);
 
+  // Wholesale and special prices from the stock master table (sitems).
+  // If the table or columns don't exist the query fails silently.
+  const priceMap = Object.create(null); // { sku → { wholesale, special } }
+  try {
+    const sitemsRows = await query(conn,
+      `SELECT CODE, PRICE2 AS wholesale, PRICE3 AS special FROM sitems WHERE CODE IS NOT NULL`);
+    for (const r of sitemsRows) {
+      priceMap[r.CODE] = {
+        wholesale: r.wholesale > 0 ? Number(r.wholesale) : null,
+        special:   r.special   > 0 ? Number(r.special)   : null,
+      };
+    }
+    log(`Price map built: ${Object.keys(priceMap).length} SKUs with sitems data.`);
+  } catch (e) {
+    log("sitems price query skipped (non-fatal): " + e.message);
+  }
+
   const products = soldProducts.map(p => ({
-    sku:      p.sku,
-    name:     p.name,
-    price:    Number(p.price),
-    category: p.category || "Uncategorised",
-    stockQty: Math.max(0, Math.round(stockMap[p.sku] ?? 0)),
+    sku:            p.sku,
+    name:           p.name,
+    price:          Number(p.price),
+    cost:           costMap[p.sku] ?? 0,
+    wholesalePrice: priceMap[p.sku]?.wholesale ?? null,
+    specialPrice:   priceMap[p.sku]?.special   ?? null,
+    category:       p.category || "Uncategorised",
+    stockQty:       Math.max(0, Math.round(stockMap[p.sku] ?? 0)),
   }));
 
   return { products, costMap };

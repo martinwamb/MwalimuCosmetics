@@ -118,7 +118,10 @@ router.post("/products", async (req, res) => {
   if (!checkSecret(req, res)) return;
 
   const { products } = req.body as {
-    products: Array<{ sku: string; name: string; price: number; category: string; stockQty: number }>;
+    products: Array<{
+      sku: string; name: string; price: number; category: string; stockQty: number;
+      cost?: number; wholesalePrice?: number | null; specialPrice?: number | null;
+    }>;
   };
   if (!Array.isArray(products)) return res.status(400).json({ error: "products must be array" });
 
@@ -131,23 +134,32 @@ router.post("/products", async (req, res) => {
     });
     if (!cat) cat = await prisma.category.create({ data: { name: p.category } });
 
+    const costVal     = typeof p.cost === "number" && p.cost > 0 ? p.cost : undefined;
+    const wholesale   = typeof p.wholesalePrice === "number" && p.wholesalePrice > 0 ? p.wholesalePrice : null;
+    const special     = typeof p.specialPrice   === "number" && p.specialPrice   > 0 ? p.specialPrice   : null;
+
     await prisma.product.upsert({
       where:  { sku: p.sku },
       update: {
-        name:       p.name,
-        price:      p.price,
-        stockQty:   p.stockQty,
-        categoryId: cat.id,
-        status:     p.stockQty > 0 ? "ACTIVE" : "INACTIVE",
+        name:           p.name,
+        price:          p.price,
+        stockQty:       p.stockQty,
+        categoryId:     cat.id,
+        status:         p.stockQty > 0 ? "ACTIVE" : "INACTIVE",
+        ...(costVal !== undefined ? { cost: costVal } : {}),
+        wholesalePrice: wholesale,
+        specialPrice:   special,
       },
       create: {
-        sku:        p.sku,
-        name:       p.name,
-        price:      p.price,
-        cost:       0,
-        stockQty:   p.stockQty,
-        categoryId: cat.id,
-        status:     p.stockQty > 0 ? "ACTIVE" : "INACTIVE",
+        sku:            p.sku,
+        name:           p.name,
+        price:          p.price,
+        cost:           costVal ?? 0,
+        wholesalePrice: wholesale,
+        specialPrice:   special,
+        stockQty:       p.stockQty,
+        categoryId:     cat.id,
+        status:         p.stockQty > 0 ? "ACTIVE" : "INACTIVE",
       },
     });
     upserted++;
@@ -311,7 +323,7 @@ router.get("/backup/list", requireAuth, async (_req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260502-1";
+const AGENT_VERSION = "20260511-1";
 
 router.get("/agent-version", (_req, res) => {
   res.json({ version: AGENT_VERSION });
