@@ -72,7 +72,7 @@ jobs:
           # NEXT_SKIP_LOCKFILE_PATCH=1 prevents Next.js 14 from trying to run
           # 'npm install' internally to patch missing swc deps — which fails in
           # a workspace setup without a committed package-lock.json.
-          NEXT_SKIP_LOCKFILE_PATCH=1 npm run build --workspace=@mwalimu/front
+          cd apps/front && NEXT_SKIP_LOCKFILE_PATCH=1 npx next build && cd ../..
 
           # Build backend
           npm run build --workspace=@mwalimu/back
