@@ -111,7 +111,7 @@ router.get("/", async (req, res) => {
 });
 
 // Fast product search for the stock adjustment UI
-router.get("/search", requireRoles("ADMIN", "ACCOUNTS", "SALES"), async (req, res) => {
+router.get("/search", requireRoles(["ADMIN", "ACCOUNTS", "SALES"]), async (req, res) => {
   const q = ((req.query.q as string) ?? "").trim();
   if (q.length < 2) return res.json([]);
   const products = await prisma.product.findMany({
