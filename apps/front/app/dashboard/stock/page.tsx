@@ -358,10 +358,10 @@ export default function StockPage() {
       <div style={{ display: "flex", gap: "0.5rem", borderBottom: "1px solid var(--border)", paddingBottom: "0.5rem" }}>
         {(["adjust", "grn"] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+            style={{ border: "none", cursor: "pointer", fontFamily: "inherit",
               padding: "0.4rem 0.9rem", borderRadius: 8, fontWeight: tab === t ? 700 : 400,
               color: tab === t ? "var(--teal)" : "var(--muted)",
-              background: tab === t ? "var(--teal-soft, #f0fdf4)" : "none" } as any}>
+              background: tab === t ? "#f0fdf4" : "none" } as any}>
             {t === "adjust" ? "Adjust Stock" : "Receive Goods (GRN)"}
           </button>
         ))}
