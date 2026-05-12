@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260511-1";
+const AGENT_VERSION   = "20260511-2";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -504,6 +504,7 @@ async function run() {
 
   let metricsPushed = false;
   if (metricsData) {
+    metricsData.agentVersion = AGENT_VERSION;
     metricsPushed = await pushMetrics(metricsData)
       .catch(e => { log("Metrics push error: " + e.message); return false; });
   }

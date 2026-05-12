@@ -29,6 +29,7 @@ const metricsSchema = z.object({
   draftSales:        z.number().default(0),
   purchases:         z.number().default(0),
   profit:            z.number().default(0),
+  agentVersion:      z.string().optional(),
   paymentBreakdown: z.array(z.object({
     name:         z.string(),
     transactions: z.number(),
@@ -57,18 +58,15 @@ router.post("/metrics", async (req, res) => {
 
   let data = parsed.data;
 
-  // Old agent detection: tax=0, profit=0, purchases=0, draftTransactions=0.
-  // Old agents lack posted=1 filtering so totalSales includes drafts, and their
-  // paymentBreakdown covers all transactions — meaning breakdown and totalSales
-  // will never reconcile with each other.
-  // When detected: reject everything from the old agent and keep the entire
-  // existing accurate snapshot intact. Nothing the old agent sends is usable.
-  const isOldAgent = data.tax === 0 && data.profit === 0 && data.purchases === 0 && data.draftTransactions === 0;
-  if (isOldAgent) {
+  // Old agent detection: agents before v20260501 don't send agentVersion and
+  // lack posted=1 filtering, so their totalSales includes drafts and
+  // paymentBreakdown covers all transactions. Only reject if:
+  //   1. No agentVersion field (new agents always send it), AND
+  //   2. An accurate snapshot already exists for the day
+  if (!data.agentVersion) {
     const existing = await prisma.metricsSnapshot.findFirst({ where: { forDate: data.forDate } });
     const ex = existing as any;
     if (existing && (existing.tax > 0 || ex.profit > 0 || ex.purchases > 0)) {
-      // Silently ignore the old agent push — accurate data is already stored
       return res.json({ ok: true });
     }
   }
@@ -286,7 +284,7 @@ router.post("/backup", async (req, res) => {
   }
 
   // Whitelist tables accepted for backup
-  const allowed = ["pos_header", "pos_details", "pos_payment_details", "stran"];
+  const allowed = ["pos_header", "pos_details", "pos_payment_details", "stran", "grn"];
   if (!allowed.includes(table)) return res.status(400).json({ error: "table not allowed" });
 
   try {
@@ -323,7 +321,7 @@ router.get("/backup/list", requireAuth, async (_req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260511-1";
+const AGENT_VERSION = "20260511-2";
 
 router.get("/agent-version", (_req, res) => {
   res.json({ version: AGENT_VERSION });

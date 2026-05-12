@@ -9,6 +9,7 @@
  *   pos_details         — line items (products sold per receipt)
  *   pos_payment_details — payment method breakdown per receipt
  *   stran               — stock movement ledger (today's entries)
+ *   grn                 — goods received note headers (for purchases in history)
  *
  * The server stores each table as a JSON file under /backups/{date}/{table}.json.
  * No size limit: all rows for the given date are included.
@@ -105,6 +106,9 @@ async function run() {
 
   await backupTable(conn, "stran", today,
     `SELECT * FROM stran WHERE DATE(stdate) = ?`, [today]);
+
+  await backupTable(conn, "grn", today,
+    `SELECT * FROM grn WHERE DATE(ddate) = ?`, [today]);
 
   conn.end();
   log("=== Daily backup complete ===");

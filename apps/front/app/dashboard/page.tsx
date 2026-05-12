@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const [snap, setSnap]             = useState<Snapshot | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState("");
   const [lastFetch, setLastFetch]   = useState<Date | null>(null);
   const tokenRef = useRef("");
 
@@ -53,29 +54,51 @@ export default function DashboardPage() {
   async function requestRefresh() {
     if (!tokenRef.current || refreshing) return;
     setRefreshing(true);
+    setRefreshMsg("");
+    let synced = false;
     try {
-      // Ask server to queue a sync request for the shop PC
       const reqRes = await fetch(`${apiBase}/sync/request`, {
         method: "POST",
         headers: { Authorization: `Bearer ${tokenRef.current}` },
       });
+      if (!reqRes.ok) {
+        setRefreshMsg("Could not reach server. Try again.");
+        setRefreshing(false);
+        return;
+      }
       const { requestedAt } = await reqRes.json();
 
       // Poll until the snapshot is newer than our request (shop PC has synced)
       const deadline = Date.now() + 90000; // 90s timeout
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, 3000));
-        const snap = await fetch(`${apiBase}/sync/metrics/latest`, {
+        const latest = await fetch(`${apiBase}/sync/metrics/latest`, {
           headers: { Authorization: `Bearer ${tokenRef.current}` },
           cache: "no-store",
         }).then(r => r.json()).catch(() => null);
-        if (snap && new Date(snap.capturedAt) > new Date(requestedAt)) {
-          setSnap(snap);
+        if (latest && new Date(latest.capturedAt) > new Date(requestedAt)) {
+          setSnap(latest);
           setLastFetch(new Date());
+          synced = true;
           break;
         }
       }
-    } catch {}
+
+      // Whether the comparison succeeded or timed out, load the latest snapshot
+      // so the dashboard always shows the most current data available
+      if (!synced) {
+        const latest = await fetch(`${apiBase}/sync/metrics/latest`, {
+          headers: { Authorization: `Bearer ${tokenRef.current}` },
+          cache: "no-store",
+        }).then(r => r.json()).catch(() => null);
+        if (latest) { setSnap(latest); setLastFetch(new Date()); }
+        setRefreshMsg("Sync timed out — showing latest available data.");
+      } else {
+        setRefreshMsg("");
+      }
+    } catch {
+      setRefreshMsg("Sync failed. Is the shop PC online?");
+    }
     setRefreshing(false);
   }
 
@@ -124,7 +147,12 @@ export default function DashboardPage() {
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {refreshing && (
             <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-              Syncing with POS… (up to 30s)
+              Syncing with POS… (up to 90s)
+            </span>
+          )}
+          {!refreshing && refreshMsg && (
+            <span style={{ fontSize: "0.82rem", color: refreshMsg.includes("timed out") ? "#f59e0b" : "#dc2626" }}>
+              {refreshMsg}
             </span>
           )}
           <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }} disabled={refreshing} onClick={requestRefresh}>

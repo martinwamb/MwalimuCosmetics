@@ -88,10 +88,27 @@ if %errorlevel% equ 0 (
   echo [OK] Startup folder fallback configured.
 )
 
+:: Find node.exe for backup task (same dynamic search as loop.ps1)
+set NODE_EXE=
+for %%P in (
+  "C:\Program Files\nodejs\node.exe"
+  "C:\Program Files (x86)\nodejs\node.exe"
+) do (
+  if exist "%%~P" (
+    if not defined NODE_EXE set NODE_EXE=%%~P
+  )
+)
+if not defined NODE_EXE (
+  for /f "delims=" %%I in ('where node 2^>nul') do (
+    if not defined NODE_EXE set NODE_EXE=%%I
+  )
+)
+if not defined NODE_EXE set NODE_EXE=node
+
 :: Register daily backup — runs at 17:00 Kenya time under SYSTEM account
 echo.
-echo Registering daily backup task (5:00 PM)...
-schtasks /create /tn "MwalimuDailyBackup" /tr "\"C:\Program Files\nodejs\node.exe\" C:\MwalimuSync\daily-backup.js" /sc DAILY /st 17:00 /ru SYSTEM /rl HIGHEST /f >nul
+echo Registering daily backup task (5:00 PM) using: %NODE_EXE%
+schtasks /create /tn "MwalimuDailyBackup" /tr "\"%NODE_EXE%\" C:\MwalimuSync\daily-backup.js" /sc DAILY /st 17:00 /ru SYSTEM /rl HIGHEST /f >nul
 if %errorlevel% equ 0 (
   echo [OK] Daily backup: runs at 17:00 every day.
 ) else (
