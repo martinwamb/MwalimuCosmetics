@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260511-2";
+const AGENT_VERSION   = "20260511-3";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -319,6 +319,48 @@ async function syncProducts(products) {
   log(`Products synced: ${synced} of ${products.length}`);
 }
 
+// ── Backup: ship today's MySQL tables to Hetzner ─────────────
+// Used by the backup_request pending-change type (dashboard "Backup Now" button)
+// and by the scheduled daily-backup.js task.
+async function runDailyBackup(conn) {
+  const today = kenyanDate();
+  log(`=== Backup starting for ${today} ===`);
+
+  const tables = [
+    { name: "pos_header",          sql: `SELECT * FROM pos_header WHERE DATE(trandate) = ?`,         params: [today] },
+    { name: "pos_details",         sql: `SELECT pd.* FROM pos_details pd JOIN pos_header ph ON pd.receiptno = ph.receiptno WHERE DATE(ph.trandate) = ?`, params: [today] },
+    { name: "pos_payment_details", sql: `SELECT ppd.* FROM pos_payment_details ppd JOIN pos_header ph ON ppd.receiptno = ph.receiptno WHERE DATE(ph.trandate) = ?`, params: [today] },
+    { name: "stran",               sql: `SELECT * FROM stran WHERE DATE(stdate) = ?`,                 params: [today] },
+    { name: "grn",                 sql: `SELECT * FROM grn WHERE DATE(ddate) = ?`,                    params: [today] },
+  ];
+
+  for (const t of tables) {
+    try {
+      const rows = await query(conn, t.sql, t.params);
+      const clean = rows.map(row => {
+        const out = {};
+        for (const [k, v] of Object.entries(row)) {
+          if (v === null || v === undefined) out[k] = null;
+          else if (v instanceof Date)        out[k] = v.toISOString();
+          else if (Buffer.isBuffer(v))       out[k] = v.toString("base64");
+          else                               out[k] = v;
+        }
+        return out;
+      });
+      const r = await apiPostLarge("/sync/backup", { date: today, table: t.name, rows: clean }, SECRET);
+      if (r.status === 200) {
+        const parsed = JSON.parse(r.body);
+        log(`  ${t.name}: ${parsed.rows} rows backed up.`);
+      } else {
+        log(`  ${t.name} backup failed [${r.status}]: ${r.body.slice(0, 100)}`);
+      }
+    } catch (e) {
+      log(`  ${t.name} backup error: ${e.message}`);
+    }
+  }
+  log("=== Backup complete ===");
+}
+
 // ── 3. Apply pending changes from cloud ──────────────────────
 async function applyPendingChanges(conn, token) {
   const r = await apiGet("/sync/pending-changes", token);
@@ -337,6 +379,9 @@ async function applyPendingChanges(conn, token) {
           `INSERT INTO stran (CODE, descr, stdate, qty, tt, trandesc, staff, source)
            VALUES (?, ?, CURDATE(), ?, 'ADJ', ?, 'WEB', 'WEB')`,
           [sku, name || sku, Number(delta), reason || "Web stock adjustment"]);
+
+      } else if (change.type === "backup_request") {
+        await runDailyBackup(conn);
 
       } else if (change.type === "goods_received") {
         // Goods received note — writes grn header, grn_d lines, and stran entries

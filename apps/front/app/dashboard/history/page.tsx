@@ -307,19 +307,77 @@ function StockTab({ date, token }: { date: string; token: string }) {
 
 // ── Main page ─────────────────────────────────────────────────
 export default function HistoryPage() {
-  const [token, setToken]   = useState("");
-  const [dates, setDates]   = useState<string[]>([]);
-  const [date, setDate]     = useState("");
-  const [tab, setTab]       = useState<Tab>("summary");
+  const [token, setToken]         = useState("");
+  const [dates, setDates]         = useState<string[]>([]);
+  const [date, setDate]           = useState("");
+  const [tab, setTab]             = useState<Tab>("summary");
+  const [backing, setBacking]     = useState(false);
+  const [backupMsg, setBackupMsg] = useState("");
+
+  function kenyanDate() {
+    return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
+  function reloadDates(t: string) {
+    return fetch(`${apiBase}/history/dates`, { headers: { Authorization: `Bearer ${t}` } })
+      .then(r => r.json())
+      .then((d: string[]) => { setDates(d); if (d.length > 0 && !date) setDate(d[0]); })
+      .catch(() => {});
+  }
 
   useEffect(() => {
     const t = localStorage.getItem("mwalimu_token") ?? "";
     setToken(t);
-    fetch(`${apiBase}/history/dates`, { headers: { Authorization: `Bearer ${t}` } })
-      .then(r => r.json())
-      .then(d => { setDates(d); if (d.length > 0) setDate(d[0]); })
-      .catch(() => {});
+    reloadDates(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function requestBackup() {
+    if (backing) return;
+    setBacking(true);
+    setBackupMsg("");
+    try {
+      // Create a backup_request pending change
+      const cr = await fetch(`${apiBase}/sync/pending-changes`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "backup_request", payload: {} }),
+      });
+      if (!cr.ok) { setBackupMsg("Could not queue backup. Try again."); setBacking(false); return; }
+
+      // Wake the bridge PC so it picks up the pending change
+      await fetch(`${apiBase}/sync/request`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      // Poll /history/dates until today's date appears (up to 3 minutes)
+      const today    = kenyanDate();
+      const deadline = Date.now() + 180000;
+      let found = false;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 4000));
+        const d: string[] = await fetch(`${apiBase}/history/dates`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(r => r.json()).catch(() => []);
+        if (d.includes(today)) {
+          setDates(d);
+          setDate(today);
+          setTab("summary");
+          found = true;
+          setBackupMsg("Backup complete.");
+          break;
+        }
+      }
+      if (!found) {
+        setBackupMsg("Backup timed out — is the shop PC online?");
+        reloadDates(token);
+      }
+    } catch {
+      setBackupMsg("Backup failed. Check connection.");
+    }
+    setBacking(false);
+  }
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "summary",      label: "Daily Summary" },
@@ -329,11 +387,25 @@ export default function HistoryPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-      <div>
-        <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Historical Data</h2>
-        <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.85rem" }}>
-          Browse daily backups of POS data. Backups are created at 5 PM each day.
-        </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.75rem" }}>
+        <div>
+          <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Historical Data</h2>
+          <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.85rem" }}>
+            Browse daily backups of POS data. Backups are created at 5 PM each day.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          {backing && <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>Backing up… (up to 3 min)</span>}
+          {!backing && backupMsg && (
+            <span style={{ fontSize: "0.82rem", color: backupMsg.includes("complete") ? "#16a34a" : "#f59e0b" }}>
+              {backupMsg}
+            </span>
+          )}
+          <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
+            disabled={backing} onClick={requestBackup}>
+            ⬇ Backup Now
+          </button>
+        </div>
       </div>
 
       {dates.length === 0 ? (
