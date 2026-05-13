@@ -22,6 +22,7 @@ import { router as reportsRouter } from "./routes/reports.js";
 import { router as syncRouter }    from "./routes/sync.js";
 import { router as posRouter }     from "./routes/pos.js";
 import { router as historyRouter } from "./routes/history.js";
+import { router as mirrorRouter }  from "./routes/mirror.js";
 import { uploadsDir } from "./lib/uploads.js";
 import { seedAdmin } from "./lib/admin.js";
 
@@ -60,6 +61,7 @@ app.use("/reports", reportsRouter);
 app.use("/sync",    syncRouter);
 app.use("/pos",     posRouter);
 app.use("/history", historyRouter);
+app.use("/sync",    mirrorRouter);
 
 seedAdmin()
   .catch((err) => {

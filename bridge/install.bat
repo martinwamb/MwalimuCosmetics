@@ -55,9 +55,10 @@ echo [OK] Dependencies ready.
 :: Copy files to install directory
 echo.
 echo Copying files to %INSTALL_DIR%...
-copy /y "%~dp0pusher.js"    "%INSTALL_DIR%\pusher.js"    >nul
-copy /y "%~dp0loop.ps1"     "%INSTALL_DIR%\loop.ps1"     >nul
+copy /y "%~dp0pusher.js"       "%INSTALL_DIR%\pusher.js"       >nul
+copy /y "%~dp0loop.ps1"        "%INSTALL_DIR%\loop.ps1"        >nul
 copy /y "%~dp0daily-backup.js" "%INSTALL_DIR%\daily-backup.js" >nul 2>nul
+copy /y "%~dp0daily-mirror.js" "%INSTALL_DIR%\daily-mirror.js" >nul 2>nul
 copy /y "%~dp0package.json" "%INSTALL_DIR%\package.json" >nul 2>nul
 xcopy /e /q /y "%~dp0node_modules" "%INSTALL_DIR%\node_modules\" >nul 2>nul
 echo [OK] Files copied.
@@ -70,9 +71,10 @@ if exist "%OLD_VBS%" (
 )
 
 :: Remove any old scheduled tasks
-schtasks /delete /tn "MwalimuSync"       /f >nul 2>&1
-schtasks /delete /tn "MwalimuSyncLoop"   /f >nul 2>&1
+schtasks /delete /tn "MwalimuSync"        /f >nul 2>&1
+schtasks /delete /tn "MwalimuSyncLoop"    /f >nul 2>&1
 schtasks /delete /tn "MwalimuDailyBackup" /f >nul 2>&1
+schtasks /delete /tn "MwalimuDailyMirror" /f >nul 2>&1
 
 :: Register sync loop — runs at every boot under SYSTEM account
 echo.
@@ -115,6 +117,19 @@ if %errorlevel% equ 0 (
   echo [WARNING] Daily backup task registration failed.
 )
 
+:: Register nightly mirror — runs at 21:00 Kenya time under SYSTEM account
+:: Syncs all MySQL tables to PostgreSQL on Hetzner for analytics queries.
+:: Safe for POS: read-only queries, shop is winding down at this hour.
+:: Retry logic built in: if PC shuts down mid-run, next night resumes.
+echo.
+echo Registering nightly mirror task (9:00 PM) using: %NODE_EXE%
+schtasks /create /tn "MwalimuDailyMirror" /tr "\"%NODE_EXE%\" C:\MwalimuSync\daily-mirror.js" /sc DAILY /st 21:00 /ru SYSTEM /rl HIGHEST /f >nul
+if %errorlevel% equ 0 (
+  echo [OK] Nightly mirror: runs at 21:00 every day.
+) else (
+  echo [WARNING] Nightly mirror task registration failed.
+)
+
 :: Run a first sync now so we can confirm connectivity
 echo.
 echo Running first sync (output visible this one time only)...
@@ -135,10 +150,11 @@ echo [OK] Sync loop running silently in background.
 echo.
 echo  ============================================
 echo   Installation complete!
-echo   - Syncs every 30 seconds (live data)
+echo   - Syncs every 5 seconds when Refresh is clicked
+echo   - Daily backup at 5:00 PM (today's POS data)
+echo   - Nightly mirror at 9:00 PM (full MySQL to Hetzner)
+echo   - Mirror retries automatically if PC was off
 echo   - Starts automatically at boot (Task Scheduler)
-echo   - No popup windows — fully silent
-echo   - Log: C:\MwalimuSync\sync.log
 echo  ============================================
 echo.
 pause
