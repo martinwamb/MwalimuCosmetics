@@ -56,14 +56,15 @@ router.post("/metrics", async (req, res) => {
   const parsed = metricsSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  let data = parsed.data;
+  // Strip agentVersion before passing to Prisma (not a DB column)
+  const { agentVersion, ...data } = parsed.data;
 
   // Old agent detection: agents before v20260501 don't send agentVersion and
   // lack posted=1 filtering, so their totalSales includes drafts and
   // paymentBreakdown covers all transactions. Only reject if:
   //   1. No agentVersion field (new agents always send it), AND
   //   2. An accurate snapshot already exists for the day
-  if (!data.agentVersion) {
+  if (!agentVersion) {
     const existing = await prisma.metricsSnapshot.findFirst({ where: { forDate: data.forDate } });
     const ex = existing as any;
     if (existing && (existing.tax > 0 || ex.profit > 0 || ex.purchases > 0)) {
