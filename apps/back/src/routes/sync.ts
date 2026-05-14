@@ -341,3 +341,17 @@ router.get("/agent/loop.ps1", (_req, res) => {
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.sendFile(filePath);
 });
+
+router.get("/agent/daily-backup.js", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "daily-backup.js");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
+});
+
+router.get("/agent/daily-mirror.js", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "daily-mirror.js");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
+});
