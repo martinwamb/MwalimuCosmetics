@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260511-3";
+const AGENT_VERSION   = "20260514-1";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -34,7 +34,13 @@ const SELF_PATH       = "C:\\MwalimuSync\\pusher.js";
 function kenyanDate() {
   return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
-function log(msg) { console.log(`[${new Date().toLocaleTimeString("en-KE")}] ${msg}`); }
+const _logLines = [];
+function log(msg) {
+  const line = `[${new Date().toLocaleTimeString("en-KE")}] ${msg}`;
+  console.log(line);
+  _logLines.push(line);
+  if (_logLines.length > 60) _logLines.shift();
+}
 
 function query(conn, sql, params) {
   return new Promise((res, rej) =>
@@ -577,4 +583,15 @@ async function run() {
   log("=== Sync complete ===");
 }
 
-run().catch(err => { log("Fatal: " + err.message); process.exit(1); });
+// After every sync attempt (success or failure), forward the log to the
+// server so it appears in PM2 logs and can be read remotely for diagnostics.
+async function forwardLog() {
+  if (!_logLines.length) return;
+  try {
+    await apiPost("/sync/bridge-log", { entries: _logLines.slice() }, SECRET);
+  } catch {}
+}
+
+run()
+  .then(forwardLog)
+  .catch(err => { log("Fatal: " + err.message); forwardLog(); process.exit(1); });

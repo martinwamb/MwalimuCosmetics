@@ -316,13 +316,25 @@ router.get("/backup/list", requireAuth, async (_req, res) => {
   }
 });
 
+// ── Bridge remote log ─────────────────────────────────────────
+// Bridge POSTs its log lines here after each sync run so we can read
+// them in PM2 logs (server-side) without accessing the shop PC directly.
+router.post("/bridge-log", (req, res) => {
+  if (!checkSecret(req, res)) return;
+  const { entries } = req.body as { entries: string[] };
+  if (Array.isArray(entries) && entries.length) {
+    console.log("[bridge]", entries.join("\n[bridge] "));
+  }
+  return res.json({ ok: true });
+});
+
 // ── Agent self-update endpoints ───────────────────────────────
 // Bridge PCs call /sync/agent-version on every startup.
 // If the version differs from their embedded constant they fetch
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260511-3";
+const AGENT_VERSION = "20260514-1";
 
 router.get("/agent-version", (_req, res) => {
   res.json({ version: AGENT_VERSION });
