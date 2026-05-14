@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-1";
+const AGENT_VERSION   = "20260514-2";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -42,9 +42,10 @@ function log(msg) {
   if (_logLines.length > 60) _logLines.shift();
 }
 
-function query(conn, sql, params) {
+function query(conn, sql, params, timeoutMs) {
+  const spec = timeoutMs ? { sql, timeout: timeoutMs } : sql;
   return new Promise((res, rej) =>
-    conn.query(sql, params || [], (e, r) => e ? rej(e) : res(r))
+    conn.query(spec, params || [], (e, r) => e ? rej(e) : res(r))
   );
 }
 
@@ -253,9 +254,20 @@ async function buildProducts(conn) {
 
   if (!soldProducts.length) { log("No products found."); return null; }
 
-  // Stock ledger — SUM(qty) over all stran movements
+  // Ensure stran(CODE) index exists so GROUP BY doesn't do a full table scan.
+  // First time this runs it will take 30-90s to build the index on a large table;
+  // every subsequent call returns instantly (Duplicate key name → caught silently).
+  log("Ensuring stran(CODE) index exists…");
+  await query(conn, "ALTER TABLE stran ADD INDEX idx_stran_code (CODE)", [])
+    .catch(e => {
+      if (!e.message.includes("Duplicate")) log("stran index: " + e.message);
+    });
+
+  // Stock ledger — SUM(qty) over all stran movements (fast once index exists)
   const stockRows = await query(conn,
-    `SELECT CODE AS sku, COALESCE(SUM(qty), 0) AS stockQty FROM stran GROUP BY CODE`);
+    `SELECT CODE AS sku, COALESCE(SUM(qty), 0) AS stockQty FROM stran GROUP BY CODE`,
+    [], 60000)  // 60-second timeout safety net
+    .catch(e => { log("stran query failed (" + e.message + ") — stock will be 0"); return []; });
 
   const stockMap = Object.create(null);
   for (const s of stockRows) stockMap[s.sku] = Number(s.stockQty);
