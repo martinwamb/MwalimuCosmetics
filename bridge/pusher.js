@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-10";
+const AGENT_VERSION   = "20260514-11";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -371,8 +371,34 @@ async function syncProducts(products) {
 // Triggered by a print_receipt pending change from the dashboard POS.
 // Formats the receipt as plain text and sends it to the Windows default
 // printer via PowerShell Out-Printer — silent, no window, no extra packages.
+// Convert a number to KES words (e.g. 700 → "Seven Hundred only.")
+function amtInWords(n) {
+  const ones = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine",
+                 "Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen",
+                 "Seventeen","Eighteen","Nineteen"];
+  const tens = ["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+  function below1000(x) {
+    if (x === 0) return "";
+    if (x < 20) return ones[x];
+    if (x < 100) return tens[Math.floor(x/10)] + (x%10 ? " " + ones[x%10] : "");
+    return ones[Math.floor(x/100)] + " Hundred" + (x%100 ? " " + below1000(x%100) : "");
+  }
+  const whole = Math.floor(n);
+  if (whole === 0) return "Zero only.";
+  let w = "";
+  if (whole >= 1000000) w += below1000(Math.floor(whole/1000000)) + " Million ";
+  if (whole >= 1000)    w += below1000(Math.floor((whole%1000000)/1000)) + " Thousand ";
+  w += below1000(whole % 1000);
+  return w.trim() + " only.";
+}
+
 async function printReceipt(payload) {
-  const { receiptNo, date, items = [], total, amountPaid, changeDue, paymentDetails = {}, ref } = payload;
+  const { receiptNo, date, items = [], total, amountPaid, changeDue,
+          paymentDetails = {}, ref, staff, vatRate = 16 } = payload;
+
+  // VAT-inclusive breakdown (same as FumasV5)
+  const vatAmount = Math.round(Number(total) * vatRate / (100 + vatRate));
+  const netAmount = Number(total) - vatAmount;
 
   const W = 42; // characters wide (80mm paper ~42 chars at 10pt Courier)
   const hr  = "-".repeat(W);
@@ -387,28 +413,32 @@ async function printReceipt(payload) {
   const lines = [
     dhr,
     center("MWALIMU COSMETICS"),
-    center("P.O. Box 1234, Nairobi"),
+    center("P.O. Box, Nairobi"),
     dhr,
     row("Date:", new Date(date).toLocaleString("en-KE")),
     row("Receipt:", receiptNo || "PENDING"),
+    ...(staff ? [row("Cashier:", staff)] : []),
     hr,
     row("ITEM", "TOTAL"),
     hr,
     ...items.map(i => {
-      const name = (i.name || "Item").slice(0, 28);
+      const name = (i.name || "Item").slice(0, 26);
       const subtot = "KES " + (Number(i.unitPrice) * Number(i.qty)).toLocaleString("en-KE");
-      const nameLine = `  ${name} x${i.qty}`;
-      return row(nameLine, subtot);
+      return row(`  ${name} x${i.qty}`, subtot);
     }),
     hr,
+    row("Net (excl. VAT):", "KES " + netAmount.toLocaleString("en-KE")),
+    row(`VAT (${vatRate}%):`, "KES " + vatAmount.toLocaleString("en-KE")),
     row("TOTAL:", "KES " + Number(total).toLocaleString("en-KE")),
-    row("PAID:", "KES " + Number(amountPaid).toLocaleString("en-KE")),
-    ...(changeDue > 0 ? [row("CHANGE:", "KES " + Number(changeDue).toLocaleString("en-KE"))] : []),
     hr,
     ...Object.entries(paymentDetails)
       .filter(([k, v]) => v > 0 && k !== "ref")
       .map(([k, v]) => row("  " + k.toUpperCase(), "KES " + Number(v).toLocaleString("en-KE"))),
     ...(ref ? [row("  Ref:", ref)] : []),
+    row("PAID:", "KES " + Number(amountPaid).toLocaleString("en-KE")),
+    ...(changeDue > 0 ? [row("CHANGE:", "KES " + Number(changeDue).toLocaleString("en-KE"))] : []),
+    hr,
+    "  " + amtInWords(Number(amountPaid)),
     hr,
     center("Thank you for shopping with us!"),
     dhr,

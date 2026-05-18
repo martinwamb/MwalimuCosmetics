@@ -10,7 +10,7 @@ type Product = {
   category: { name: string } | null;
 };
 type CartItem = Product & { qty: number; unitPrice: number };
-type Receipt  = { id: string; createdAt: string; total: number; amountPaid: number; changeDue: number; items: any[]; paymentDetails: any; mysqlReceiptNo?: string | null };
+type Receipt  = { id: string; createdAt: string; total: number; amountPaid: number; changeDue: number; items: any[]; paymentDetails: any; mysqlReceiptNo?: string | null; createdBy?: { name: string } | null };
 
 const PAYMENT_METHODS = [
   { key: "cash",           label: "Cash" },
@@ -141,6 +141,7 @@ export default function POSPage() {
         payload: {
           receiptNo:      receipt.mysqlReceiptNo ?? `WEB-${receipt.id.slice(-8).toUpperCase()}`,
           date:           receipt.createdAt,
+          staff:          receipt.createdBy?.name ?? "Staff",
           items:          receipt.items?.map((i: any) => ({
             name:      i.product?.name ?? i.name ?? "Item",
             qty:       i.qty,
@@ -151,6 +152,7 @@ export default function POSPage() {
           changeDue:      receipt.changeDue,
           paymentDetails: receipt.paymentDetails,
           ref:            receipt.paymentDetails?.ref,
+          vatRate:        16,
         },
       }),
     });
@@ -196,6 +198,11 @@ export default function POSPage() {
           <div className="pos-receipt-header">
             <div className="pos-receipt-brand">Mwalimu Cosmetics</div>
             <div className="pos-receipt-date">{new Date(receipt.createdAt).toLocaleString("en-KE")}</div>
+            {receipt.createdBy?.name && (
+              <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginTop: 2 }}>
+                Cashier: {receipt.createdBy.name}
+              </div>
+            )}
             <div style={{ fontSize: "0.82rem", marginTop: "0.25rem",
               color: receipt.mysqlReceiptNo ? "#065f46" : "var(--muted)",
               fontWeight: receipt.mysqlReceiptNo ? 700 : 400 }}>
@@ -218,9 +225,17 @@ export default function POSPage() {
           </table>
 
           <div className="pos-receipt-totals">
-            <div className="pos-receipt-row"><span>Subtotal</span><strong>KES {fmt(receipt.total)}</strong></div>
-            <div className="pos-receipt-row"><span>Paid</span><strong>KES {fmt(receipt.amountPaid)}</strong></div>
-            {receipt.changeDue > 0 && <div className="pos-receipt-row change"><span>Change</span><strong>KES {fmt(receipt.changeDue)}</strong></div>}
+            {(() => {
+              const vat = Math.round(receipt.total * 16 / 116);
+              const net = receipt.total - vat;
+              return <>
+                <div className="pos-receipt-row"><span>Net (excl. VAT)</span><strong>KES {fmt(net)}</strong></div>
+                <div className="pos-receipt-row"><span>VAT (16%)</span><strong>KES {fmt(vat)}</strong></div>
+                <div className="pos-receipt-row"><span>Total</span><strong>KES {fmt(receipt.total)}</strong></div>
+                <div className="pos-receipt-row"><span>Paid</span><strong>KES {fmt(receipt.amountPaid)}</strong></div>
+                {receipt.changeDue > 0 && <div className="pos-receipt-row change"><span>Change</span><strong>KES {fmt(receipt.changeDue)}</strong></div>}
+              </>;
+            })()}
           </div>
 
           <div className="pos-receipt-methods">
