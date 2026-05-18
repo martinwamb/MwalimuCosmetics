@@ -69,7 +69,7 @@ export default function DashboardPage() {
       const { requestedAt } = await reqRes.json();
 
       // Poll until the snapshot is newer than our request (shop PC has synced)
-      const deadline = Date.now() + 90000; // 90s timeout
+      const deadline = Date.now() + 300000; // 5-min timeout (flaky wifi needs more retries)
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, 3000));
         const latest = await fetch(`${apiBase}/sync/metrics/latest`, {
@@ -147,7 +147,7 @@ export default function DashboardPage() {
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {refreshing && (
             <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-              Syncing with POS… (up to 90s)
+              Syncing with POS… (up to 5 min)
             </span>
           )}
           {!refreshing && refreshMsg && (

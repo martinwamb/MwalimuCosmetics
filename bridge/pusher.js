@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-3";
+const AGENT_VERSION   = "20260514-4";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -109,9 +109,14 @@ function saveCheckpoint(cp) {
 // Downloads new pusher.js if the server has a newer version and writes it
 // to disk. Does NOT restart — the loop.ps1 will pick up the new file on
 // the next 30-second cycle naturally, avoiding concurrent-instance races.
+// Only runs once per minute (not every 5s) to avoid wasting bandwidth on
+// flaky connections.
 async function checkForUpdate() {
+  const cp = loadCheckpoint();
+  if (Date.now() - (cp.lastUpdateCheck || 0) < 60000) return; // once per minute
   try {
-    const r = await apiGet("/sync/agent-version", null);
+    saveCheckpoint({ ...cp, lastUpdateCheck: Date.now() });
+    const r = await apiRequest("GET", "/sync/agent-version", null, null, null, 5000); // 5s timeout
     if (r.status !== 200) return;
     const { version } = JSON.parse(r.body);
     if (version === AGENT_VERSION) return;
@@ -665,13 +670,11 @@ async function run() {
   await checkForUpdate();
 
   // Check if a refresh was requested from the dashboard (cheap — no MySQL)
-  const refreshCheck = await apiRequest("GET", "/sync/pending-refresh", null, SECRET, null)
+  // Short 10s timeout: fail fast on flaky wifi so the next loop cycle retries sooner.
+  const refreshCheck = await apiRequest("GET", "/sync/pending-refresh", null, SECRET, null, 10000)
     .catch(() => ({ status: 0, body: "{}" }));
 
-  if (refreshCheck.status !== 200) {
-    log("Could not reach server. Skipping.");
-    return;
-  }
+  if (refreshCheck.status !== 200) return; // silent — no log (would flood on bad connection)
 
   const { pending } = JSON.parse(refreshCheck.body);
   if (!pending) {
