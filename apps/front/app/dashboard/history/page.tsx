@@ -422,7 +422,9 @@ export default function HistoryPage() {
     setBacking(false);
   }
 
-  async function startMirrorBatch(batchDays = 10) {
+  // autoContinue=true → bridge keeps queuing batches until complete (use when quiet)
+  // autoContinue=false → one batch then stops (normal daily use)
+  async function startMirrorBatch(batchDays = 60, autoContinue = false) {
     if (mirroring) return;
     setMirroring(true);
     setMirrorMsg("");
@@ -436,7 +438,7 @@ export default function HistoryPage() {
     const cr = await fetch(`${apiBase}/sync/pending-changes`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "mirror_run", payload: { batchDays } }),
+      body: JSON.stringify({ type: "mirror_run", payload: { batchDays, autoContinue } }),
     }).catch(() => null);
     if (!cr?.ok) {
       setMirrorMsg("Could not queue upload. Try again.");
@@ -539,8 +541,13 @@ export default function HistoryPage() {
             {!mirroring && (
               <>
                 <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
-                  onClick={() => startMirrorBatch(60)}>
-                  {mirror.lastDate ? "▶ Continue Upload" : "▶ Start Upload"}
+                  onClick={() => startMirrorBatch(60, false)}>
+                  {mirror.lastDate ? "▶ Next 60 days" : "▶ Start Upload"}
+                </button>
+                <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem", opacity: 0.75 }}
+                  title="Runs continuously until all history is uploaded — use when shop is quiet"
+                  onClick={() => startMirrorBatch(60, true)}>
+                  ⚡ Run to completion
                 </button>
               </>
             )}

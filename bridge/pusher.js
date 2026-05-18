@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-19";
+const AGENT_VERSION   = "20260514-20";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -846,17 +846,21 @@ async function applyPendingChanges(conn, token) {
         await runDailyBackup(conn);
 
       } else if (change.type === "mirror_run") {
-        const { batchDays = 60 } = change.payload || {};
+        const { batchDays = 60, autoContinue = false } = change.payload || {};
         const remaining = await runDailyMirrorBatch(conn, batchDays);
-        // Auto-queue next batch if more days remain and not paused
-        if (remaining > 0 && !(await isPaused())) {
+        // Auto-queue next batch ONLY when autoContinue was explicitly set.
+        // In normal operation (autoContinue=false) each batch is one-shot —
+        // the user decides when to run the next one from the History page.
+        if (autoContinue && remaining > 0 && !(await isPaused())) {
           await apiRequest("POST", "/sync/pending-changes",
-            { type: "mirror_run", payload: { batchDays } },
+            { type: "mirror_run", payload: { batchDays, autoContinue: true } },
             null, token, 10000).catch(() => {});
           await apiRequest("POST", "/sync/request", {}, null, token, 10000).catch(() => {});
-          log(`Auto-queued next mirror batch (${remaining} days remaining).`);
+          log(`Auto-queued next batch (${remaining} days remaining).`);
         } else if (remaining === 0) {
           log("Mirror upload complete — all historical data is on Hetzner.");
+        } else if (!autoContinue && remaining > 0) {
+          log(`Batch done. ${remaining} days still pending — click Continue on History page for next batch.`);
         }
 
       } else if (change.type === "goods_received") {
