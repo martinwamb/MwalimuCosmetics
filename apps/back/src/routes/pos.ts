@@ -114,7 +114,7 @@ router.post("/sale", async (req: any, res) => {
         })),
       },
     },
-    include: { items: true },
+    include: { items: { include: { product: { select: { name: true, sku: true } } } } },
   });
 
   // Decrement stock in PostgreSQL

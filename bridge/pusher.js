@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-6";
+const AGENT_VERSION   = "20260514-7";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -367,6 +367,78 @@ async function syncProducts(products) {
   log(`Products synced: ${synced} of ${products.length}`);
 }
 
+// ── Remote receipt printing ───────────────────────────────────
+// Triggered by a print_receipt pending change from the dashboard POS.
+// Formats the receipt as plain text and sends it to the Windows default
+// printer via PowerShell Out-Printer — silent, no window, no extra packages.
+async function printReceipt(payload) {
+  const { receiptNo, date, items = [], total, amountPaid, changeDue, paymentDetails = {}, ref } = payload;
+
+  const W = 42; // characters wide (80mm paper ~42 chars at 10pt Courier)
+  const hr  = "-".repeat(W);
+  const dhr = "=".repeat(W);
+  const center = s => s.padStart(Math.floor((W + s.length) / 2)).padEnd(W);
+  const row    = (l, r) => {
+    const right = String(r);
+    const left  = String(l).slice(0, W - right.length - 1).padEnd(W - right.length - 1);
+    return left + " " + right;
+  };
+
+  const lines = [
+    dhr,
+    center("MWALIMU COSMETICS"),
+    center("P.O. Box 1234, Nairobi"),
+    dhr,
+    row("Date:", new Date(date).toLocaleString("en-KE")),
+    row("Receipt:", receiptNo || "PENDING"),
+    hr,
+    row("ITEM", "TOTAL"),
+    hr,
+    ...items.map(i => {
+      const name = (i.name || "Item").slice(0, 28);
+      const subtot = "KES " + (Number(i.unitPrice) * Number(i.qty)).toLocaleString("en-KE");
+      const nameLine = `  ${name} x${i.qty}`;
+      return row(nameLine, subtot);
+    }),
+    hr,
+    row("TOTAL:", "KES " + Number(total).toLocaleString("en-KE")),
+    row("PAID:", "KES " + Number(amountPaid).toLocaleString("en-KE")),
+    ...(changeDue > 0 ? [row("CHANGE:", "KES " + Number(changeDue).toLocaleString("en-KE"))] : []),
+    hr,
+    ...Object.entries(paymentDetails)
+      .filter(([k, v]) => v > 0 && k !== "ref")
+      .map(([k, v]) => row("  " + k.toUpperCase(), "KES " + Number(v).toLocaleString("en-KE"))),
+    ...(ref ? [row("  Ref:", ref)] : []),
+    hr,
+    center("Thank you for shopping with us!"),
+    dhr,
+    "", "", "",  // feed lines for tear-off
+  ];
+
+  const text = lines.join("\r\n");
+  const tmpFile = "C:\\MwalimuSync\\last_receipt.txt";
+
+  try {
+    fs.writeFileSync(tmpFile, text, "ascii");
+    // Send to default Windows printer silently via PowerShell Out-Printer
+    await new Promise((res, rej) => {
+      require("child_process").exec(
+        `powershell -NoProfile -NonInteractive -Command "Get-Content '${tmpFile}' | Out-Printer"`,
+        { timeout: 15000 },
+        (err) => err ? rej(err) : res()
+      );
+    });
+    log("Receipt printed successfully.");
+  } catch (e) {
+    log("Print failed: " + e.message);
+    // Fallback: try notepad /p (shows briefly)
+    try {
+      require("child_process").exec(`notepad /p "${tmpFile}"`);
+      log("Receipt sent via notepad fallback.");
+    } catch {}
+  }
+}
+
 // ── Backup: ship today's MySQL tables to Hetzner ─────────────
 // Used by the backup_request pending-change type (dashboard "Backup Now" button)
 // and by the scheduled daily-backup.js task.
@@ -557,6 +629,9 @@ async function applyPendingChanges(conn, token) {
           `INSERT INTO stran (CODE, descr, stdate, qty, tt, trandesc, staff, source)
            VALUES (?, ?, CURDATE(), ?, 'ADJ', ?, 'WEB', 'WEB')`,
           [sku, name || sku, Number(delta), reason || "Web stock adjustment"]);
+
+      } else if (change.type === "print_receipt") {
+        await printReceipt(change.payload);
 
       } else if (change.type === "backup_request") {
         await runDailyBackup(conn);

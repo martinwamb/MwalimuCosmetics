@@ -130,6 +130,35 @@ export default function POSPage() {
     }
   }
 
+  // Send a print job to the office PC's physical printer via the bridge
+  async function printOnOfficePrinter() {
+    if (!receipt) return;
+    await fetch(`${apiBase}/sync/pending-changes`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "print_receipt",
+        payload: {
+          receiptNo:      receipt.mysqlReceiptNo ?? `WEB-${receipt.id.slice(-8).toUpperCase()}`,
+          date:           receipt.createdAt,
+          items:          receipt.items?.map((i: any) => ({
+            name:      i.product?.name ?? i.name ?? "Item",
+            qty:       i.qty,
+            unitPrice: Number(i.unitPrice),
+          })),
+          total:          receipt.total,
+          amountPaid:     receipt.amountPaid,
+          changeDue:      receipt.changeDue,
+          paymentDetails: receipt.paymentDetails,
+          ref:            receipt.paymentDetails?.ref,
+        },
+      }),
+    });
+    // Wake bridge to pick up the print job
+    await fetch(`${apiBase}/sync/request`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+    alert("Print job sent to office printer. It will print within a few seconds.");
+  }
+
   // After sale: wake the bridge and poll until it writes the MySQL receipt number
   async function syncReceiptNo(orderId: string) {
     setSyncingReceipt(true);
@@ -227,6 +256,12 @@ export default function POSPage() {
                 Print {receipt.mysqlReceiptNo ? "Receipt" : "Now"}
               </button>
             </div>
+            <button
+              className="button ghost full"
+              style={{ marginTop: "0.5rem", fontSize: "0.82rem" }}
+              onClick={printOnOfficePrinter}>
+              🖨 Print on Office Printer
+            </button>
           </div>
         </div>
       </div>
