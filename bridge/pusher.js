@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-9";
+const AGENT_VERSION   = "20260514-10";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -443,8 +443,11 @@ async function printReceipt(payload) {
       );
     }
 
-    // Step 3: print using explicit printer name via PowerShell Out-Printer
-    const printerArg = printerName ? ` -Name "${printerName}"` : "";
+    // Step 3: print using explicit printer name via PowerShell Out-Printer.
+    // Use single quotes inside the PowerShell string so printer names with
+    // slashes, spaces or other special characters are passed safely.
+    const safeName = printerName ? printerName.replace(/'/g, "''") : null;
+    const printerArg = safeName ? ` -Name '${safeName}'` : "";
     await new Promise((res, rej) =>
       exec(
         `powershell -NoProfile -NonInteractive -Command "Get-Content '${tmpFile}' | Out-Printer${printerArg}"`,
