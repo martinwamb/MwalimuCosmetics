@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-14";
+const AGENT_VERSION   = "20260514-15";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -539,8 +539,8 @@ async function runDailyBackup(conn) {
     { name: "pos_header",          sql: `SELECT * FROM pos_header WHERE DATE(trandate) = ?`,         params: [today] },
     { name: "pos_details",         sql: `SELECT pd.* FROM pos_details pd JOIN pos_header ph ON pd.receiptno = ph.receiptno WHERE DATE(ph.trandate) = ?`, params: [today] },
     { name: "pos_payment_details", sql: `SELECT ppd.* FROM pos_payment_details ppd JOIN pos_header ph ON ppd.receiptno = ph.receiptno WHERE DATE(ph.trandate) = ?`, params: [today] },
-    { name: "stran",               sql: `SELECT * FROM stran WHERE DATE(stdate) = ?`,                 params: [today] },
-    { name: "grn",                 sql: `SELECT * FROM grn WHERE DATE(ddate) = ?`,                    params: [today] },
+    { name: "stran", sql: `SELECT * FROM stran WHERE stdate >= ? AND stdate < ?`, params: [today + " 00:00:00", addDays(today, 1) + " 00:00:00"] },
+    { name: "grn",   sql: `SELECT * FROM grn WHERE ddate >= ? AND ddate < ?`,    params: [today + " 00:00:00", addDays(today, 1) + " 00:00:00"] },
   ];
 
   for (const t of tables) {
@@ -589,11 +589,11 @@ const MIRROR_DATE_TABLES = [
            WHERE DATE(ph.trandate) = ?`,
     params: d => [d] },
   { name: "stran",
-    sql:  "SELECT * FROM stran WHERE DATE(stdate) = ?",
-    params: d => [d] },
+    sql:  "SELECT * FROM stran WHERE stdate >= ? AND stdate < ?",
+    params: d => [d + " 00:00:00", addDays(d, 1) + " 00:00:00"] },
   { name: "grn",
-    sql:  "SELECT * FROM grn WHERE DATE(ddate) = ?",
-    params: d => [d] },
+    sql:  "SELECT * FROM grn WHERE ddate >= ? AND ddate < ?",
+    params: d => [d + " 00:00:00", addDays(d, 1) + " 00:00:00"] },
   { name: "grn_d",
     sql:  `SELECT gd.* FROM grn_d gd JOIN grn g ON gd.no = g.no
            WHERE DATE(g.ddate) = ?`,
