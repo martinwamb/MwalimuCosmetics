@@ -332,17 +332,46 @@ export default function HistoryPage() {
   }
 
   function loadMirrorStatus(t: string) {
-    fetch(`${apiBase}/sync/mirror/progress`, { headers: { Authorization: `Bearer ${t}` } })
+    return fetch(`${apiBase}/sync/mirror/progress`, { headers: { Authorization: `Bearer ${t}` } })
       .then(r => r.json())
-      .then((d: MirrorStatus) => setMirror(d))
-      .catch(() => {});
+      .then((d: MirrorStatus) => { setMirror(d); return d; })
+      .catch(() => ({ lastDate: null, paused: false } as MirrorStatus));
+  }
+
+  // On mount: check if a mirror_run is already queued/running (e.g. user navigated away
+  // mid-batch). If so, resume the progress polling loop automatically so the UI stays live.
+  async function resumeIfActive(t: string) {
+    const prog = await loadMirrorStatus(t);
+    const changes: any[] = await fetch(`${apiBase}/sync/pending-changes/history`, {
+      headers: { Authorization: `Bearer ${t}` },
+    }).then(r => r.json()).catch(() => []);
+    const activeMirror = changes.find((c: any) => c.type === "mirror_run" && c.status === "pending");
+    if (activeMirror) {
+      // A batch is still running on the bridge — re-attach the progress tracker
+      setMirroring(true);
+      setMirrorMsg("");
+      const snapshotDate = prog.lastDate;
+      const deadline = Date.now() + 1200000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 5000));
+        const p: MirrorStatus = await fetch(`${apiBase}/sync/mirror/progress`, {
+          headers: { Authorization: `Bearer ${t}` },
+        }).then(r => r.json()).catch(() => prog);
+        setMirror(p);
+        if (p.lastDate !== snapshotDate || p.paused) {
+          setMirrorMsg(p.paused ? "Paused." : `Batch complete — synced up to ${p.lastDate}.`);
+          break;
+        }
+      }
+      setMirroring(false);
+    }
   }
 
   useEffect(() => {
     const t = localStorage.getItem("mwalimu_token") ?? "";
     setToken(t);
     reloadDates(t);
-    loadMirrorStatus(t);
+    resumeIfActive(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
