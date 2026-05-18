@@ -517,10 +517,10 @@ export default function HistoryPage() {
             <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>Database Mirror</div>
             <div className="muted" style={{ fontSize: "0.82rem", marginTop: 2 }}>
               {mirroring
-                ? "Uploading historical data to Hetzner…"
+                ? "Uploading historical data — batches of 60 days, runs continuously until complete…"
                 : mirror.lastDate
-                  ? `Synced up to ${mirror.lastDate}${mirror.paused ? " — paused" : ""}`
-                  : "Not started — uploads full MySQL history to Hetzner for analytics"}
+                  ? `Synced up to ${mirror.lastDate}${mirror.paused ? " — paused" : " — click Continue to resume"}`
+                  : "Not started — click Start to upload full MySQL history to Hetzner (auto-runs batch by batch)"}
             </div>
             {mirrorMsg && (
               <div style={{ fontSize: "0.80rem", marginTop: 4,
@@ -539,15 +539,9 @@ export default function HistoryPage() {
             {!mirroring && (
               <>
                 <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
-                  onClick={() => startMirrorBatch(10)}>
-                  {mirror.lastDate ? "▶ Continue (10 days)" : "▶ Start Upload"}
+                  onClick={() => startMirrorBatch(60)}>
+                  {mirror.lastDate ? "▶ Continue Upload" : "▶ Start Upload"}
                 </button>
-                {mirror.lastDate && (
-                  <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
-                    onClick={() => startMirrorBatch(60)}>
-                    ▶▶ Fast (60 days)
-                  </button>
-                )}
               </>
             )}
           </div>

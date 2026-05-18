@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-18";
+const AGENT_VERSION   = "20260514-19";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -685,11 +685,12 @@ async function isPaused() {
   } catch { return false; }
 }
 
+// Returns: number of days still pending after this batch (0 = fully caught up)
 async function runDailyMirrorBatch(conn, batchDays) {
-  batchDays = Number(batchDays) || 10;
+  batchDays = Number(batchDays) || 60;
   log(`=== Mirror batch starting (${batchDays} days) ===`);
 
-  if (await isPaused()) { log("Mirror is paused — skipping batch."); return; }
+  if (await isPaused()) { log("Mirror is paused — skipping batch."); return 0; }
 
   // Get watermark from server
   const sr = await apiRequest("GET", "/sync/mirror/status", null, SECRET, null, 10000)
@@ -714,7 +715,7 @@ async function runDailyMirrorBatch(conn, batchDays) {
     log(`Historical mirror starts from ${startDate}`);
   }
 
-  if (startDate > yesterday) { log("Mirror is fully up to date."); return; }
+  if (startDate > yesterday) { log("Mirror is fully up to date."); return 0; }
 
   const allPending  = getDatesRange(startDate, yesterday);
   const batch       = allPending.slice(0, batchDays);
@@ -776,6 +777,7 @@ async function runDailyMirrorBatch(conn, batchDays) {
   }
 
   log(`=== Mirror batch complete${afterBatch > 0 ? ` — ${afterBatch} days still pending` : " — history fully mirrored"} ===`);
+  return afterBatch; // caller uses this to decide whether to auto-queue next batch
 }
 
 // ── 3. Apply pending changes from cloud ──────────────────────
@@ -844,8 +846,18 @@ async function applyPendingChanges(conn, token) {
         await runDailyBackup(conn);
 
       } else if (change.type === "mirror_run") {
-        const { batchDays = 10 } = change.payload || {};
-        await runDailyMirrorBatch(conn, batchDays);
+        const { batchDays = 60 } = change.payload || {};
+        const remaining = await runDailyMirrorBatch(conn, batchDays);
+        // Auto-queue next batch if more days remain and not paused
+        if (remaining > 0 && !(await isPaused())) {
+          await apiRequest("POST", "/sync/pending-changes",
+            { type: "mirror_run", payload: { batchDays } },
+            null, token, 10000).catch(() => {});
+          await apiRequest("POST", "/sync/request", {}, null, token, 10000).catch(() => {});
+          log(`Auto-queued next mirror batch (${remaining} days remaining).`);
+        } else if (remaining === 0) {
+          log("Mirror upload complete — all historical data is on Hetzner.");
+        }
 
       } else if (change.type === "goods_received") {
         // Goods received note — writes grn header, grn_d lines, and stran entries
