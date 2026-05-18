@@ -62,11 +62,12 @@ jobs:
           DATABASE_URL=$(grep '^DATABASE_URL=' apps/back/.env | cut -d= -f2-) \
             node_modules/.bin/prisma generate --schema packages/db/prisma/schema.prisma
 
-          # Apply any schema changes directly (safe, idempotent)
+          # Apply any schema changes (additive only — never drop tables or columns).
+          # Removing --accept-data-loss preserves tables outside the Prisma schema
+          # (e.g. mirror_* tables created by raw SQL in the application layer).
           DATABASE_URL=$(grep '^DATABASE_URL=' apps/back/.env | cut -d= -f2-) \
             node_modules/.bin/prisma db push \
-              --schema packages/db/prisma/schema.prisma \
-              --accept-data-loss
+              --schema packages/db/prisma/schema.prisma
 
           # Build frontend
           # NEXT_SKIP_LOCKFILE_PATCH=1 prevents Next.js 14 from trying to run
