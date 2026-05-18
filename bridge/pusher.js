@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-15";
+const AGENT_VERSION   = "20260514-16";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -478,13 +478,13 @@ async function printReceipt(payload) {
 
   const text = lines.join("\r\n");
   const tmpFile = "C:\\MwalimuSync\\last_receipt.txt";
-
+  const ps1File = "C:\\MwalimuSync\\print_receipt.ps1";
   const exec = require("child_process").exec;
 
   try {
     fs.writeFileSync(tmpFile, text, "ascii");
 
-    // Step 1: find the default printer name via WMI (works from SYSTEM account)
+    // Find default printer via WMI (works from SYSTEM account)
     let printerName = null;
     try {
       const wmicOut = await new Promise((res) =>
@@ -495,34 +495,55 @@ async function printReceipt(payload) {
       if (m) printerName = m[1].trim();
     } catch {}
 
-    // Step 2: ensure the printer is in the system-wide list (makes it accessible
-    // to the SYSTEM account — needed because printers install per-user by default)
     if (printerName) {
+      // Expose printer to SYSTEM account
       await new Promise(res =>
         exec(`rundll32 printui.dll,PrintUIEntry /ga /n "${printerName}"`,
           { timeout: 8000 }, () => res())
       );
     }
 
-    // Step 3: print using explicit printer name via PowerShell Out-Printer.
-    // Use single quotes inside the PowerShell string so printer names with
-    // slashes, spaces or other special characters are passed safely.
-    const safeName = printerName ? printerName.replace(/'/g, "''") : null;
-    const printerArg = safeName ? ` -Name '${safeName}'` : "";
+    // Use System.Drawing.Printing with Courier New 8pt — monospace font
+    // that preserves our exact padding/alignment on thermal paper.
+    // Out-Printer uses GDI with proportional fonts which breaks the layout.
+    const safePrinter = (printerName || "").replace(/'/g, "''").replace(/"/g, '""');
+    const psScript = `
+Add-Type -AssemblyName System.Drawing
+$lines = [System.IO.File]::ReadAllLines('${tmpFile.replace(/\\/g, "\\\\")}', [System.Text.Encoding]::ASCII)
+$font = New-Object System.Drawing.Font('Courier New', 8, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+$brush = [System.Drawing.Brushes]::Black
+$doc = New-Object System.Drawing.Printing.PrintDocument
+${printerName ? `$doc.PrinterSettings.PrinterName = '${safePrinter}'` : ""}
+$printLines = $lines
+$doc.add_PrintPage({
+    $g = $_.Graphics
+    $lineH = $font.GetHeight($g)
+    $y = 2.0
+    foreach ($line in $printLines) {
+        $g.DrawString($line, $font, $brush, 2.0, $y)
+        $y += $lineH
+    }
+    $_.HasMorePages = $false
+})
+$doc.Print()
+$doc.Dispose()
+$font.Dispose()
+`;
+    fs.writeFileSync(ps1File, psScript, "utf8");
+
     await new Promise((res, rej) =>
       exec(
-        `powershell -NoProfile -NonInteractive -Command "Get-Content '${tmpFile}' | Out-Printer${printerArg}"`,
-        { timeout: 20000 },
+        `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${ps1File}"`,
+        { timeout: 30000 },
         (err) => err ? rej(err) : res()
       )
     );
-    log(`Receipt printed on: ${printerName || "default printer"}`);
+    log(`Receipt printed (Courier New 8pt) on: ${printerName || "default"}`);
 
   } catch (e) {
     log("Print failed: " + e.message);
-    // Final fallback — notepad /p works on most Windows versions
     try {
-      require("child_process").exec(`notepad /p "${tmpFile}"`);
+      exec(`notepad /p "${tmpFile}"`);
       log("Receipt sent via notepad fallback.");
     } catch {}
   }
