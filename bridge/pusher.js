@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-8";
+const AGENT_VERSION   = "20260514-9";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -412,7 +412,7 @@ async function printReceipt(payload) {
     hr,
     center("Thank you for shopping with us!"),
     dhr,
-    "", "", "",  // feed lines for tear-off
+    "", "", "", "", "", "", "", "", // 8 feed lines — clears past tear bar
   ];
 
   const text = lines.join("\r\n");
