@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-16";
+const AGENT_VERSION   = "20260514-17";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -275,11 +275,19 @@ async function pushMetrics(data) {
 async function buildProducts(conn) {
   log("Reading product catalogue from MySQL…");
 
+  // Use the LATEST posted sale price per SKU (not MAX which picks the highest ever).
+  // Trailing spaces in SKUs are trimmed so they join correctly in PostgreSQL.
   const soldProducts = await query(conn,
     `SELECT pd.code AS sku, MAX(pd.description) AS name,
-            MAX(pd.price) AS price, MAX(pd.icateg) AS category
+            SUBSTRING_INDEX(
+              GROUP_CONCAT(pd.price ORDER BY ph.trandate DESC SEPARATOR ','),
+              ',', 1
+            ) AS price,
+            MAX(pd.icateg) AS category
      FROM pos_details pd
-     WHERE pd.code IS NOT NULL AND pd.code != '' AND pd.code != '0' AND pd.price > 0
+     JOIN pos_header ph ON pd.receiptno = ph.receiptno
+     WHERE pd.code IS NOT NULL AND TRIM(pd.code) != '' AND pd.code != '0'
+       AND pd.price > 0 AND ph.posted = 1
      GROUP BY pd.code`);
 
   if (!soldProducts.length) { log("No products found."); return null; }
@@ -308,7 +316,8 @@ async function buildProducts(conn) {
       [today + " 00:00:00", addDays(today, 1) + " 00:00:00"], 15000)
       .catch(() => []);
     for (const r of todayRows) {
-      stockMap[r.sku] = (stockMap[r.sku] || 0) + Number(r.delta);
+      const sku = (r.sku || '').trim();
+      stockMap[sku] = (stockMap[sku] || 0) + Number(r.delta);
     }
     log(`Stock: using cache + ${todayRows.length} today's movements.`);
   } else {
@@ -319,7 +328,7 @@ async function buildProducts(conn) {
       [], 300000)  // 5-minute timeout for initial index build
       .catch(e => { log("stran full scan failed: " + e.message); return []; });
     stockMap = Object.create(null);
-    for (const s of stockRows) stockMap[s.sku] = Number(s.stockQty);
+    for (const s of stockRows) stockMap[(s.sku || '').trim()] = Number(s.stockQty);
     log(`Stock totals built: ${Object.keys(stockMap).length} SKUs.`);
   }
 
@@ -331,39 +340,71 @@ async function buildProducts(conn) {
      WHERE g.posted = 1
      ORDER BY g.ddate DESC`);
 
+  // Trim SKUs before building maps — POS data sometimes has trailing spaces
+  // which cause JOIN failures in PostgreSQL analysis queries.
   const costMap = Object.create(null);
   for (const r of costRows) {
-    if (!(r.code in costMap)) costMap[r.code] = Number(r.cost);
+    const sku = (r.code || '').trim();
+    if (sku && !(sku in costMap)) costMap[sku] = Number(r.cost);
   }
   log(`Cost map built: ${Object.keys(costMap).length} SKUs with known cost.`);
 
   // Wholesale and special prices from the stock master table (sitems).
-  // If the table or columns don't exist the query fails silently.
-  const priceMap = Object.create(null); // { sku → { wholesale, special } }
+  // First discover the actual column names for wholesale/special (varies by
+  // FumasV5 version) by querying INFORMATION_SCHEMA, then fetch the prices.
+  const priceMap = Object.create(null);
   try {
-    const sitemsRows = await query(conn,
-      `SELECT CODE, PRICE2 AS wholesale, PRICE3 AS special FROM sitems WHERE CODE IS NOT NULL`);
-    for (const r of sitemsRows) {
-      priceMap[r.CODE] = {
-        wholesale: r.wholesale > 0 ? Number(r.wholesale) : null,
-        special:   r.special   > 0 ? Number(r.special)   : null,
-      };
+    const cols = await query(conn,
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_NAME = 'sitems' AND TABLE_SCHEMA = DATABASE()
+       ORDER BY ORDINAL_POSITION`);
+    const colNames = cols.map(c => (c.COLUMN_NAME || '').toUpperCase());
+    log(`sitems columns: ${colNames.join(', ')}`);
+
+    // Detect wholesale and special price column names
+    const wCol = colNames.find(c => ['PRICE2','WPRICE','WHLPRICE','WHOLESALE','W_PRICE','PRICE_W'].includes(c))
+              || colNames.find(c => c.includes('WHOLE') || c.includes('WHL'));
+    const sCol = colNames.find(c => ['PRICE3','SPRICE','SPECPRICE','SPECIAL','S_PRICE','PRICE_S'].includes(c))
+              || colNames.find(c => c.includes('SPEC') || (c.includes('PRICE') && c !== 'PRICE1' && c !== (wCol || '')));
+    const codeCol = colNames.includes('CODE') ? 'CODE' : (colNames.find(c => c.includes('CODE')) || 'CODE');
+
+    if (wCol || sCol) {
+      const selectCols = [
+        `\`${codeCol}\` AS sku`,
+        wCol ? `\`${wCol}\` AS wholesale` : 'NULL AS wholesale',
+        sCol ? `\`${sCol}\` AS special`   : 'NULL AS special',
+      ].join(', ');
+      const sitemsRows = await query(conn,
+        `SELECT ${selectCols} FROM sitems WHERE \`${codeCol}\` IS NOT NULL`);
+      for (const r of sitemsRows) {
+        const sku = (r.sku || '').trim();
+        if (!sku) continue;
+        priceMap[sku] = {
+          wholesale: r.wholesale > 0 ? Number(r.wholesale) : null,
+          special:   r.special   > 0 ? Number(r.special)   : null,
+        };
+      }
+      log(`Price map: ${Object.keys(priceMap).length} SKUs (wholesale=${wCol||'n/a'}, special=${sCol||'n/a'})`);
+    } else {
+      log("sitems: wholesale/special price columns not found. Columns available: " + colNames.join(', '));
     }
-    log(`Price map built: ${Object.keys(priceMap).length} SKUs with sitems data.`);
   } catch (e) {
-    log("sitems price query skipped (non-fatal): " + e.message);
+    log("sitems price query skipped: " + e.message);
   }
 
-  const products = soldProducts.map(p => ({
-    sku:            p.sku,
-    name:           p.name,
-    price:          Number(p.price),
-    cost:           costMap[p.sku] ?? 0,
-    wholesalePrice: priceMap[p.sku]?.wholesale ?? null,
-    specialPrice:   priceMap[p.sku]?.special   ?? null,
-    category:       p.category || "Uncategorised",
-    stockQty:       Math.max(0, Math.round(stockMap[p.sku] ?? 0)),
-  }));
+  const products = soldProducts.map(p => {
+    const sku = (p.sku || '').trim(); // trim trailing spaces
+    return {
+      sku,
+      name:           p.name,
+      price:          Number(p.price),
+      cost:           costMap[sku] ?? 0,
+      wholesalePrice: priceMap[sku]?.wholesale ?? null,
+      specialPrice:   priceMap[sku]?.special   ?? null,
+      category:       p.category || "Uncategorised",
+      stockQty:       Math.max(0, Math.round((stockMap[sku] ?? stockMap[p.sku]) ?? 0)),
+    };
+  });
 
   return { products, costMap };
 }
