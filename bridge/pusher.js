@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-17";
+const AGENT_VERSION   = "20260514-18";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -354,12 +354,28 @@ async function buildProducts(conn) {
   // FumasV5 version) by querying INFORMATION_SCHEMA, then fetch the prices.
   const priceMap = Object.create(null);
   try {
+    // Step 1: find the table that holds price levels (varies by FumasV5 version)
+    const candidateTables = ['sitems','stockitems','stock_items','items','pricelist','price_list','products','stock','sitem'];
+    const foundTables = await query(conn,
+      `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (${candidateTables.map(() => '?').join(',')})`,
+      candidateTables);
+
+    if (!foundTables.length) {
+      // Log all tables in the DB so we can identify the right one
+      const allTables = await query(conn,
+        `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME`);
+      log(`Price table not found. All tables: ${allTables.map(t => t.TABLE_NAME).join(', ')}`);
+      throw new Error("price table not found");
+    }
+
+    const priceTableName = foundTables[0].TABLE_NAME;
     const cols = await query(conn,
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-       WHERE TABLE_NAME = 'sitems' AND TABLE_SCHEMA = DATABASE()
-       ORDER BY ORDINAL_POSITION`);
+       WHERE TABLE_NAME = ? AND TABLE_SCHEMA = DATABASE()
+       ORDER BY ORDINAL_POSITION`, [priceTableName]);
     const colNames = cols.map(c => (c.COLUMN_NAME || '').toUpperCase());
-    log(`sitems columns: ${colNames.join(', ')}`);
+    log(`${priceTableName} columns: ${colNames.join(', ')}`);
 
     // Detect wholesale and special price column names
     const wCol = colNames.find(c => ['PRICE2','WPRICE','WHLPRICE','WHOLESALE','W_PRICE','PRICE_W'].includes(c))
@@ -375,7 +391,7 @@ async function buildProducts(conn) {
         sCol ? `\`${sCol}\` AS special`   : 'NULL AS special',
       ].join(', ');
       const sitemsRows = await query(conn,
-        `SELECT ${selectCols} FROM sitems WHERE \`${codeCol}\` IS NOT NULL`);
+        `SELECT ${selectCols} FROM \`${priceTableName}\` WHERE \`${codeCol}\` IS NOT NULL`);
       for (const r of sitemsRows) {
         const sku = (r.sku || '').trim();
         if (!sku) continue;
