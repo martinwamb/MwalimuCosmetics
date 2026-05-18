@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-11";
+const AGENT_VERSION   = "20260514-12";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -400,49 +400,59 @@ async function printReceipt(payload) {
   const vatAmount = Math.round(Number(total) * vatRate / (100 + vatRate));
   const netAmount = Number(total) - vatAmount;
 
-  const W = 42; // characters wide (80mm paper ~42 chars at 10pt Courier)
+  // W=32 is conservative — safe even when Out-Printer uses wide margins/fonts.
+  // FumasV5 uses raw ESC/POS (48 chars) but we go through the Windows driver.
+  const W = 32;
   const hr  = "-".repeat(W);
   const dhr = "=".repeat(W);
-  const center = s => s.padStart(Math.floor((W + s.length) / 2)).padEnd(W);
-  const row    = (l, r) => {
+  const center = s => {
+    const pad = Math.max(0, Math.floor((W - s.length) / 2));
+    return " ".repeat(pad) + s;
+  };
+  const row = (l, r) => {
     const right = String(r);
     const left  = String(l).slice(0, W - right.length - 1).padEnd(W - right.length - 1);
     return left + " " + right;
   };
+  const kes = n => "KES " + Number(n).toLocaleString("en-KE");
 
   const lines = [
     dhr,
     center("MWALIMU COSMETICS"),
     center("P.O. Box, Nairobi"),
     dhr,
-    row("Date:", new Date(date).toLocaleString("en-KE")),
-    row("Receipt:", receiptNo || "PENDING"),
-    ...(staff ? [row("Cashier:", staff)] : []),
+    "Date: " + new Date(date).toLocaleString("en-KE", { day:"2-digit", month:"short", year:"numeric" }),
+    "Time: " + new Date(date).toLocaleTimeString("en-KE"),
+    "Receipt: " + (receiptNo || "PENDING"),
+    ...(staff ? ["Cashier: " + staff] : []),
     hr,
-    row("ITEM", "TOTAL"),
-    hr,
-    ...items.map(i => {
-      const name = (i.name || "Item").slice(0, 26);
-      const subtot = "KES " + (Number(i.unitPrice) * Number(i.qty)).toLocaleString("en-KE");
-      return row(`  ${name} x${i.qty}`, subtot);
+    // Items: name on its own line, qty x price = total indented below
+    ...items.flatMap(i => {
+      const name  = (i.name || "Item").slice(0, W);
+      const price = Number(i.unitPrice);
+      const qty   = Number(i.qty);
+      return [
+        name,
+        `  ${qty} x ${kes(price)} = ${kes(qty * price)}`,
+      ];
     }),
     hr,
-    row("Net (excl. VAT):", "KES " + netAmount.toLocaleString("en-KE")),
-    row(`VAT (${vatRate}%):`, "KES " + vatAmount.toLocaleString("en-KE")),
-    row("TOTAL:", "KES " + Number(total).toLocaleString("en-KE")),
+    row("Net (excl.VAT):", kes(netAmount)),
+    row("VAT " + vatRate + "%:", kes(vatAmount)),
+    row("TOTAL:", kes(total)),
     hr,
     ...Object.entries(paymentDetails)
       .filter(([k, v]) => v > 0 && k !== "ref")
-      .map(([k, v]) => row("  " + k.toUpperCase(), "KES " + Number(v).toLocaleString("en-KE"))),
-    ...(ref ? [row("  Ref:", ref)] : []),
-    row("PAID:", "KES " + Number(amountPaid).toLocaleString("en-KE")),
-    ...(changeDue > 0 ? [row("CHANGE:", "KES " + Number(changeDue).toLocaleString("en-KE"))] : []),
+      .map(([k, v]) => row(k.toUpperCase() + ":", kes(v))),
+    ...(ref ? ["Ref: " + ref] : []),
+    row("PAID:", kes(amountPaid)),
+    ...(changeDue > 0 ? [row("CHANGE:", kes(changeDue))] : []),
     hr,
-    "  " + amtInWords(Number(amountPaid)),
+    amtInWords(Number(amountPaid)),
     hr,
-    center("Thank you for shopping with us!"),
+    center("Thank you for shopping!"),
     dhr,
-    "", "", "", "", "", "", "", "", // 8 feed lines — clears past tear bar
+    "", "", "", "", "", "", "", "", // 8 feed lines
   ];
 
   const text = lines.join("\r\n");
