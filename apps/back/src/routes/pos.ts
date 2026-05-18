@@ -128,6 +128,19 @@ router.post("/sale", async (req: any, res) => {
   return res.json(order);
 });
 
+// ── Get single sale (used to poll for mysqlReceiptNo after bridge sync) ─
+router.get("/sale/:id", async (req, res) => {
+  const order = await prisma.salesOrder.findUnique({
+    where: { id: req.params.id },
+    include: {
+      items: { include: { product: { select: { name: true, sku: true } } } },
+      createdBy: { select: { name: true } },
+    },
+  });
+  if (!order) return res.status(404).json({ error: "Not found" });
+  return res.json(order);
+});
+
 // ── Sales history ───────────────────────────────────────────
 router.get("/sales", async (req, res) => {
   const date  = String(req.query.date ?? new Date().toISOString().slice(0, 10));

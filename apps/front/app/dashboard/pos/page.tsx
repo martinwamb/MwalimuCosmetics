@@ -10,7 +10,7 @@ type Product = {
   category: { name: string } | null;
 };
 type CartItem = Product & { qty: number; unitPrice: number };
-type Receipt  = { id: string; createdAt: string; total: number; amountPaid: number; changeDue: number; items: any[]; paymentDetails: any };
+type Receipt  = { id: string; createdAt: string; total: number; amountPaid: number; changeDue: number; items: any[]; paymentDetails: any; mysqlReceiptNo?: string | null };
 
 const PAYMENT_METHODS = [
   { key: "cash",           label: "Cash" },
@@ -40,6 +40,8 @@ export default function POSPage() {
   const [payRef, setPayRef]             = useState("");
   const [paying, setPaying]             = useState(false);
   const [receipt, setReceipt]           = useState<Receipt | null>(null);
+  const [autoPrint, setAutoPrint]       = useState(false);
+  const [syncingReceipt, setSyncingReceipt] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -109,11 +111,18 @@ export default function POSPage() {
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error ?? "Sale failed");
 
-      setReceipt({ ...data, total: subtotal, amountPaid: totalPaid, changeDue: change, paymentDetails: pd });
+      const newReceipt = { ...data, total: subtotal, amountPaid: totalPaid, changeDue: change, paymentDetails: pd };
+      setReceipt(newReceipt);
       setCart([]);
       setShowPay(false);
       setPayAmounts({});
       setPayRef("");
+
+      // Auto-print immediately with web receipt (before bridge sync)
+      if (autoPrint) setTimeout(() => window.print(), 400);
+
+      // Trigger bridge sync and poll for the MySQL receipt number in the background
+      syncReceiptNo(data.id);
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -121,17 +130,50 @@ export default function POSPage() {
     }
   }
 
-  function newSale() { setReceipt(null); loadProducts(); searchRef.current?.focus(); }
+  // After sale: wake the bridge and poll until it writes the MySQL receipt number
+  async function syncReceiptNo(orderId: string) {
+    setSyncingReceipt(true);
+    try {
+      // Wake the bridge so it picks up the sale quickly
+      await fetch(`${apiBase}/sync/request`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+      const deadline = Date.now() + 120000; // wait up to 2 minutes
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 4000));
+        const res = await fetch(`${apiBase}/pos/sale/${orderId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(r => r.json()).catch(() => null);
+        if (res?.mysqlReceiptNo) {
+          setReceipt(prev => prev ? { ...prev, mysqlReceiptNo: res.mysqlReceiptNo } : prev);
+          return;
+        }
+      }
+    } finally {
+      setSyncingReceipt(false);
+    }
+  }
+
+  function newSale() { setReceipt(null); setSyncingReceipt(false); loadProducts(); searchRef.current?.focus(); }
 
   // ── Receipt screen ──
   if (receipt) {
+    const receiptLabel = receipt.mysqlReceiptNo
+      ? `Receipt #${receipt.mysqlReceiptNo}`
+      : `Web Ref: ${receipt.id.slice(-8).toUpperCase()}`;
+
     return (
       <div className="pos-receipt-wrap">
         <div className="pos-receipt">
+          {/* ── Printable area ── */}
           <div className="pos-receipt-header">
             <div className="pos-receipt-brand">Mwalimu Cosmetics</div>
             <div className="pos-receipt-date">{new Date(receipt.createdAt).toLocaleString("en-KE")}</div>
+            <div style={{ fontSize: "0.82rem", marginTop: "0.25rem",
+              color: receipt.mysqlReceiptNo ? "#065f46" : "var(--muted)",
+              fontWeight: receipt.mysqlReceiptNo ? 700 : 400 }}>
+              {receiptLabel}
+            </div>
           </div>
+
           <table className="pos-receipt-table">
             <thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
             <tbody>
@@ -145,11 +187,13 @@ export default function POSPage() {
               ))}
             </tbody>
           </table>
+
           <div className="pos-receipt-totals">
             <div className="pos-receipt-row"><span>Subtotal</span><strong>KES {fmt(receipt.total)}</strong></div>
             <div className="pos-receipt-row"><span>Paid</span><strong>KES {fmt(receipt.amountPaid)}</strong></div>
             {receipt.changeDue > 0 && <div className="pos-receipt-row change"><span>Change</span><strong>KES {fmt(receipt.changeDue)}</strong></div>}
           </div>
+
           <div className="pos-receipt-methods">
             {PAYMENT_METHODS.filter(m => (receipt.paymentDetails?.[m.key] || 0) > 0).map(m => (
               <div key={m.key} className="pos-receipt-method">
@@ -158,10 +202,31 @@ export default function POSPage() {
               </div>
             ))}
           </div>
+
           <div className="pos-receipt-footer">Thank you for shopping with us!</div>
-          <div style={{ display:"flex", gap:"0.75rem", marginTop:"1.25rem" }}>
-            <button className="button full" onClick={newSale}>New Sale</button>
-            <button className="button ghost full" onClick={() => window.print()}>Print</button>
+
+          {/* ── On-screen only (hidden when printing) ── */}
+          <div className="pos-receipt-actions">
+            {/* POS sync status */}
+            {syncingReceipt && !receipt.mysqlReceiptNo && (
+              <div style={{ fontSize: "0.78rem", color: "var(--muted)", textAlign: "center",
+                padding: "0.5rem 0", borderTop: "1px dashed var(--border)", marginTop: "0.75rem" }}>
+                ⏳ Syncing receipt number with POS…
+              </div>
+            )}
+            {receipt.mysqlReceiptNo && (
+              <div style={{ fontSize: "0.78rem", color: "#16a34a", textAlign: "center",
+                padding: "0.5rem 0", borderTop: "1px dashed var(--border)", marginTop: "0.75rem" }}>
+                ✓ Synced to POS — Receipt #{receipt.mysqlReceiptNo}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "0.75rem", marginTop: "0.75rem" }}>
+              <button className="button full" onClick={newSale}>New Sale</button>
+              <button className="button ghost full" onClick={() => window.print()}>
+                Print {receipt.mysqlReceiptNo ? "Receipt" : "Now"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -304,6 +369,14 @@ export default function POSPage() {
                 </span>
               )}
             </div>
+
+            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem",
+              fontSize: "0.85rem", cursor: "pointer", userSelect: "none" }}>
+              <input type="checkbox" checked={autoPrint}
+                onChange={e => setAutoPrint(e.target.checked)}
+                style={{ width: 16, height: 16, cursor: "pointer" }} />
+              Auto-print receipt after sale
+            </label>
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0.65rem" }}>
               <button className="pos-cancel-btn" onClick={() => setShowPay(false)}>Cancel</button>

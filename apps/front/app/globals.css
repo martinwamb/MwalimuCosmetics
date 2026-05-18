@@ -2571,10 +2571,40 @@ a {
 .pos-receipt-footer { text-align: center; margin-top: 1rem; color: var(--muted); font-size: 0.85rem; border-top: 1px dashed var(--border); padding-top: 0.75rem; }
 
 @media print {
-  .dash-shell, .dash-topbar, .dash-sidebar, .dash-backdrop { display: none !important; }
-  .pos-receipt-wrap { padding: 0; }
-  .pos-receipt { border: none; box-shadow: none; max-width: 100%; }
+  /* Hide navigation — but NOT the receipt content inside dash-body */
+  .dash-sidebar, .dash-backdrop, .dash-topbar, .dash-menu-btn,
+  .dash-sidebar-head, .dash-sidebar-foot, .dash-nav { display: none !important; }
+  .dash-body   { margin: 0 !important; }
+  .dash-content { padding: 0 !important; }
+
+  /* Receipt: optimised for 80mm thermal paper */
+  .pos-receipt-wrap {
+    display: block !important;
+    padding: 0 !important;
+    min-height: unset !important;
+  }
+  .pos-receipt {
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    max-width: 76mm !important;
+    width: 76mm !important;
+    padding: 2mm !important;
+    margin: 0 !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    font-size: 10px !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+  .pos-receipt-brand  { font-size: 13px !important; }
+  .pos-receipt-table  { font-size: 9px !important; }
+  .pos-receipt-totals,
+  .pos-receipt-methods { font-size: 9px !important; }
+  /* Hide on-screen action buttons during print */
+  .pos-receipt-actions { display: none !important; }
 }
+/* Paper setup — sits outside @media print so @page applies at print time */
+@page { size: 80mm auto; margin: 2mm; }
 
 /* ── Coming soon page ───────────────────────────────────── */
 .coming-soon-root {
