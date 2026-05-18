@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
+import { requireAuth } from "../lib/authz.js";
 
 export const router = Router();
 
@@ -103,6 +104,62 @@ router.post("/mirror/status", async (req, res) => {
   } catch (e: any) {
     return res.status(500).json({ error: e.message });
   }
+});
+
+// ── Pause / resume / progress ────────────────────────────────
+
+// GET /sync/mirror/paused — bridge polls this between dates to check if paused
+router.get("/mirror/paused", async (req, res) => {
+  if (!checkSecret(req, res)) return;
+  try {
+    await ensureMeta();
+    const rows = await prisma.$queryRawUnsafe<{ value: string }[]>(
+      `SELECT value FROM mirror_meta WHERE key = 'mirror_paused'`
+    );
+    return res.json({ paused: rows[0]?.value === "true" });
+  } catch {
+    return res.json({ paused: false });
+  }
+});
+
+// POST /sync/mirror/pause — dashboard pauses the running batch
+router.post("/mirror/pause", requireAuth, async (req, res) => {
+  try {
+    await ensureMeta();
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO mirror_meta(key, value, updated_at) VALUES('mirror_paused','true',NOW())
+       ON CONFLICT(key) DO UPDATE SET value='true', updated_at=NOW()`
+    );
+    return res.json({ ok: true });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
+});
+
+// POST /sync/mirror/resume — clears the pause flag (next batch will check this)
+router.post("/mirror/resume", requireAuth, async (req, res) => {
+  try {
+    await ensureMeta();
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO mirror_meta(key, value, updated_at) VALUES('mirror_paused','false',NOW())
+       ON CONFLICT(key) DO UPDATE SET value='false', updated_at=NOW()`
+    );
+    return res.json({ ok: true });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
+});
+
+// GET /sync/mirror/progress — dashboard reads mirror status and pause state
+router.get("/mirror/progress", requireAuth, async (req, res) => {
+  try {
+    await ensureMeta();
+    const rows = await prisma.$queryRawUnsafe<{ key: string; value: string }[]>(
+      `SELECT key, value FROM mirror_meta WHERE key IN ('last_mirrored_date','mirror_paused')`
+    );
+    const meta: Record<string, string> = {};
+    for (const r of rows) meta[r.key] = r.value;
+    return res.json({
+      lastDate: meta["last_mirrored_date"] ?? null,
+      paused:   meta["mirror_paused"] === "true",
+    });
+  } catch (e: any) { return res.status(500).json({ error: e.message }); }
 });
 
 // ── Row upload ───────────────────────────────────────────────

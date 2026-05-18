@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-2";
+const AGENT_VERSION   = "20260514-3";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -33,6 +33,27 @@ const SELF_PATH       = "C:\\MwalimuSync\\pusher.js";
 
 function kenyanDate() {
   return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function getDatesRange(start, end) {
+  const dates = [];
+  let cur = start;
+  while (cur <= end) { dates.push(cur); cur = addDays(cur, 1); }
+  return dates;
+}
+function cleanRow(row) {
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (v === null || v === undefined) out[k] = null;
+    else if (v instanceof Date)        out[k] = v.toISOString();
+    else if (Buffer.isBuffer(v))       out[k] = v.toString("base64");
+    else                               out[k] = v;
+  }
+  return out;
 }
 const _logLines = [];
 function log(msg) {
@@ -379,6 +400,125 @@ async function runDailyBackup(conn) {
   log("=== Backup complete ===");
 }
 
+// ── On-demand mirror batch ────────────────────────────────────
+// Triggered by a mirror_run pending change from the dashboard.
+// Syncs up to batchDays of historical MySQL data into PostgreSQL mirror tables.
+// Checks the server-side pause flag between dates so the user can stop mid-batch.
+const MIRROR_DATE_TABLES = [
+  { name: "pos_header",
+    sql:  "SELECT * FROM pos_header WHERE DATE(trandate) = ?",
+    params: d => [d] },
+  { name: "pos_details",
+    sql:  `SELECT pd.* FROM pos_details pd
+           JOIN pos_header ph ON pd.receiptno = ph.receiptno
+           WHERE DATE(ph.trandate) = ?`,
+    params: d => [d] },
+  { name: "pos_payment_details",
+    sql:  `SELECT ppd.* FROM pos_payment_details ppd
+           JOIN pos_header ph ON ppd.receiptno = ph.receiptno
+           WHERE DATE(ph.trandate) = ?`,
+    params: d => [d] },
+  { name: "stran",
+    sql:  "SELECT * FROM stran WHERE DATE(stdate) = ?",
+    params: d => [d] },
+  { name: "grn",
+    sql:  "SELECT * FROM grn WHERE DATE(ddate) = ?",
+    params: d => [d] },
+  { name: "grn_d",
+    sql:  `SELECT gd.* FROM grn_d gd JOIN grn g ON gd.no = g.no
+           WHERE DATE(g.ddate) = ?`,
+    params: d => [d] },
+];
+
+async function isPaused() {
+  try {
+    const r = await apiRequest("GET", "/sync/mirror/paused", null, SECRET, null, 8000);
+    return r.status === 200 && JSON.parse(r.body).paused === true;
+  } catch { return false; }
+}
+
+async function runDailyMirrorBatch(conn, batchDays) {
+  batchDays = Number(batchDays) || 10;
+  log(`=== Mirror batch starting (${batchDays} days) ===`);
+
+  if (await isPaused()) { log("Mirror is paused — skipping batch."); return; }
+
+  // Get watermark from server
+  const sr = await apiRequest("GET", "/sync/mirror/status", null, SECRET, null, 10000)
+    .catch(() => ({ status: 0, body: '{"lastDate":null}' }));
+  if (sr.status !== 200) { log("Cannot reach mirror/status."); return; }
+  const { lastDate } = JSON.parse(sr.body);
+
+  const today     = kenyanDate();
+  const yesterday = addDays(today, -1);
+
+  let startDate;
+  if (lastDate) {
+    startDate = addDays(lastDate, 1);
+  } else {
+    try {
+      const [row] = await query(conn,
+        "SELECT DATE(MIN(trandate)) AS earliest FROM pos_header WHERE trandate IS NOT NULL", []);
+      startDate = row?.earliest
+        ? new Date(row.earliest).toISOString().slice(0, 10)
+        : addDays(today, -365);
+    } catch { startDate = addDays(today, -365); }
+    log(`Historical mirror starts from ${startDate}`);
+  }
+
+  if (startDate > yesterday) { log("Mirror is fully up to date."); return; }
+
+  const allPending  = getDatesRange(startDate, yesterday);
+  const batch       = allPending.slice(0, batchDays);
+  const afterBatch  = allPending.length - batch.length;
+
+  log(`Syncing ${batch.length} days: ${batch[0]} → ${batch[batch.length - 1]}` +
+      (afterBatch > 0 ? ` (${afterBatch} days remain after this batch)` : " — will be fully caught up"));
+
+  let lastSuccessful = lastDate;
+
+  for (let i = 0; i < batch.length; i++) {
+    const date = batch[i];
+
+    // Check pause flag every 3 dates so user can stop mid-batch
+    if (i > 0 && i % 3 === 0 && await isPaused()) {
+      log(`Paused by user at ${date} (${i} of ${batch.length} dates done).`);
+      break;
+    }
+
+    log(`  [${i + 1}/${batch.length}] ${date}`);
+    let dateOk = true;
+
+    for (const t of MIRROR_DATE_TABLES) {
+      try {
+        const rows  = await query(conn, t.sql, t.params(date), 30000);
+        const clean = rows.map(cleanRow);
+        const r     = await apiRequest("POST", "/sync/mirror/rows",
+          { table: t.name, date, rows: clean }, SECRET, null, 120000);
+        if (r.status === 200) {
+          log(`    ${t.name}: ${clean.length} rows`);
+        } else {
+          log(`    [!] ${t.name}: server error ${r.status}`); dateOk = false;
+        }
+      } catch (e) {
+        log(`    [!] ${t.name}: ${e.message}`); dateOk = false;
+      }
+    }
+
+    if (dateOk) { lastSuccessful = date; }
+    else { log(`Stopping at ${date} due to error.`); break; }
+  }
+
+  // Advance watermark
+  if (lastSuccessful && lastSuccessful !== lastDate) {
+    await apiRequest("POST", "/sync/mirror/status",
+      { lastDate: lastSuccessful }, SECRET, null, 10000).catch(() => {});
+    log(`Watermark → ${lastSuccessful}`);
+  }
+
+  log(`=== Mirror batch complete${afterBatch > 0 ? ` — ${afterBatch} days still pending` : " — history fully mirrored"} ===`);
+}
+
 // ── 3. Apply pending changes from cloud ──────────────────────
 async function applyPendingChanges(conn, token) {
   const r = await apiGet("/sync/pending-changes", token);
@@ -400,6 +540,10 @@ async function applyPendingChanges(conn, token) {
 
       } else if (change.type === "backup_request") {
         await runDailyBackup(conn);
+
+      } else if (change.type === "mirror_run") {
+        const { batchDays = 10 } = change.payload || {};
+        await runDailyMirrorBatch(conn, batchDays);
 
       } else if (change.type === "goods_received") {
         // Goods received note — writes grn header, grn_d lines, and stran entries

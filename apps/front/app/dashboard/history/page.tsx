@@ -314,6 +314,12 @@ export default function HistoryPage() {
   const [backing, setBacking]     = useState(false);
   const [backupMsg, setBackupMsg] = useState("");
 
+  // ── Mirror state ──────────────────────────────────────────────
+  type MirrorStatus = { lastDate: string | null; paused: boolean };
+  const [mirror, setMirror]       = useState<MirrorStatus>({ lastDate: null, paused: false });
+  const [mirroring, setMirroring] = useState(false);
+  const [mirrorMsg, setMirrorMsg] = useState("");
+
   function kenyanDate() {
     return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
   }
@@ -325,10 +331,18 @@ export default function HistoryPage() {
       .catch(() => {});
   }
 
+  function loadMirrorStatus(t: string) {
+    fetch(`${apiBase}/sync/mirror/progress`, { headers: { Authorization: `Bearer ${t}` } })
+      .then(r => r.json())
+      .then((d: MirrorStatus) => setMirror(d))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     const t = localStorage.getItem("mwalimu_token") ?? "";
     setToken(t);
     reloadDates(t);
+    loadMirrorStatus(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -379,6 +393,65 @@ export default function HistoryPage() {
     setBacking(false);
   }
 
+  async function startMirrorBatch(batchDays = 10) {
+    if (mirroring) return;
+    setMirroring(true);
+    setMirrorMsg("");
+
+    // Clear the pause flag first so the batch actually runs
+    await fetch(`${apiBase}/sync/mirror/resume`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+
+    // Queue the mirror_run pending change
+    const cr = await fetch(`${apiBase}/sync/pending-changes`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "mirror_run", payload: { batchDays } }),
+    }).catch(() => null);
+    if (!cr?.ok) {
+      setMirrorMsg("Could not queue upload. Try again.");
+      setMirroring(false);
+      return;
+    }
+
+    // Wake the bridge
+    await fetch(`${apiBase}/sync/request`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+
+    // Poll progress until lastDate advances or paused (up to 20 min)
+    const snapshotDate = mirror.lastDate;
+    const deadline     = Date.now() + 1200000;
+    let done = false;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 5000));
+      const prog: MirrorStatus = await fetch(`${apiBase}/sync/mirror/progress`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(r => r.json()).catch(() => mirror);
+      setMirror(prog);
+      if (prog.lastDate !== snapshotDate || prog.paused) {
+        done = true;
+        setMirrorMsg(prog.paused
+          ? "Paused."
+          : prog.lastDate
+            ? `Batch complete — synced up to ${prog.lastDate}.`
+            : "Batch complete.");
+        break;
+      }
+    }
+    if (!done) setMirrorMsg("Timed out — check if the shop PC is online.");
+    setMirroring(false);
+  }
+
+  async function pauseMirror() {
+    await fetch(`${apiBase}/sync/mirror/pause`, {
+      method: "POST", headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+    setMirrorMsg("Pause requested — will stop after current date.");
+    loadMirrorStatus(token);
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: "summary",      label: "Daily Summary" },
     { key: "transactions", label: "Transactions" },
@@ -405,6 +478,50 @@ export default function HistoryPage() {
             disabled={backing} onClick={requestBackup}>
             ⬇ Backup Now
           </button>
+        </div>
+      </div>
+
+      {/* Database Mirror panel */}
+      <div className="card" style={{ padding: "1rem 1.25rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>Database Mirror</div>
+            <div className="muted" style={{ fontSize: "0.82rem", marginTop: 2 }}>
+              {mirroring
+                ? "Uploading historical data to Hetzner…"
+                : mirror.lastDate
+                  ? `Synced up to ${mirror.lastDate}${mirror.paused ? " — paused" : ""}`
+                  : "Not started — uploads full MySQL history to Hetzner for analytics"}
+            </div>
+            {mirrorMsg && (
+              <div style={{ fontSize: "0.80rem", marginTop: 4,
+                color: mirrorMsg.includes("complete") || mirrorMsg.includes("Paused") ? "#16a34a" : "#f59e0b" }}>
+                {mirrorMsg}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            {mirroring && (
+              <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
+                onClick={pauseMirror}>
+                ⏸ Pause
+              </button>
+            )}
+            {!mirroring && (
+              <>
+                <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
+                  onClick={() => startMirrorBatch(10)}>
+                  {mirror.lastDate ? "▶ Continue (10 days)" : "▶ Start Upload"}
+                </button>
+                {mirror.lastDate && (
+                  <button className="button ghost" style={{ padding: "0.3rem 0.75rem", fontSize: "0.82rem" }}
+                    onClick={() => startMirrorBatch(60)}>
+                    ▶▶ Fast (60 days)
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
