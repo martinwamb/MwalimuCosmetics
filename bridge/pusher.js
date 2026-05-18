@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-13";
+const AGENT_VERSION   = "20260514-14";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -284,23 +284,44 @@ async function buildProducts(conn) {
 
   if (!soldProducts.length) { log("No products found."); return null; }
 
-  // Ensure stran(CODE) index exists so GROUP BY doesn't do a full table scan.
-  // First time this runs it will take 30-90s to build the index on a large table;
-  // every subsequent call returns instantly (Duplicate key name → caught silently).
-  log("Ensuring stran(CODE) index exists…");
-  await query(conn, "ALTER TABLE stran ADD INDEX idx_stran_code (CODE)", [])
-    .catch(e => {
-      if (!e.message.includes("Duplicate")) log("stran index: " + e.message);
-    });
+  // Stock ledger strategy:
+  // The full stran GROUP BY (SUM over all history) is slow on large tables —
+  // even with an index it can take minutes and block the POS on every sync.
+  //
+  // Solution: cache the stock totals in checkpoint (stockMap). On each sync:
+  //   - If we have a cached stockMap: apply ONLY today's movements as a delta.
+  //   - If no cached stockMap (first ever run): do the full GROUP BY ONCE.
+  //     That one-time run may be slow but the result is cached forever after.
+  //
+  // This means update-agent.bat clearing checkpoint.json only loses the cache —
+  // next run does the full query once, then caches again. Subsequent syncs are fast.
 
-  // Stock ledger — SUM(qty) over all stran movements (fast once index exists)
-  const stockRows = await query(conn,
-    `SELECT CODE AS sku, COALESCE(SUM(qty), 0) AS stockQty FROM stran GROUP BY CODE`,
-    [], 60000)  // 60-second timeout safety net
-    .catch(e => { log("stran query failed (" + e.message + ") — stock will be 0"); return []; });
-
-  const stockMap = Object.create(null);
-  for (const s of stockRows) stockMap[s.sku] = Number(s.stockQty);
+  let stockMap = cp.stockMap ? Object.create(null) : null;
+  if (cp.stockMap) {
+    // Fast path: restore cached totals and apply today's delta only
+    Object.assign(stockMap, cp.stockMap);
+    const today = kenyanDate();
+    const todayRows = await query(conn,
+      `SELECT CODE AS sku, COALESCE(SUM(qty), 0) AS delta
+       FROM stran WHERE stdate >= ? AND stdate < ?
+       GROUP BY CODE`,
+      [today + " 00:00:00", addDays(today, 1) + " 00:00:00"], 15000)
+      .catch(() => []);
+    for (const r of todayRows) {
+      stockMap[r.sku] = (stockMap[r.sku] || 0) + Number(r.delta);
+    }
+    log(`Stock: using cache + ${todayRows.length} today's movements.`);
+  } else {
+    // Slow path (first run or cache cleared): full historical scan, then cache
+    log("Building stock totals from full stran history (first run — may take a moment)…");
+    const stockRows = await query(conn,
+      `SELECT CODE AS sku, COALESCE(SUM(qty), 0) AS stockQty FROM stran GROUP BY CODE`,
+      [], 300000)  // 5-minute timeout for initial index build
+      .catch(e => { log("stran full scan failed: " + e.message); return []; });
+    stockMap = Object.create(null);
+    for (const s of stockRows) stockMap[s.sku] = Number(s.stockQty);
+    log(`Stock totals built: ${Object.keys(stockMap).length} SKUs.`);
+  }
 
   // Latest cost per SKU from GRN receipts — used for profit calculation.
   // Done here (hourly) not on every 30s metrics cycle so grn_d isn't hit constantly.
@@ -940,10 +961,11 @@ async function run() {
   }
 
   saveCheckpoint({
-    txCount:         metricsPushed ? 0 : cp.txCount, // reset so next refresh always pushes
+    txCount:         metricsPushed ? 0 : cp.txCount,
     date:            metricsPushed ? today : cp.date,
     lastProductSync: productSyncDue ? nowMs : (cp.lastProductSync || 0),
     costMap:         costMap || cp.costMap || null,
+    stockMap:        Object.keys(stockMap || {}).length > 0 ? stockMap : (cp.stockMap || null),
   });
   log("=== Sync complete ===");
 }
