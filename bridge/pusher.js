@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-4";
+const AGENT_VERSION   = "20260514-5";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -145,40 +145,45 @@ async function getSyncToken() {
 async function buildMetrics(conn, today, costMap) {
   log("Reading metrics from MySQL…");
 
+  // Use range conditions (>= and <) instead of DATE(col) = ? so MySQL can use
+  // the index on trandate/ddate without a full-table function scan.
+  // This is the critical fix that prevents POS table locks during each refresh.
+  const tomorrow = addDays(today, 1);
+  const t0 = today    + " 00:00:00";
+  const t1 = tomorrow + " 00:00:00";
+
   // Confirmed paid sales only (posted=1)
   const [paid] = await query(conn,
     `SELECT COUNT(*) AS transactions,
             COALESCE(SUM(amount), 0) AS totalSales,
             COALESCE(SUM(tax),    0) AS totalTax
      FROM pos_header
-     WHERE DATE(trandate) = ? AND posted = 1 AND (is_return = 0 OR is_return IS NULL)`,
-    [today]);
+     WHERE trandate >= ? AND trandate < ? AND posted = 1 AND (is_return = 0 OR is_return IS NULL)`,
+    [t0, t1]);
 
   // Unposted drafts (posted=0) — money not yet received
   const [draft] = await query(conn,
     `SELECT COUNT(*) AS transactions, COALESCE(SUM(amount), 0) AS totalSales
      FROM pos_header
-     WHERE DATE(trandate) = ? AND posted = 0 AND (is_return = 0 OR is_return IS NULL)`,
-    [today]);
+     WHERE trandate >= ? AND trandate < ? AND posted = 0 AND (is_return = 0 OR is_return IS NULL)`,
+    [t0, t1]);
 
   // GRN purchases: stock received today at cost price
   const [grn] = await query(conn,
     `SELECT COALESCE(SUM(gtotal), 0) AS purchases
-     FROM grn WHERE DATE(ddate) = ? AND posted = 1`,
-    [today]);
+     FROM grn WHERE ddate >= ? AND ddate < ? AND posted = 1`,
+    [t0, t1]);
 
-  // Gross profit — uses the cached cost map built during the hourly product sync.
-  // We do NOT query grn_d on every 30-second cycle (it can be a large table scan).
-  // costMap is passed in from the hourly buildProducts() run.
+  // Gross profit — uses the cached cost map built during the daily product sync.
   const soldItems = await query(conn,
     `SELECT pd.code, SUM(pd.qty) AS qty, ROUND(SUM(pd.total), 0) AS revenue
      FROM pos_details pd
      JOIN pos_header ph ON pd.receiptno = ph.receiptno
-     WHERE DATE(ph.trandate) = ? AND ph.posted = 1
+     WHERE ph.trandate >= ? AND ph.trandate < ? AND ph.posted = 1
        AND (ph.is_return = 0 OR ph.is_return IS NULL)
        AND pd.code IS NOT NULL AND pd.code != ''
      GROUP BY pd.code`,
-    [today]);
+    [t0, t1]);
 
   let profit = 0;
   if (soldItems.length > 0 && costMap) {
@@ -190,19 +195,18 @@ async function buildMetrics(conn, today, costMap) {
     profit = Math.round(profit);
   }
 
-  // Payment breakdown — all posted=1 transactions have a ppd entry (verified).
-  // No fallback needed: every confirmed sale records its payment method.
+  // Payment breakdown
   const breakdown = await query(conn,
     `SELECT ppd.payname AS name,
             COUNT(DISTINCT ppd.receiptno) AS transactions,
             COALESCE(SUM(ppd.pamount), 0) AS total
      FROM pos_payment_details ppd
      JOIN pos_header ph ON ppd.receiptno = ph.receiptno
-     WHERE DATE(ph.trandate) = ? AND ph.posted = 1
+     WHERE ph.trandate >= ? AND ph.trandate < ? AND ph.posted = 1
        AND (ph.is_return = 0 OR ph.is_return IS NULL)
      GROUP BY ppd.paynumber, ppd.payname
      ORDER BY total DESC`,
-    [today]);
+    [t0, t1]);
 
   let cashSales = 0, mpesaSales = 0, otherSales = 0;
   for (const b of breakdown) {
@@ -219,11 +223,11 @@ async function buildMetrics(conn, today, costMap) {
             SUM(d.qty) AS qtySold, ROUND(SUM(d.total), 0) AS revenue
      FROM pos_details d
      JOIN pos_header h ON d.receiptno = h.receiptno
-     WHERE DATE(h.trandate) = ? AND h.posted = 1
+     WHERE h.trandate >= ? AND h.trandate < ? AND h.posted = 1
        AND (h.is_return = 0 OR h.is_return IS NULL)
        AND d.code IS NOT NULL AND d.code != ''
      GROUP BY d.code ORDER BY revenue DESC LIMIT 10`,
-    [today]);
+    [t0, t1]);
 
   // Staff: net sales and returns shown separately
   const byStaff = await query(conn,
@@ -231,9 +235,9 @@ async function buildMetrics(conn, today, costMap) {
        SUM(CASE WHEN posted = 1 AND (is_return = 0 OR is_return IS NULL) THEN 1     ELSE 0 END) AS transactions,
        COALESCE(SUM(CASE WHEN posted = 1 AND (is_return = 0 OR is_return IS NULL) THEN amount ELSE 0 END), 0) AS sales,
        COALESCE(SUM(CASE WHEN is_return = 1 THEN amount ELSE 0 END), 0) AS returns
-     FROM pos_header WHERE DATE(trandate) = ?
+     FROM pos_header WHERE trandate >= ? AND trandate < ?
      GROUP BY staff ORDER BY sales DESC`,
-    [today]);
+    [t0, t1]);
 
   return {
     forDate:           today,
