@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-7";
+const AGENT_VERSION   = "20260514-8";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -418,20 +418,45 @@ async function printReceipt(payload) {
   const text = lines.join("\r\n");
   const tmpFile = "C:\\MwalimuSync\\last_receipt.txt";
 
+  const exec = require("child_process").exec;
+
   try {
     fs.writeFileSync(tmpFile, text, "ascii");
-    // Send to default Windows printer silently via PowerShell Out-Printer
-    await new Promise((res, rej) => {
-      require("child_process").exec(
-        `powershell -NoProfile -NonInteractive -Command "Get-Content '${tmpFile}' | Out-Printer"`,
-        { timeout: 15000 },
-        (err) => err ? rej(err) : res()
+
+    // Step 1: find the default printer name via WMI (works from SYSTEM account)
+    let printerName = null;
+    try {
+      const wmicOut = await new Promise((res) =>
+        exec('wmic printer where "Default=True" get Name /format:list',
+          { timeout: 6000 }, (_, stdout) => res(stdout || ""))
       );
-    });
-    log("Receipt printed successfully.");
+      const m = wmicOut.match(/Name=(.+)/);
+      if (m) printerName = m[1].trim();
+    } catch {}
+
+    // Step 2: ensure the printer is in the system-wide list (makes it accessible
+    // to the SYSTEM account — needed because printers install per-user by default)
+    if (printerName) {
+      await new Promise(res =>
+        exec(`rundll32 printui.dll,PrintUIEntry /ga /n "${printerName}"`,
+          { timeout: 8000 }, () => res())
+      );
+    }
+
+    // Step 3: print using explicit printer name via PowerShell Out-Printer
+    const printerArg = printerName ? ` -Name "${printerName}"` : "";
+    await new Promise((res, rej) =>
+      exec(
+        `powershell -NoProfile -NonInteractive -Command "Get-Content '${tmpFile}' | Out-Printer${printerArg}"`,
+        { timeout: 20000 },
+        (err) => err ? rej(err) : res()
+      )
+    );
+    log(`Receipt printed on: ${printerName || "default printer"}`);
+
   } catch (e) {
     log("Print failed: " + e.message);
-    // Fallback: try notepad /p (shows briefly)
+    // Final fallback — notepad /p works on most Windows versions
     try {
       require("child_process").exec(`notepad /p "${tmpFile}"`);
       log("Receipt sent via notepad fallback.");

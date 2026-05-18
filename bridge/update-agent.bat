@@ -116,6 +116,24 @@ if %errorlevel% equ 0 (
   echo [WARN] MwalimuDailyMirror task registration failed.
 )
 
+:: ── Make default printer visible to SYSTEM account for background printing ──
+:: The receipt printer is usually installed per-user. This command adds it to
+:: the system-wide printer list so the sync agent (running as SYSTEM) can print.
+echo.
+echo Configuring printer for background printing...
+for /f "tokens=2 delims==" %%P in ('wmic printer where "Default=True" get Name /format:list 2^>nul') do (
+  if not "%%P"=="" (
+    set SYS_PRINTER=%%P
+  )
+)
+if defined SYS_PRINTER (
+  rundll32 printui.dll,PrintUIEntry /ga /n "%SYS_PRINTER%" >nul 2>&1
+  echo [OK] Printer "%SYS_PRINTER%" added to system-wide list.
+  echo       The sync agent can now print receipts automatically.
+) else (
+  echo [INFO] No default printer found - set one in Windows Settings ^> Printers.
+)
+
 :: ── Start the sync loop NOW (under SYSTEM — survives user logoff) ──
 echo.
 echo Starting sync loop under SYSTEM account...
