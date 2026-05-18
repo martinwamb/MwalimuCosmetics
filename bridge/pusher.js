@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-5";
+const AGENT_VERSION   = "20260514-6";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -502,12 +502,23 @@ async function runDailyMirrorBatch(conn, batchDays) {
       try {
         const rows  = await query(conn, t.sql, t.params(date), 30000);
         const clean = rows.map(cleanRow);
-        const r     = await apiRequest("POST", "/sync/mirror/rows",
-          { table: t.name, date, rows: clean }, SECRET, null, 120000);
-        if (r.status === 200) {
+
+        // Upload in chunks of 500 rows to avoid 502 gateway errors on large tables
+        const CHUNK = 500;
+        let tableOk = true;
+        for (let ci = 0; ci < Math.max(1, Math.ceil(clean.length / CHUNK)); ci++) {
+          const chunk = clean.slice(ci * CHUNK, (ci + 1) * CHUNK);
+          const r = await apiRequest("POST", "/sync/mirror/rows",
+            { table: t.name, date, rows: chunk }, SECRET, null, 120000);
+          if (r.status !== 200) {
+            log(`    [!] ${t.name} chunk ${ci + 1}: server error ${r.status}`);
+            tableOk = false; break;
+          }
+        }
+        if (tableOk) {
           log(`    ${t.name}: ${clean.length} rows`);
         } else {
-          log(`    [!] ${t.name}: server error ${r.status}`); dateOk = false;
+          dateOk = false;
         }
       } catch (e) {
         log(`    [!] ${t.name}: ${e.message}`); dateOk = false;
@@ -693,24 +704,32 @@ async function run() {
   const nowMs = Date.now();
 
   // ── Phase 1: read from MySQL, close before uploads ────────────
-  const conn1 = await openConn();
-  log("Connected to MySQL on server-pc.");
-
-  // Always do a full product sync when user requests refresh if cost map is stale
+  // buildProducts and buildMetrics use SEPARATE connections so that a
+  // timed-out stran query (which can corrupt the connection object) does
+  // not cascade and prevent metrics from being pushed.
   const productSyncDue = cp.date !== today || nowMs - (cp.lastProductSync || 0) > 4 * 60 * 60 * 1000;
 
   let productsData = null;
   let costMap      = cp.costMap || null;
 
   if (productSyncDue) {
-    const result = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
-    if (result) { productsData = result.products; costMap = result.costMap; }
+    const conn1 = await openConn().catch(() => null);
+    if (conn1) {
+      const result = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
+      if (result) { productsData = result.products; costMap = result.costMap; }
+      conn1.end();
+    }
   }
 
-  const metricsData = await buildMetrics(conn1, today, costMap)
-    .catch(e => { log("Metrics build error: " + e.message); return null; });
-
-  conn1.end();
+  // Fresh connection for metrics — isolated from any buildProducts failure
+  let metricsData = null;
+  const conn1b = await openConn().catch(e => { log("MySQL connect failed: " + e.message); return null; });
+  if (conn1b) {
+    log("Connected to MySQL on server-pc.");
+    metricsData = await buildMetrics(conn1b, today, costMap)
+      .catch(e => { log("Metrics build error: " + e.message); return null; });
+    conn1b.end();
+  }
 
   // ── Phase 2: push to server ────────────────────────────────────
   let token;
