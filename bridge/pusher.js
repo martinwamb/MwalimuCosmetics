@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-12";
+const AGENT_VERSION   = "20260514-13";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -700,6 +700,46 @@ async function applyPendingChanges(conn, token) {
 
       } else if (change.type === "print_receipt") {
         await printReceipt(change.payload);
+
+      } else if (change.type === "return_sale") {
+        // Reverse a web sale: creates a return receipt in MySQL and restores stock
+        const { mysqlReceiptNo, items = [], staff = "WEB", originalReceiptNo } = change.payload;
+
+        // Next sequential receipt number (return gets its own number)
+        const [maxRct] = await query(conn,
+          "SELECT MAX(CAST(receiptno AS UNSIGNED)) AS maxno FROM pos_header WHERE receiptno REGEXP '^[0-9]+$'");
+        const retRctNo = String((Number(maxRct?.maxno) || 0) + 1).padStart(8, "0");
+        const now = new Date(Date.now() + 3 * 60 * 60 * 1000)
+          .toISOString().slice(0, 19).replace("T", " ");
+        const retTotal = items.reduce((s, i) => s + Number(i.unitPrice) * Number(i.qty), 0);
+
+        // Return header (is_return=1, links back to original via notes)
+        await query(conn,
+          `INSERT INTO pos_header
+             (receiptno,amount,paid,changee,tax,staff,tyype,trandate,posdate,
+              cash,mpesa,creditcard,cheque,posted,is_return,disc,notes)
+           VALUES (?,?,?,0,0,?,'Return',?,?,0,0,0,0,1,1,0,?)`,
+          [retRctNo, retTotal, retTotal, staff, now.slice(0, 10), now,
+           "Return of " + (originalReceiptNo || mysqlReceiptNo || "web order")]);
+
+        // Return line items + stock restoration
+        for (const item of items) {
+          const lineTotal = Number(item.unitPrice) * Number(item.qty);
+          await query(conn,
+            `INSERT INTO pos_details
+               (receiptno,code,description,qty,price,total,vat,posted,disc)
+             VALUES (?,?,?,?,?,?,0,1,0)`,
+            [retRctNo, item.sku, item.name, Number(item.qty),
+             Number(item.unitPrice), lineTotal]);
+
+          // Positive qty in stran = stock returned to shelf
+          await query(conn,
+            `INSERT INTO stran (CODE,descr,stdate,qty,price,total,tt,trandesc,staff,source)
+             VALUES (?,?,CURDATE(),?,?,?,'RETURN','Sales Return',?,'WEB')`,
+            [item.sku, item.name, Number(item.qty),
+             Number(item.unitPrice), lineTotal, staff]);
+        }
+        log(`Return receipt ${retRctNo} created (reverses ${originalReceiptNo || "web order"}).`);
 
       } else if (change.type === "backup_request") {
         await runDailyBackup(conn);
