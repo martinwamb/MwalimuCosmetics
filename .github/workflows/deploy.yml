@@ -36,6 +36,8 @@ jobs:
             --exclude "apps/back/dist/" \
             --filter "P .env" \
             --filter "P .env.*" \
+            --filter "P bridge/FumasV5.exe" \
+            --filter "P bridge/FumasV5-version.txt" \
             ./ $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/
 
       - name: Install, migrate, build, restart
