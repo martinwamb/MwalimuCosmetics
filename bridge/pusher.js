@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-26";
+const AGENT_VERSION   = "20260514-27";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -124,7 +124,8 @@ async function checkFumasUpdate() {
   const retryMs   = hasLocal ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000; // 1h if not yet downloaded
   if (Date.now() - lastCheck < retryMs) return;
   try {
-    const r = await apiRequest("GET", "/sync/agent/FumasV5-version", null, null, null, 15000);
+    // FumasV5 updates are handled via fumas_update pending change (more reliable)
+    return; // skip startup FumasV5 check — avoids timeout issues on slow connections
     if (r.status !== 200) return;
     const serverVersion = JSON.parse(r.body).version;
     const localVersion  = hasLocal ? fs.readFileSync(FUMAS_VER_FILE, "utf8").trim() : "";
@@ -156,13 +157,14 @@ async function checkForUpdate() {
   if (Date.now() - (cp.lastUpdateCheck || 0) < 60000) return; // once per minute
   try {
     saveCheckpoint({ ...cp, lastUpdateCheck: Date.now() });
-    const r = await apiRequest("GET", "/sync/agent-version", null, null, null, 15000); // 15s timeout
+    // Use POST — GET requests timeout on some networks but POST works reliably
+    const r = await apiRequest("POST", "/sync/agent-version", {}, null, null, 15000);
     if (r.status !== 200) return;
     const { version } = JSON.parse(r.body);
     if (version === AGENT_VERSION) return;
 
     log(`New agent version available (${version}). Downloading…`);
-    const dl = await apiGet("/sync/agent/pusher.js", null);
+    const dl = await apiRequest("POST", "/sync/agent/get-file", { filename: "pusher.js" }, null, null, 60000);
     if (dl.status !== 200) { log("Download failed: " + dl.status); return; }
 
     fs.writeFileSync(SELF_PATH, dl.body, "utf8");

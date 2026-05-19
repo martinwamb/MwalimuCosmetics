@@ -337,10 +337,20 @@ router.post("/bridge-log", (req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260514-26";
+const AGENT_VERSION = "20260514-27";
 
-router.get("/agent-version", (_req, res) => {
-  res.json({ version: AGENT_VERSION });
+router.get("/agent-version",  (_req, res) => res.json({ version: AGENT_VERSION }));
+router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }));
+
+// POST endpoint to serve agent files — works on networks that block GET
+router.post("/agent/get-file", (req, res) => {
+  const { filename } = req.body as { filename?: string };
+  const allowed = ["pusher.js", "loop.ps1", "daily-backup.js", "daily-mirror.js", "launch-pos.bat", "FumasV5.exe"];
+  if (!filename || !allowed.includes(filename)) return res.status(400).json({ error: "not allowed" });
+  const filePath = path.join(AGENT_DIR, filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.sendFile(filePath);
 });
 
 router.get("/agent/pusher.js", (_req, res) => {
