@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-22";
+const AGENT_VERSION   = "20260514-23";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -103,6 +103,41 @@ function loadCheckpoint() {
 }
 function saveCheckpoint(cp) {
   try { fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify(cp)); } catch {}
+}
+
+// ── FumasV5 POS auto-update ───────────────────────────────────
+// Runs once per day. Downloads a new FumasV5.exe from the server if the
+// version has changed, stages it as FumasV5_new.exe, and creates a marker
+// file. The launch-pos.bat launcher applies it on next POS start — no
+// mid-sale interruptions.
+const FUMAS_DIR     = "C:\\mwalimu\\Debugv5";
+const FUMAS_EXE     = FUMAS_DIR + "\\FumasV5.exe";
+const FUMAS_NEW     = FUMAS_DIR + "\\FumasV5_new.exe";
+const FUMAS_VER_FILE = FUMAS_DIR + "\\FumasV5-version.txt";
+
+async function checkFumasUpdate() {
+  const cp = loadCheckpoint();
+  if (Date.now() - (cp.lastFumasCheck || 0) < 24 * 60 * 60 * 1000) return; // once per day
+  try {
+    saveCheckpoint({ ...cp, lastFumasCheck: Date.now() });
+    const r = await apiRequest("GET", "/sync/agent/FumasV5-version", null, null, null, 8000);
+    if (r.status !== 200) return;
+    const serverVersion = JSON.parse(r.body).version;
+    const localVersion  = fs.existsSync(FUMAS_VER_FILE)
+      ? fs.readFileSync(FUMAS_VER_FILE, "utf8").trim() : "";
+    if (serverVersion === localVersion) return; // already up to date
+
+    log(`New FumasV5 version available (${serverVersion}). Downloading…`);
+    // Download with a long timeout — the exe is large (~33MB)
+    const dl = await apiRequest("GET", "/sync/agent/FumasV5.exe", null, null, null, 300000);
+    if (dl.status !== 200) { log("FumasV5 download failed: " + dl.status); return; }
+
+    fs.writeFileSync(FUMAS_NEW, dl.body, "binary");
+    fs.writeFileSync(FUMAS_VER_FILE, serverVersion, "utf8");
+    log(`FumasV5 ${serverVersion} staged as FumasV5_new.exe — will apply on next POS start.`);
+  } catch (e) {
+    log("FumasV5 update check skipped: " + e.message);
+  }
 }
 
 // ── Self-update (write-only, no restart) ─────────────────────
@@ -989,6 +1024,7 @@ function openConn() {
 // ── Main ─────────────────────────────────────────────────────
 async function run() {
   await checkForUpdate();
+  await checkFumasUpdate(); // once-daily FumasV5 version check
 
   // Check if a refresh was requested from the dashboard (cheap — no MySQL)
   // Short 10s timeout: fail fast on flaky wifi so the next loop cycle retries sooner.

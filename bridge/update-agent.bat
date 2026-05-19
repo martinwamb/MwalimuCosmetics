@@ -61,6 +61,9 @@ if exist "%DIR%\daily-backup.js" ( echo [OK] daily-backup.js ) else echo [WARN] 
 call :download "https://api.mwalimucosmetics.com/sync/agent/daily-mirror.js" "%DIR%\daily-mirror.js"
 if exist "%DIR%\daily-mirror.js" ( echo [OK] daily-mirror.js ) else echo [WARN] daily-mirror.js not downloaded.
 
+call :download "https://api.mwalimucosmetics.com/sync/agent/launch-pos.bat" "%DIR%\launch-pos.bat"
+if exist "%DIR%\launch-pos.bat" ( echo [OK] launch-pos.bat ) else echo [WARN] launch-pos.bat not downloaded.
+
 :: ── Install mysql npm package ──────────────────────────────────
 if not exist "%DIR%\node_modules\mysql" (
   echo Installing mysql dependency...

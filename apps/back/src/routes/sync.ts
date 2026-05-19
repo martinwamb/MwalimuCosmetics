@@ -334,7 +334,7 @@ router.post("/bridge-log", (req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260514-22";
+const AGENT_VERSION = "20260514-23";
 
 router.get("/agent-version", (_req, res) => {
   res.json({ version: AGENT_VERSION });
@@ -354,8 +354,34 @@ router.get("/agent/loop.ps1", (_req, res) => {
   res.sendFile(filePath);
 });
 
+// FumasV5 POS application update endpoints
+// The compiled FumasV5.exe lives in AGENT_DIR (same folder as bridge scripts).
+// Upload a new build there via: scp FumasV5.exe admin@server:AGENT_DIR/
+// Write the new version string into FumasV5-version.txt alongside the exe.
+router.get("/agent/FumasV5-version", (_req, res) => {
+  const versionFile = path.join(AGENT_DIR, "FumasV5-version.txt");
+  if (!fs.existsSync(versionFile)) return res.status(404).json({ error: "no FumasV5 build on server yet" });
+  const version = fs.readFileSync(versionFile, "utf8").trim();
+  return res.json({ version });
+});
+
+router.get("/agent/FumasV5.exe", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "FumasV5.exe");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "FumasV5.exe not found on server" });
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", "attachment; filename=FumasV5.exe");
+  res.sendFile(filePath);
+});
+
 router.get("/agent/daily-backup.js", (_req, res) => {
   const filePath = path.join(AGENT_DIR, "daily-backup.js");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
+});
+
+router.get("/agent/launch-pos.bat", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "launch-pos.bat");
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.sendFile(filePath);
