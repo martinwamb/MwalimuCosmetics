@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-20";
+const AGENT_VERSION   = "20260514-21";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -275,19 +275,15 @@ async function pushMetrics(data) {
 async function buildProducts(conn) {
   log("Reading product catalogue from MySQL…");
 
-  // Use the LATEST posted sale price per SKU (not MAX which picks the highest ever).
-  // Trailing spaces in SKUs are trimmed so they join correctly in PostgreSQL.
+  // SKUs are trimmed so they join correctly in PostgreSQL.
+  // Use MAX(price) for performance — GROUP_CONCAT+JOIN pos_header was causing
+  // POS lag by scanning millions of joined rows on every product sync.
+  // Price accuracy is secondary to not freezing the POS cashier screen.
   const soldProducts = await query(conn,
     `SELECT pd.code AS sku, MAX(pd.description) AS name,
-            SUBSTRING_INDEX(
-              GROUP_CONCAT(pd.price ORDER BY ph.trandate DESC SEPARATOR ','),
-              ',', 1
-            ) AS price,
-            MAX(pd.icateg) AS category
+            MAX(pd.price) AS price, MAX(pd.icateg) AS category
      FROM pos_details pd
-     JOIN pos_header ph ON pd.receiptno = ph.receiptno
-     WHERE pd.code IS NOT NULL AND TRIM(pd.code) != '' AND pd.code != '0'
-       AND pd.price > 0 AND ph.posted = 1
+     WHERE pd.code IS NOT NULL AND pd.code != '' AND pd.code != '0' AND pd.price > 0
      GROUP BY pd.code`);
 
   if (!soldProducts.length) { log("No products found."); return null; }
@@ -334,10 +330,12 @@ async function buildProducts(conn) {
 
   // Latest cost per SKU from GRN receipts — used for profit calculation.
   // Done here (hourly) not on every 30s metrics cycle so grn_d isn't hit constantly.
+  // Limit to last 2 years of GRNs — older costs are irrelevant and a full
+  // scan of grn_d with no date filter causes unnecessary MySQL load.
   const costRows = await query(conn,
     `SELECT d.code, d.uprice AS cost
      FROM grn_d d JOIN grn g ON d.no = g.no
-     WHERE g.posted = 1
+     WHERE g.posted = 1 AND g.ddate >= DATE_SUB(NOW(), INTERVAL 2 YEAR)
      ORDER BY g.ddate DESC`);
 
   // Trim SKUs before building maps — POS data sometimes has trailing spaces
