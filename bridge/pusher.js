@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-23";
+const AGENT_VERSION   = "20260514-24";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -117,14 +117,19 @@ const FUMAS_VER_FILE = FUMAS_DIR + "\\FumasV5-version.txt";
 
 async function checkFumasUpdate() {
   const cp = loadCheckpoint();
-  if (Date.now() - (cp.lastFumasCheck || 0) < 24 * 60 * 60 * 1000) return; // once per day
+  // Skip if checked successfully in last 24h. If last check failed (no local version
+  // file exists and check was recent), retry after 1 hour instead of 24.
+  const lastCheck = cp.lastFumasCheck || 0;
+  const hasLocal  = fs.existsSync(FUMAS_VER_FILE);
+  const retryMs   = hasLocal ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000; // 1h if not yet downloaded
+  if (Date.now() - lastCheck < retryMs) return;
   try {
-    saveCheckpoint({ ...cp, lastFumasCheck: Date.now() });
     const r = await apiRequest("GET", "/sync/agent/FumasV5-version", null, null, null, 8000);
     if (r.status !== 200) return;
     const serverVersion = JSON.parse(r.body).version;
-    const localVersion  = fs.existsSync(FUMAS_VER_FILE)
-      ? fs.readFileSync(FUMAS_VER_FILE, "utf8").trim() : "";
+    const localVersion  = hasLocal ? fs.readFileSync(FUMAS_VER_FILE, "utf8").trim() : "";
+    // Only save checkpoint after a successful version response (not on timeout/error)
+    saveCheckpoint({ ...cp, lastFumasCheck: Date.now() });
     if (serverVersion === localVersion) return; // already up to date
 
     log(`New FumasV5 version available (${serverVersion}). Downloading…`);
