@@ -10,7 +10,7 @@ type Product = {
   category: { name: string } | null;
 };
 type CartItem = Product & { qty: number; unitPrice: number };
-type Receipt  = { id: string; createdAt: string; total: number; amountPaid: number; changeDue: number; items: any[]; paymentDetails: any; mysqlReceiptNo?: string | null; createdBy?: { name: string } | null };
+type Receipt  = { id: string; createdAt: string; total: number; amountPaid: number; changeDue: number; items: any[]; paymentDetails: any; mysqlReceiptNo?: string | null; createdBy?: { name: string } | null; withholdingTax?: number; customerPin?: string };
 
 const PAYMENT_METHODS = [
   { key: "cash",           label: "Cash" },
@@ -42,6 +42,8 @@ export default function POSPage() {
   const [receipt, setReceipt]           = useState<Receipt | null>(null);
   const [autoPrint, setAutoPrint]       = useState(false);
   const [syncingReceipt, setSyncingReceipt] = useState(false);
+  const [isWHT, setIsWHT]               = useState(false);   // withholding tax customer
+  const [customerPin, setCustomerPin]   = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -88,9 +90,14 @@ export default function POSPage() {
 
   const subtotal = cart.reduce((s, i) => s + i.unitPrice * i.qty, 0);
 
+  // WHT: 2% of the net (pre-VAT) amount = gross × 2/116
+  // Amount supplier receives = gross × 114/116
+  const whtAmount   = isWHT ? Math.round(subtotal * 2 / 116 * 100) / 100 : 0;
+  const netReceivable = subtotal - whtAmount;   // what the cashier actually collects
+
   const totalPaid = Object.values(payAmounts).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-  const change    = Math.max(0, totalPaid - subtotal);
-  const shortfall = Math.max(0, subtotal - totalPaid);
+  const change    = Math.max(0, totalPaid - netReceivable);
+  const shortfall = Math.max(0, netReceivable - totalPaid);
 
   async function completeSale() {
     if (!cart.length || shortfall > 0) return;
@@ -106,12 +113,15 @@ export default function POSPage() {
           items: cart.map(i => ({ productId: i.id, sku: i.sku, name: i.name, qty: i.qty, unitPrice: i.unitPrice, discount: 0 })),
           paymentDetails: { ...pd, ref: payRef },
           amountPaid: totalPaid,
+          withholdingTax: whtAmount > 0 ? whtAmount : undefined,
+          customerPin: customerPin || undefined,
         }),
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error ?? "Sale failed");
 
-      const newReceipt = { ...data, total: subtotal, amountPaid: totalPaid, changeDue: change, paymentDetails: pd };
+      const newReceipt = { ...data, total: subtotal, amountPaid: totalPaid, changeDue: change, paymentDetails: pd,
+        withholdingTax: whtAmount > 0 ? whtAmount : undefined, customerPin: customerPin || undefined };
       setReceipt(newReceipt);
       setCart([]);
       setShowPay(false);
@@ -183,7 +193,7 @@ export default function POSPage() {
     }
   }
 
-  function newSale() { setReceipt(null); setSyncingReceipt(false); loadProducts(); searchRef.current?.focus(); }
+  function newSale() { setReceipt(null); setSyncingReceipt(false); setIsWHT(false); setCustomerPin(""); loadProducts(); searchRef.current?.focus(); }
 
   // ── Receipt screen ──
   if (receipt) {
@@ -228,12 +238,30 @@ export default function POSPage() {
             {(() => {
               const vat = Math.round(receipt.total * 16 / 116);
               const net = receipt.total - vat;
+              const wht = receipt.withholdingTax ?? 0;
               return <>
                 <div className="pos-receipt-row"><span>Net (excl. VAT)</span><strong>KES {fmt(net)}</strong></div>
                 <div className="pos-receipt-row"><span>VAT (16%)</span><strong>KES {fmt(vat)}</strong></div>
-                <div className="pos-receipt-row"><span>Total</span><strong>KES {fmt(receipt.total)}</strong></div>
-                <div className="pos-receipt-row"><span>Paid</span><strong>KES {fmt(receipt.amountPaid)}</strong></div>
-                {receipt.changeDue > 0 && <div className="pos-receipt-row change"><span>Change</span><strong>KES {fmt(receipt.changeDue)}</strong></div>}
+                <div className="pos-receipt-row"><span>Gross Total</span><strong>KES {fmt(receipt.total)}</strong></div>
+                {wht > 0 && <>
+                  <div className="pos-receipt-row" style={{ color: "#dc2626" }}>
+                    <span>Less WHT (2% of net)</span><strong>-KES {fmt(wht)}</strong>
+                  </div>
+                  <div className="pos-receipt-row" style={{ fontWeight: 700, borderTop: "1px dashed var(--border)", paddingTop: 4 }}>
+                    <span>Amount Collected</span><strong>KES {fmt(receipt.total - wht)}</strong>
+                  </div>
+                  {receipt.customerPin && <div className="pos-receipt-row muted" style={{ fontSize: "0.8rem" }}>
+                    <span>Customer PIN</span><span>{receipt.customerPin}</span>
+                  </div>}
+                </>}
+                {!wht && <>
+                  <div className="pos-receipt-row"><span>Paid</span><strong>KES {fmt(receipt.amountPaid)}</strong></div>
+                  {receipt.changeDue > 0 && <div className="pos-receipt-row change"><span>Change</span><strong>KES {fmt(receipt.changeDue)}</strong></div>}
+                </>}
+                {wht > 0 && <>
+                  <div className="pos-receipt-row"><span>Paid</span><strong>KES {fmt(receipt.amountPaid)}</strong></div>
+                  {receipt.changeDue > 0 && <div className="pos-receipt-row change"><span>Change</span><strong>KES {fmt(receipt.changeDue)}</strong></div>}
+                </>}
               </>;
             })()}
           </div>
@@ -382,7 +410,7 @@ export default function POSPage() {
             <span className="pos-total-amount">KES {fmt(subtotal)}</span>
           </div>
           <button className="pos-pay-btn" disabled={!cart.length} onClick={() => setShowPay(true)}>
-            Charge KES {fmt(subtotal)}
+            Charge KES {fmt(subtotal)}{isWHT ? ` (collect ${fmt(netReceivable)})` : ""}
           </button>
         </div>
       </div>
@@ -391,7 +419,10 @@ export default function POSPage() {
       {showPay && (
         <div className="pos-modal-backdrop" onClick={e => e.target === e.currentTarget && setShowPay(false)}>
           <div className="pos-modal">
-            <h2 className="pos-modal-title">Payment — KES {fmt(subtotal)}</h2>
+            <h2 className="pos-modal-title">
+              Payment — KES {fmt(subtotal)}
+              {isWHT && <span style={{ fontSize: "0.75rem", color: "#f97316", fontWeight: 400, marginLeft: 8 }}>Collect KES {fmt(netReceivable)} (after WHT)</span>}
+            </h2>
 
             <div style={{ display:"flex", flexDirection:"column", gap:"0.65rem" }}>
               {PAYMENT_METHODS.map(m => (
@@ -417,6 +448,33 @@ export default function POSPage() {
                 <span style={{ color:"#065f46", fontWeight:700 }}>
                   Change: KES {fmt(change)} ✓
                 </span>
+              )}
+            </div>
+
+            {/* WHT toggle */}
+            <div style={{ background: isWHT ? "#fff7ed" : "#f9fafb", border: `1px solid ${isWHT ? "#fb923c" : "var(--border)"}`, borderRadius: 10, padding: "0.75rem" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.9rem", cursor: "pointer", userSelect: "none", fontWeight: 600 }}>
+                <input type="checkbox" checked={isWHT} onChange={e => setIsWHT(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: "pointer" }} />
+                Withholding Tax (WHT) Customer
+              </label>
+              {isWHT && (
+                <div style={{ marginTop: "0.6rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  <input className="filter-input" placeholder="Customer PIN (KRA)"
+                    value={customerPin} onChange={e => setCustomerPin(e.target.value)}
+                    style={{ fontSize: "0.9rem" }} />
+                  <div style={{ fontSize: "0.85rem", color: "#92400e", lineHeight: 1.6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>Gross sale:</span><strong>KES {fmt(subtotal)}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#dc2626" }}>
+                      <span>Less WHT (2% of net):</span><strong>-KES {fmt(whtAmount)}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #fb923c", paddingTop: 4, fontWeight: 700 }}>
+                      <span>Amount to collect:</span><strong>KES {fmt(netReceivable)}</strong>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
 

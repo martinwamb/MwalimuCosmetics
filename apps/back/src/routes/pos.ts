@@ -75,20 +75,24 @@ const createSaleSchema = z.object({
     kcb:            z.number().min(0).default(0),
     ref:            z.string().optional(),
   }),
-  amountPaid: z.number().min(0),
-  notes:      z.string().optional(),
+  amountPaid:      z.number().min(0),
+  notes:           z.string().optional(),
+  withholdingTax:  z.number().min(0).optional(),   // WHT amount (gross × 2/116)
+  customerPin:     z.string().optional(),           // KRA PIN for WHT certificate
 });
 
 router.post("/sale", async (req: any, res) => {
   const parsed = createSaleSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  const { items, paymentDetails, amountPaid, notes } = parsed.data;
+  const { items, paymentDetails, amountPaid, notes, withholdingTax, customerPin } = parsed.data;
   const userId = req.auth?.sub;
 
   const subtotal = items.reduce((s, i) => s + (i.unitPrice - i.discount) * i.qty, 0);
   const total    = subtotal;
-  const change   = Math.max(0, amountPaid - total);
+  // With WHT: customer pays (total - WHT), change is relative to net receivable
+  const netReceivable = withholdingTax ? total - withholdingTax : total;
+  const change        = Math.max(0, amountPaid - netReceivable);
 
   const order = await prisma.salesOrder.create({
     data: {
@@ -101,7 +105,7 @@ router.post("/sale", async (req: any, res) => {
       total,
       amountPaid,
       changeDue:      change,
-      paymentDetails,
+      paymentDetails: { ...paymentDetails, withholdingTax: withholdingTax ?? 0, customerPin: customerPin ?? "" },
       notes,
       createdById:    userId ?? null,
       mysqlSynced:    false,

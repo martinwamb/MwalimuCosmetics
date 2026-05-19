@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-21";
+const AGENT_VERSION   = "20260514-22";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -515,7 +515,12 @@ async function printReceipt(payload) {
     hr,
     row("Net (excl.VAT):", kes(netAmount)),
     row("VAT " + vatRate + "%:", kes(vatAmount)),
-    row("TOTAL:", kes(total)),
+    row("GROSS TOTAL:", kes(total)),
+    ...(payload.withholdingTax > 0 ? [
+      row("Less WHT (2% net):", "-" + kes(payload.withholdingTax)),
+      row("AMOUNT COLLECTED:", kes(Number(total) - Number(payload.withholdingTax))),
+      ...(payload.customerPin ? [row("Cust. PIN:", payload.customerPin)] : []),
+    ] : []),
     hr,
     ...Object.entries(paymentDetails)
       .filter(([k, v]) => v > 0 && k !== "ref")
@@ -926,15 +931,20 @@ async function writeBackSales(conn, token) {
     const tyype    = hasCash && !hasMpesa && !hasOther ? "Cash Sale"
                    : !hasCash && hasMpesa && !hasOther ? "Mobile Money" : "Multiple";
 
+    // WHT (withholding tax) — stored in pos_header.levy
+    const levyAmount = Number(pd.withholdingTax || 0);
+    const arname     = pd.customerPin ? `WHT:${pd.customerPin}` : "";
+
     try {
       await new Promise((res, rej) => conn.query(
         `INSERT INTO pos_header
            (receiptno,amount,paid,changee,tax,staff,arcode,arname,tyype,
-            trandate,posdate,cash,mpesa,creditcard,cheque,posted,is_return,disc)
-         VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,1,0,0)`,
+            trandate,posdate,cash,mpesa,creditcard,cheque,posted,is_return,disc,levy,csale)
+         VALUES (?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,1,0,0,?,?)`,
         [rctNo, sale.total, sale.amountPaid, sale.changeDue,
-         sale.staffCode || "WEB", "", "", tyype, now.slice(0, 10), now,
-         Number(pd.cash || 0), Number(pd.mpesa || 0), 0, 0],
+         sale.staffCode || "WEB", "", arname, tyype, now.slice(0, 10), now,
+         Number(pd.cash || 0), Number(pd.mpesa || 0), 0, 0,
+         levyAmount, levyAmount > 0 ? 1 : 0],
         (e) => e ? rej(e) : res()
       ));
 
