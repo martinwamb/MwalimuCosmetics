@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-24";
+const AGENT_VERSION   = "20260514-25";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -124,7 +124,7 @@ async function checkFumasUpdate() {
   const retryMs   = hasLocal ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000; // 1h if not yet downloaded
   if (Date.now() - lastCheck < retryMs) return;
   try {
-    const r = await apiRequest("GET", "/sync/agent/FumasV5-version", null, null, null, 8000);
+    const r = await apiRequest("GET", "/sync/agent/FumasV5-version", null, null, null, 15000);
     if (r.status !== 200) return;
     const serverVersion = JSON.parse(r.body).version;
     const localVersion  = hasLocal ? fs.readFileSync(FUMAS_VER_FILE, "utf8").trim() : "";
@@ -156,7 +156,7 @@ async function checkForUpdate() {
   if (Date.now() - (cp.lastUpdateCheck || 0) < 60000) return; // once per minute
   try {
     saveCheckpoint({ ...cp, lastUpdateCheck: Date.now() });
-    const r = await apiRequest("GET", "/sync/agent-version", null, null, null, 5000); // 5s timeout
+    const r = await apiRequest("GET", "/sync/agent-version", null, null, null, 15000); // 15s timeout
     if (r.status !== 200) return;
     const { version } = JSON.parse(r.body);
     if (version === AGENT_VERSION) return;
@@ -841,6 +841,26 @@ async function applyPendingChanges(conn, token) {
           `INSERT INTO stran (CODE, descr, stdate, qty, tt, trandesc, staff, source)
            VALUES (?, ?, CURDATE(), ?, 'ADJ', ?, 'WEB', 'WEB')`,
           [sku, name || sku, Number(delta), reason || "Web stock adjustment"]);
+
+      } else if (change.type === "fumas_update") {
+        // Download and stage FumasV5.exe via the pending changes path.
+        // Uses the 120-second apiPostLarge timeout rather than the 8-second
+        // startup check — works even on intermittent connections.
+        try {
+          log("Downloading FumasV5 update…");
+          const vr = await apiRequest("GET", "/sync/agent/FumasV5-version", null, null, null, 20000);
+          if (vr.status !== 200) { log("FumasV5 version check failed: " + vr.status); break; }
+          const serverVer = JSON.parse(vr.body).version;
+          const localVer  = fs.existsSync(FUMAS_VER_FILE)
+            ? fs.readFileSync(FUMAS_VER_FILE, "utf8").trim() : "";
+          if (serverVer === localVer) { log("FumasV5 already up to date (" + serverVer + ")."); break; }
+          log("Downloading FumasV5 " + serverVer + " (" + Math.round(33000000/1024/1024) + "MB)…");
+          const dl = await apiRequest("GET", "/sync/agent/FumasV5.exe", null, null, null, 300000);
+          if (dl.status !== 200) { log("FumasV5 download failed: " + dl.status); break; }
+          fs.writeFileSync(FUMAS_NEW, dl.body, "binary");
+          fs.writeFileSync(FUMAS_VER_FILE, serverVer, "utf8");
+          log("FumasV5 " + serverVer + " staged — will apply next time launch-pos.bat is run.");
+        } catch (e) { log("FumasV5 update error: " + e.message); }
 
       } else if (change.type === "print_receipt") {
         await printReceipt(change.payload);
