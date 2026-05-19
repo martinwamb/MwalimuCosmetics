@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-27";
+const AGENT_VERSION   = "20260514-28";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -106,13 +106,19 @@ function saveCheckpoint(cp) {
 }
 
 // ── FumasV5 POS auto-update ───────────────────────────────────
-// Runs once per day. Downloads a new FumasV5.exe from the server if the
-// version has changed, stages it as FumasV5_new.exe, and creates a marker
-// file. The launch-pos.bat launcher applies it on next POS start — no
-// mid-sale interruptions.
-const FUMAS_DIR     = "C:\\mwalimu\\Debugv5";
-const FUMAS_EXE     = FUMAS_DIR + "\\FumasV5.exe";
-const FUMAS_NEW     = FUMAS_DIR + "\\FumasV5_new.exe";
+// Auto-detect FumasV5 installation folder — different PCs may have it
+// in different locations (C:\futuresoft\Debugv5, C:\mwalimu\Debugv5, etc.)
+const FUMAS_CANDIDATES = [
+  "C:\\futuresoft\\Debugv5",
+  "C:\\mwalimu\\Debugv5",
+  "C:\\fumasv5\\Debugv5",
+  "C:\\FumasV5",
+];
+const FUMAS_DIR = FUMAS_CANDIDATES.find(p => {
+  try { return fs.existsSync(p + "\\FumasV5.exe"); } catch { return false; }
+}) || "C:\\mwalimu\\Debugv5";
+const FUMAS_EXE      = FUMAS_DIR + "\\FumasV5.exe";
+const FUMAS_NEW      = FUMAS_DIR + "\\FumasV5_new.exe";
 const FUMAS_VER_FILE = FUMAS_DIR + "\\FumasV5-version.txt";
 
 async function checkFumasUpdate() {

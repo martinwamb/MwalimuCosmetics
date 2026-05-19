@@ -150,15 +150,30 @@ if "%SERVER_FUMAS_VER%"=="" (
   )
 )
 
-:: Download launch-pos.bat into the FumasV5 folder so it stays with the exe
+:: Auto-detect FumasV5 installation folder on this PC
+set FUMAS_DIR=
+for %%P in (
+  "C:\futuresoft\Debugv5"
+  "C:\mwalimu\Debugv5"
+  "C:\fumasv5\Debugv5"
+  "C:\FumasV5"
+) do (
+  if exist "%%~P\FumasV5.exe" (
+    if not defined FUMAS_DIR set FUMAS_DIR=%%~P
+  )
+)
 if defined FUMAS_DIR (
+  echo [OK] FumasV5 found at: %FUMAS_DIR%
+  :: Download launch-pos.bat into the FumasV5 folder
   powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://api.mwalimucosmetics.com/sync/agent/launch-pos.bat' -OutFile '%FUMAS_DIR%\launch-pos.bat' -UseBasicParsing" 2>nul
   if exist "%FUMAS_DIR%\launch-pos.bat" (
     echo [OK] launch-pos.bat installed to %FUMAS_DIR%
-    :: Create a desktop shortcut so cashiers launch via the updater
+    :: Create desktop shortcut pointing to correct FumasV5 folder
     powershell -NoProfile -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut([Environment]::GetFolderPath('CommonDesktopDirectory')+'\Mwalimu POS.lnk'); $s.TargetPath='%FUMAS_DIR%\launch-pos.bat'; $s.WorkingDirectory='%FUMAS_DIR%'; $s.IconLocation='%FUMAS_DIR%\FumasV5.exe,0'; $s.Description='Mwalimu Cosmetics POS'; $s.Save()" 2>nul
-    echo [OK] Desktop shortcut 'Mwalimu POS' created/updated.
+    echo [OK] Desktop shortcut 'Mwalimu POS' created at %FUMAS_DIR%.
   )
+) else (
+  echo [WARN] FumasV5.exe not found in common locations. Shortcut not created.
 )
 
 :: ── Make default printer visible to SYSTEM account for background printing ──
