@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-25";
+const AGENT_VERSION   = "20260514-26";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -1051,9 +1051,9 @@ async function run() {
   await checkForUpdate();
   await checkFumasUpdate(); // once-daily FumasV5 version check
 
-  // Check if a refresh was requested from the dashboard (cheap — no MySQL)
-  // Short 10s timeout: fail fast on flaky wifi so the next loop cycle retries sooner.
-  const refreshCheck = await apiRequest("GET", "/sync/pending-refresh", null, SECRET, null, 10000)
+  // Check if a refresh was requested from the dashboard.
+  // Use POST — on some networks GET requests time out but POST works reliably.
+  const refreshCheck = await apiRequest("POST", "/sync/pending-refresh", {}, SECRET, null, 15000)
     .catch(() => ({ status: 0, body: "{}" }));
 
   if (refreshCheck.status !== 200) return; // silent — no log (would flood on bad connection)

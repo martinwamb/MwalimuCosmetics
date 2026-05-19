@@ -97,7 +97,8 @@ router.post("/request", requireAuth, async (_req, res) => {
 
 // Shop PC polls this (with sync secret) every 5 seconds — no MySQL involved.
 // Returns { pending: true } once, then marks it fulfilled so it only fires once.
-router.get("/pending-refresh", async (req, res) => {
+// Available as both GET and POST so networks that block GET still work.
+async function handlePendingRefresh(req: any, res: any) {
   if (!checkSecret(req, res)) return;
   const pending = await prisma.syncRequest.findFirst({
     where:   { fulfilledAt: null },
@@ -109,7 +110,9 @@ router.get("/pending-refresh", async (req, res) => {
     data:  { fulfilledAt: new Date() },
   });
   return res.json({ pending: true });
-});
+}
+router.get("/pending-refresh",  handlePendingRefresh);
+router.post("/pending-refresh", handlePendingRefresh);
 
 // ── Product catalogue sync ────────────────────────────────────
 
@@ -334,7 +337,7 @@ router.post("/bridge-log", (req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260514-25";
+const AGENT_VERSION = "20260514-26";
 
 router.get("/agent-version", (_req, res) => {
   res.json({ version: AGENT_VERSION });
