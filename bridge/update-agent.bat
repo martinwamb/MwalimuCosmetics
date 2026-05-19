@@ -119,6 +119,48 @@ if %errorlevel% equ 0 (
   echo [WARN] MwalimuDailyMirror task registration failed.
 )
 
+:: ── FumasV5 POS update (download new version if available) ──────────────────
+set FUMAS_DIR=C:\mwalimu\Debugv5
+echo.
+echo Checking for FumasV5 POS update...
+
+:: Get version the server has
+set SERVER_FUMAS_VER=
+for /f "usebackq tokens=*" %%V in (`powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { ($([System.Text.Encoding]::UTF8.GetString((Invoke-WebRequest -Uri 'https://api.mwalimucosmetics.com/sync/agent/FumasV5-version' -UseBasicParsing).Content)) | ConvertFrom-Json).version } catch { '' }" 2^>nul`) do set SERVER_FUMAS_VER=%%V
+
+:: Get version we have locally
+set LOCAL_FUMAS_VER=
+if exist "%FUMAS_DIR%\FumasV5-version.txt" (
+  set /p LOCAL_FUMAS_VER=<"%FUMAS_DIR%\FumasV5-version.txt"
+)
+
+if "%SERVER_FUMAS_VER%"=="" (
+  echo [INFO] No FumasV5 build on server yet.
+) else if "%SERVER_FUMAS_VER%"=="%LOCAL_FUMAS_VER%" (
+  echo [OK] FumasV5 is up to date ^(%LOCAL_FUMAS_VER%^).
+) else (
+  echo Downloading FumasV5 update ^(%SERVER_FUMAS_VER%^) - please wait, this is a large file...
+  if not exist "%FUMAS_DIR%" mkdir "%FUMAS_DIR%"
+  powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://api.mwalimucosmetics.com/sync/agent/FumasV5.exe' -OutFile '%FUMAS_DIR%\FumasV5_new.exe' -UseBasicParsing" 2>nul
+  if exist "%FUMAS_DIR%\FumasV5_new.exe" (
+    echo %SERVER_FUMAS_VER%>"%FUMAS_DIR%\FumasV5-version.txt"
+    echo [OK] FumasV5 update ready. Will apply on next POS start via launch-pos.bat.
+  ) else (
+    echo [WARN] FumasV5 download failed - check internet connection.
+  )
+)
+
+:: Download launch-pos.bat into the FumasV5 folder so it stays with the exe
+if defined FUMAS_DIR (
+  powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://api.mwalimucosmetics.com/sync/agent/launch-pos.bat' -OutFile '%FUMAS_DIR%\launch-pos.bat' -UseBasicParsing" 2>nul
+  if exist "%FUMAS_DIR%\launch-pos.bat" (
+    echo [OK] launch-pos.bat installed to %FUMAS_DIR%
+    :: Create a desktop shortcut so cashiers launch via the updater
+    powershell -NoProfile -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut([Environment]::GetFolderPath('CommonDesktopDirectory')+'\Mwalimu POS.lnk'); $s.TargetPath='%FUMAS_DIR%\launch-pos.bat'; $s.WorkingDirectory='%FUMAS_DIR%'; $s.IconLocation='%FUMAS_DIR%\FumasV5.exe,0'; $s.Description='Mwalimu Cosmetics POS'; $s.Save()" 2>nul
+    echo [OK] Desktop shortcut 'Mwalimu POS' created/updated.
+  )
+)
+
 :: ── Make default printer visible to SYSTEM account for background printing ──
 :: The receipt printer is usually installed per-user. This command adds it to
 :: the system-wide printer list so the sync agent (running as SYSTEM) can print.
@@ -166,6 +208,8 @@ echo   Syncs live data when Refresh is clicked
 echo   Daily backup: 5:00 PM
 echo   Nightly mirror: 9:00 PM
 echo   Loop runs as SYSTEM - no window needed
+echo   POS: use 'Mwalimu POS' desktop shortcut
+echo   FumasV5 updates apply on next POS start
 echo  =========================================
 echo.
 timeout /t 5 /nobreak >nul
