@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260514-28";
+const AGENT_VERSION   = "20260523-29";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -222,26 +222,17 @@ async function buildMetrics(conn, today, costMap) {
      FROM grn WHERE ddate >= ? AND ddate < ? AND posted = 1`,
     [t0, t1]);
 
-  // Gross profit — uses the cached cost map built during the daily product sync.
-  const soldItems = await query(conn,
-    `SELECT pd.code, SUM(pd.qty) AS qty, ROUND(SUM(pd.total), 0) AS revenue
+  // Gross profit — pos_details.buy_cost is the total cost for the line (qty × unit_cost),
+  // set by FumasV5 at the time of sale from the stock master. SUM(total - buy_cost) across
+  // all posted lines gives the day's gross profit directly without needing a cost map join.
+  const [cogsRow] = await query(conn,
+    `SELECT ROUND(SUM(pd.total - COALESCE(pd.buy_cost, 0)), 0) AS gross_profit
      FROM pos_details pd
      JOIN pos_header ph ON pd.receiptno = ph.receiptno
      WHERE ph.trandate >= ? AND ph.trandate < ? AND ph.posted = 1
-       AND (ph.is_return = 0 OR ph.is_return IS NULL)
-       AND pd.code IS NOT NULL AND pd.code != ''
-     GROUP BY pd.code`,
+       AND (ph.is_return = 0 OR ph.is_return IS NULL)`,
     [t0, t1]);
-
-  let profit = 0;
-  if (soldItems.length > 0 && costMap) {
-    for (const item of soldItems) {
-      if (item.code in costMap) {
-        profit += Number(item.revenue) - costMap[item.code] * Number(item.qty);
-      }
-    }
-    profit = Math.round(profit);
-  }
+  const profit = Math.round(Number(cogsRow?.gross_profit ?? 0));
 
   // Payment breakdown
   const breakdown = await query(conn,
@@ -320,7 +311,7 @@ async function pushMetrics(data) {
 // Heavy queries — runs at most once per hour (off-peak only) to protect MySQL.
 // Also builds the cost map used by buildMetrics for profit calculation,
 // so grn_d is queried here (hourly) rather than on every 30-second cycle.
-async function buildProducts(conn) {
+async function buildProducts(conn, cp) {
   log("Reading product catalogue from MySQL…");
 
   // SKUs are trimmed so they join correctly in PostgreSQL.
@@ -423,21 +414,26 @@ async function buildProducts(conn) {
     const colNames = cols.map(c => (c.COLUMN_NAME || '').toUpperCase());
     log(`${priceTableName} columns: ${colNames.join(', ')}`);
 
-    // Detect wholesale and special price column names
+    // Detect wholesale, special and cost column names
     const wCol = colNames.find(c => ['PRICE2','WPRICE','WHLPRICE','WHOLESALE','W_PRICE','PRICE_W'].includes(c))
               || colNames.find(c => c.includes('WHOLE') || c.includes('WHL'));
     const sCol = colNames.find(c => ['PRICE3','SPRICE','SPECPRICE','SPECIAL','S_PRICE','PRICE_S'].includes(c))
               || colNames.find(c => c.includes('SPEC') || (c.includes('PRICE') && c !== 'PRICE1' && c !== (wCol || '')));
+    // Cost/buying price column — used to supplement the GRN-derived costMap
+    const cstCol = colNames.find(c => ['UPRICE','COST','BPRICE','CPRICE','BUY_PRICE','BUYPRICE','BUYING_PRICE'].includes(c))
+              || colNames.find(c => c.startsWith('UPRICE') || (c.startsWith('COST') && !c.includes('DISC')));
     const codeCol = colNames.includes('CODE') ? 'CODE' : (colNames.find(c => c.includes('CODE')) || 'CODE');
 
-    if (wCol || sCol) {
+    if (wCol || sCol || cstCol) {
       const selectCols = [
         `\`${codeCol}\` AS sku`,
-        wCol ? `\`${wCol}\` AS wholesale` : 'NULL AS wholesale',
-        sCol ? `\`${sCol}\` AS special`   : 'NULL AS special',
+        wCol   ? `\`${wCol}\` AS wholesale`   : 'NULL AS wholesale',
+        sCol   ? `\`${sCol}\` AS special`     : 'NULL AS special',
+        cstCol ? `\`${cstCol}\` AS sitemsCost` : 'NULL AS sitemsCost',
       ].join(', ');
       const sitemsRows = await query(conn,
         `SELECT ${selectCols} FROM \`${priceTableName}\` WHERE \`${codeCol}\` IS NOT NULL`);
+      let sitemsNewCost = 0;
       for (const r of sitemsRows) {
         const sku = (r.sku || '').trim();
         if (!sku) continue;
@@ -445,10 +441,15 @@ async function buildProducts(conn) {
           wholesale: r.wholesale > 0 ? Number(r.wholesale) : null,
           special:   r.special   > 0 ? Number(r.special)   : null,
         };
+        // Fill costMap for products not already covered by recent GRNs
+        if (Number(r.sitemsCost) > 0 && !(sku in costMap)) {
+          costMap[sku] = Number(r.sitemsCost);
+          sitemsNewCost++;
+        }
       }
-      log(`Price map: ${Object.keys(priceMap).length} SKUs (wholesale=${wCol||'n/a'}, special=${sCol||'n/a'})`);
+      log(`Price map: ${Object.keys(priceMap).length} SKUs (wholesale=${wCol||'n/a'}, special=${sCol||'n/a'}, cost=${cstCol||'n/a'}, +${sitemsNewCost} costs from sitems)`);
     } else {
-      log("sitems: wholesale/special price columns not found. Columns available: " + colNames.join(', '));
+      log("sitems: no price/cost columns detected. Available: " + colNames.join(', '));
     }
   } catch (e) {
     log("sitems price query skipped: " + e.message);
@@ -468,7 +469,7 @@ async function buildProducts(conn) {
     };
   });
 
-  return { products, costMap };
+  return { products, costMap, stockMap };
 }
 
 async function syncProducts(products) {
@@ -1085,13 +1086,14 @@ async function run() {
   const productSyncDue = cp.date !== today || nowMs - (cp.lastProductSync || 0) > 4 * 60 * 60 * 1000;
 
   let productsData = null;
-  let costMap      = cp.costMap || null;
+  let costMap      = cp.costMap  || null;
+  let stockMap     = cp.stockMap || null;
 
   if (productSyncDue) {
     const conn1 = await openConn().catch(() => null);
     if (conn1) {
-      const result = await buildProducts(conn1).catch(e => { log("Products build error: " + e.message); return null; });
-      if (result) { productsData = result.products; costMap = result.costMap; }
+      const result = await buildProducts(conn1, cp).catch(e => { log("Products build error: " + e.message); return null; });
+      if (result) { productsData = result.products; costMap = result.costMap; stockMap = result.stockMap; }
       conn1.end();
     }
   }
