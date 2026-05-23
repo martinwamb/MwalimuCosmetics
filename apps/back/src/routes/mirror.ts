@@ -229,6 +229,236 @@ router.post("/mirror/rows", async (req, res) => {
   }
 });
 
+// ── Dashboard read endpoints ─────────────────────────────────
+
+function mirrorKenyanToday(): string {
+  return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function mirrorAddDays(dateStr: string, n: number): string {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Return 0 safely for BigInt or undefined values from aggregate queries
+function toNum(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === "bigint") return Number(v);
+  return Number(v);
+}
+
+async function tableExists(name: string): Promise<boolean> {
+  const r = await prisma.$queryRawUnsafe<{ tbl: string | null }[]>(
+    `SELECT to_regclass($1) AS tbl`, name
+  );
+  return !!r[0]?.tbl;
+}
+
+function parseData(row: { data: unknown }): Record<string, unknown> {
+  if (!row?.data) return {};
+  if (typeof row.data === "string") {
+    try { return JSON.parse(row.data); } catch { return {}; }
+  }
+  return row.data as Record<string, unknown>;
+}
+
+// GET /sync/mirror/sales?date=YYYY-MM-DD&page=N&staff=&method=&minAmount=&search=&posted=
+// Returns POS transactions for a date from mirror tables (much richer than web SalesOrders).
+router.get("/mirror/sales", requireAuth, async (req, res) => {
+  const { date, staff, method, minAmount, search, posted: postedFilter, page = "1" } = req.query as Record<string, string>;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date))
+    return res.status(400).json({ error: "date required (YYYY-MM-DD)" });
+
+  const pageNum  = Math.max(1, parseInt(page) || 1);
+  const pageSize = 50;
+
+  try {
+    if (!(await tableExists("mirror_pos_header")))
+      return res.json({ rows: [], total: 0, page: 1, pages: 0 });
+
+    // Load all data for the date in parallel
+    const [rawHeaders, rawDetails, rawPpd] = await Promise.all([
+      prisma.$queryRawUnsafe<{ data: unknown }[]>(
+        `SELECT data FROM mirror_pos_header WHERE row_date = $1`, date
+      ),
+      tableExists("mirror_pos_details").then(exists => exists
+        ? prisma.$queryRawUnsafe<{ data: unknown }[]>(
+            `SELECT data FROM mirror_pos_details WHERE row_date = $1`, date
+          )
+        : []
+      ),
+      tableExists("mirror_pos_payment_details").then(exists => exists
+        ? prisma.$queryRawUnsafe<{ data: unknown }[]>(
+            `SELECT data FROM mirror_pos_payment_details
+             WHERE row_date = $1 AND (data->>'pamount')::numeric < 500000`, date
+          )
+        : []
+      ),
+    ]);
+
+    // Build lookup maps
+    const detailsByRct: Record<string, any[]> = {};
+    for (const r of rawDetails as { data: unknown }[]) {
+      const d = parseData(r);
+      const rno = String(d.receiptno ?? "");
+      if (!detailsByRct[rno]) detailsByRct[rno] = [];
+      detailsByRct[rno].push(d);
+    }
+
+    const methodsByRct: Record<string, string[]> = {};
+    for (const r of rawPpd as { data: unknown }[]) {
+      const p = parseData(r);
+      const rno = String(p.receiptno ?? "");
+      if (!methodsByRct[rno]) methodsByRct[rno] = [];
+      const mn = String(p.payname ?? "");
+      if (mn && !methodsByRct[rno].includes(mn)) methodsByRct[rno].push(mn);
+    }
+
+    // Apply filters in JS
+    let rows: any[] = rawHeaders.map(r => parseData(r as { data: unknown }));
+
+    if (postedFilter === "1") rows = rows.filter(h => Number(h.posted) === 1);
+    if (postedFilter === "0") rows = rows.filter(h => Number(h.posted) !== 1);
+    if (staff)     rows = rows.filter(h => String(h.staff ?? "").toUpperCase().includes(staff.toUpperCase()));
+    if (minAmount) rows = rows.filter(h => Number(h.amount) >= Number(minAmount));
+    if (method)    rows = rows.filter(h => (methodsByRct[String(h.receiptno)] ?? []).some(m => m.toLowerCase().includes(method.toLowerCase())));
+    if (search)    rows = rows.filter(h =>
+      String(h.receiptno ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (detailsByRct[String(h.receiptno)] ?? []).some(d =>
+        String(d.description ?? d.descr ?? "").toLowerCase().includes(search.toLowerCase())
+      )
+    );
+
+    rows.sort((a, b) => new Date(String(b.trandate ?? 0)).getTime() - new Date(String(a.trandate ?? 0)).getTime());
+
+    const total  = rows.length;
+    const sliced = rows.slice((pageNum - 1) * pageSize, pageNum * pageSize);
+
+    return res.json({
+      total,
+      page:  pageNum,
+      pages: Math.ceil(total / pageSize) || 0,
+      rows: sliced.map(h => ({
+        receiptno: h.receiptno,
+        trandate:  h.trandate,
+        staff:     h.staff ? String(h.staff).toUpperCase() : "—",
+        amount:    Number(h.amount ?? 0),
+        posted:    Number(h.posted ?? 0),
+        is_return: Number(h.is_return ?? 0),
+        methods:   methodsByRct[String(h.receiptno)] ?? [],
+        items: (detailsByRct[String(h.receiptno)] ?? []).map(d => ({
+          code:        d.code,
+          description: d.description ?? d.descr,
+          qty:         Number(d.qty ?? 0),
+          price:       Number(d.price ?? 0),
+          total:       Number(d.total ?? 0),
+        })),
+      })),
+    });
+  } catch (e: any) {
+    console.error("[mirror/sales]", e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /sync/mirror/analytics?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Daily aggregates + top products + payment split for the Analytics page.
+router.get("/mirror/analytics", requireAuth, async (req, res) => {
+  const today = mirrorKenyanToday();
+  const from  = String(req.query.from || mirrorAddDays(today, -30));
+  const to    = String(req.query.to   || today);
+
+  try {
+    if (!(await tableExists("mirror_pos_header")))
+      return res.json({ salesByDate: [], topProducts: [], paymentSplit: [] });
+
+    // Daily sales totals
+    const salesRows = await prisma.$queryRawUnsafe<any[]>(`
+      SELECT
+        row_date AS date,
+        COUNT(*)::int                     FILTER (WHERE (data->>'posted')::int = 1
+          AND (data->>'is_return') IS DISTINCT FROM '1') AS transactions,
+        SUM((data->>'amount')::numeric)   FILTER (WHERE (data->>'posted')::int = 1
+          AND (data->>'is_return') IS DISTINCT FROM '1') AS total_sales
+      FROM mirror_pos_header
+      WHERE row_date >= $1 AND row_date <= $2
+      GROUP BY row_date
+      ORDER BY row_date
+    `, from, to);
+
+    // Daily purchases
+    const purchaseRows = (await tableExists("mirror_grn"))
+      ? await prisma.$queryRawUnsafe<any[]>(`
+          SELECT
+            row_date AS date,
+            SUM((data->>'gtotal')::numeric) FILTER (WHERE (data->>'posted')::int = 1) AS purchases
+          FROM mirror_grn
+          WHERE row_date >= $1 AND row_date <= $2
+          GROUP BY row_date
+          ORDER BY row_date
+        `, from, to).catch(() => [] as any[])
+      : [];
+
+    const purchaseMap: Record<string, number> = {};
+    for (const r of purchaseRows) purchaseMap[String(r.date)] = toNum(r.purchases);
+
+    const salesByDate = salesRows.map(r => ({
+      date:         String(r.date),
+      transactions: toNum(r.transactions),
+      totalSales:   toNum(r.total_sales),
+      purchases:    purchaseMap[String(r.date)] ?? 0,
+    }));
+
+    // Top products (from mirror_pos_details, excludes returns via qty > 0)
+    const topProducts = (await tableExists("mirror_pos_details"))
+      ? await prisma.$queryRawUnsafe<any[]>(`
+          SELECT
+            data->>'code' AS code,
+            MAX(data->>'description') AS name,
+            SUM((data->>'qty')::numeric)::float8   AS qty_sold,
+            SUM((data->>'total')::numeric)::float8 AS revenue
+          FROM mirror_pos_details
+          WHERE row_date >= $1 AND row_date <= $2
+            AND (data->>'qty')::numeric > 0
+          GROUP BY data->>'code'
+          ORDER BY revenue DESC
+          LIMIT 20
+        `, from, to).then(r => r.map(p => ({
+            code:    String(p.code ?? ""),
+            name:    String(p.name ?? p.code ?? ""),
+            qtySold: toNum(p.qty_sold),
+            revenue: toNum(p.revenue),
+          }))).catch(() => [] as any[])
+      : [];
+
+    // Payment split (with corrupted-row filter)
+    const paymentSplit = (await tableExists("mirror_pos_payment_details"))
+      ? await prisma.$queryRawUnsafe<any[]>(`
+          SELECT
+            data->>'payname' AS method,
+            COUNT(*)::int                          AS transactions,
+            SUM((data->>'pamount')::numeric)::float8 AS total
+          FROM mirror_pos_payment_details
+          WHERE row_date >= $1 AND row_date <= $2
+            AND (data->>'pamount')::numeric > 0
+            AND (data->>'pamount')::numeric < 500000
+          GROUP BY data->>'payname'
+          ORDER BY total DESC
+        `, from, to).then(r => r.map(p => ({
+            method:       String(p.method ?? "Unknown"),
+            transactions: toNum(p.transactions),
+            total:        toNum(p.total),
+          }))).catch(() => [] as any[])
+      : [];
+
+    return res.json({ salesByDate, topProducts, paymentSplit });
+  } catch (e: any) {
+    console.error("[mirror/analytics]", e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /sync/mirror/reference  body: { table, rows[] }
 // Full-replace reference tables that have no date dimension (e.g. sitems).
 router.post("/mirror/reference", async (req, res) => {
