@@ -1,0 +1,97 @@
+To implement the on-demand database mirroring with pause/resume functionality from a dashboard within one week, we will focus on creating a simple REST API endpoint that can control the mirror state and a corresponding frontend dashboard component to interact with this API.
+
+### Backend Code
+
+First, let's create an endpoint in the backend (e.g., using Node.js with Express) to handle the database mirroring commands:
+
+```javascript
+const express = require('express');
+const axios = require('axios');
+const app = express();
+app.use(express.json());
+
+// Simulate a mirror state object
+let mirrorState = {
+  isMirroring: false,
+};
+
+// Endpoint to start or stop the mirror
+app.post('/mirror/start', async (req, res) => {
+  if (!mirrorState.isMirroring) {
+    // Start mirroring logic here (pseudo-code)
+    console.log('Starting database mirroring...');
+    await simulateMirrorStart(); // Simulate starting the mirror
+    mirrorState.isMirroring = true;
+  }
+  res.status(200).json({ message: 'Database mirroring started.' });
+});
+
+app.post('/mirror/stop', async (req, res) => {
+  if (mirrorState.isMirroring) {
+    // Stop mirroring logic here (pseudo-code)
+    console.log('Stopping database mirroring...');
+    await simulateMirrorStop(); // Simulate stopping the mirror
+    mirrorState.isMirroring = false;
+  }
+  res.status(200).json({ message: 'Database mirroring stopped.' });
+});
+
+async function simulateMirrorStart() {
+  // Placeholder for actual start logic
+}
+
+async function simulateMirrorStop() {
+  // Placeholder for actual stop logic
+}
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+```
+
+### Frontend Code
+
+Next, let's create a simple React component to interact with the backend API:
+
+```jsx
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const MirrorControl = () => {
+  const [isMirroring, setIsMirroring] = useState(false);
+
+  useEffect(() => {
+    // Fetch initial state from server
+    axios.get('http://localhost:3000/mirror/state')
+      .then(response => {
+        setIsMirroring(response.data.isMirroring);
+      })
+      .catch(error => console.error('Error fetching mirror state:', error));
+  }, []);
+
+  const startMirror = () => {
+    axios.post('http://localhost:3000/mirror/start')
+      .then(() => setIsMirroring(true))
+      .catch(error => console.error('Error starting mirror:', error));
+  };
+
+  const stopMirror = () => {
+    axios.post('http://localhost:3000/mirror/stop')
+      .then(() => setIsMirroring(false))
+      .catch(error => console.error('Error stopping mirror:', error));
+  };
+
+  return (
+    <div>
+      {isMirroring ? 'Database Mirroring is ON' : 'Database Mirroring is OFF'}
+      <button onClick={startMirror} disabled={isMirroring}>Start Mirror</button>
+      <button onClick={stopMirror} disabled={!isMirroring}>Stop Mirror</button>
+    </div>
+  );
+};
+
+export default MirrorControl;
+```
+
+### File and Notes
