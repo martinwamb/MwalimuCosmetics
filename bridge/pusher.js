@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260731-32";
+const AGENT_VERSION   = "20260731-33";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -1001,8 +1001,7 @@ async function applyPendingChanges(conn, token) {
 
       } else if (change.type === "grn_payment") {
         // Instalment cheque/cash/bank-transfer payment against a GRN — posts
-        // into FumasV5's real AP ledger. Still targets mwalimuinvest_test
-        // (see GRN_PAYMENT_DB) until verified end-to-end.
+        // into FumasV5's real AP ledger (see GRN_PAYMENT_DB).
         await postGrnPayment(change.payload);
 
       } else {
@@ -1175,12 +1174,11 @@ async function setupTestDatabase() {
 // accounts.prepaid balance — all in one DB transaction so a partial
 // failure can never leave the books unbalanced.
 //
-// TESTING GATE: still points at mwalimuinvest_test, not the real
-// mwalimuinvest database, until this has been verified end-to-end
-// (posted payments checked against FumasV5's own creditor statement and
-// trial balance reports run against the test copy). Flip
-// GRN_PAYMENT_DB to MYSQL.database only after that passes.
-const GRN_PAYMENT_DB = "mwalimuinvest_test";
+// LIVE as of 2026-07-31: verified against mwalimuinvest_test (6 test
+// postings, all journal legs balanced, creditors_transactions matched
+// accounts.prepaid exactly, overpayment guard rejected correctly twice —
+// see agent logs) and approved to point at the real database.
+const GRN_PAYMENT_DB = MYSQL.database;
 
 function openTestConn() {
   return new Promise((res, rej) => {
@@ -1337,6 +1335,12 @@ async function postGrnPayment(payload) {
 // logs a clear pass/fail summary — verification ahead of ever pointing
 // GRN_PAYMENT_DB at production. Gated to run exactly once.
 async function runPaymentSelfTest() {
+  // Safety net: never post fabricated self-test entries into whatever
+  // GRN_PAYMENT_DB currently points at once it's live (e.g. if checkpoint.json
+  // is ever wiped by update-agent.bat, this must not silently re-run against
+  // the real ledger). Already-completed test runs stay recorded in the log.
+  if (GRN_PAYMENT_DB === MYSQL.database) return;
+
   const cp = loadCheckpoint();
   if (cp.grnPaymentSelfTestV2Done) return;
   if (!cp.testDbReady) return; // wait until the test DB actually exists

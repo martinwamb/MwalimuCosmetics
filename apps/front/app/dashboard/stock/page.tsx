@@ -464,7 +464,7 @@ function GrnPaymentsTab({ token }: { token: string }) {
         }),
       });
       if (r.ok) {
-        setMsg({ ok: true, text: "Payment queued. Note: posting still targets a test copy of the shop database while this is being verified — this will currently show as \"Failed: GRN not found in mwalimuinvest_test\" in Recent Changes for real invoices, which is expected until verification is complete." });
+        setMsg({ ok: true, text: "Payment queued — will post to MySQL (cash/bank leg, AP control account, creditor ledger, and voucher) within 30 seconds on next refresh." });
         setAmount(""); setChequeNo(""); setRemarks("");
       } else {
         setMsg({ ok: false, text: "Failed to queue payment." });
@@ -475,14 +475,6 @@ function GrnPaymentsTab({ token }: { token: string }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-      <div style={{ padding: "0.65rem 0.75rem", borderRadius: 10, fontSize: "0.82rem",
-        background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}>
-        Payment posting into FumasV5's accounts payable ledger is implemented but still points at
-        a test copy of the shop's database for verification — you can search invoices and queue
-        payments now, but they won't post against real invoices until that verification is complete
-        and this is switched over to the live database.
-      </div>
-
       <div style={{ maxWidth: 480 }}>
         <label className="input-label">Search Invoice (GRN)</label>
         <input className="input-field" value={search} onChange={e => runSearch(e.target.value)}
@@ -608,8 +600,7 @@ export default function StockPage() {
       <div>
         <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Stock Management</h2>
         <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.85rem" }}>
-          Adjustments and GRNs queue here and are applied to MySQL within 30 seconds of the next dashboard refresh.
-          GRN payments can be recorded but won't post to MySQL until accounts-payable testing is complete.
+          Adjustments, GRNs, and GRN payments queue here and are applied to MySQL within 30 seconds of the next dashboard refresh.
         </p>
       </div>
 
