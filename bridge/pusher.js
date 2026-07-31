@@ -188,9 +188,11 @@ async function getSyncToken() {
 }
 
 // ── 1. Build metrics from MySQL (read-only) ───────────────────
-// costMap: { sku → latestCostPrice } built during hourly product sync.
-// Passing null is safe — profit will show 0 until first hourly sync runs.
-async function buildMetrics(conn, today, costMap) {
+// Profit is computed directly from pos_details.buy_cost below — no
+// costMap dependency (removed since commit 8aac26a switched profit to
+// buy_cost; buildProducts()/checkpoint.costMap still feeds Product.cost
+// in the catalog sync, a separate concern from this daily profit metric).
+async function buildMetrics(conn, today) {
   log("Reading metrics from MySQL…");
 
   // Use range conditions (>= and <) instead of DATE(col) = ? so MySQL can use
@@ -1459,7 +1461,7 @@ async function run() {
   const conn1b = await openConn().catch(e => { log("MySQL connect failed: " + e.message); return null; });
   if (conn1b) {
     log("Connected to MySQL on server-pc.");
-    metricsData = await buildMetrics(conn1b, today, costMap)
+    metricsData = await buildMetrics(conn1b, today)
       .catch(e => { log("Metrics build error: " + e.message); return null; });
     conn1b.end();
   }
