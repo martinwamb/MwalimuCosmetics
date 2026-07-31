@@ -70,6 +70,16 @@ if exist "%OLD_VBS%" (
   echo [OK] Removed old startup VBS entry.
 )
 
+:: Stop any already-running instance before removing the task definition —
+:: /delete alone does not kill a process that Task Scheduler already launched,
+:: so a re-run of this installer on a PC where the loop is still active would
+:: otherwise leave the old loop.ps1 running alongside the new one, doubling
+:: the 5-second poll (and any MySQL load triggered by a refresh).
+schtasks /end /tn "MwalimuSyncLoop"    >nul 2>&1
+schtasks /end /tn "MwalimuDailyBackup" >nul 2>&1
+schtasks /end /tn "MwalimuDailyMirror" >nul 2>&1
+timeout /t 2 /nobreak >nul
+
 :: Remove any old scheduled tasks
 schtasks /delete /tn "MwalimuSync"        /f >nul 2>&1
 schtasks /delete /tn "MwalimuSyncLoop"    /f >nul 2>&1
