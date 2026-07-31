@@ -37,9 +37,9 @@ async function ensureMeta() {
 }
 
 async function ensureTable(table: string) {
-  if (table === "sitems") {
+  if (table === "sitems" || table === "su") {
     await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS mirror_sitems (
+      CREATE TABLE IF NOT EXISTS mirror_${table} (
         code      TEXT PRIMARY KEY,
         data      JSONB NOT NULL,
         synced_at TIMESTAMPTZ DEFAULT NOW()
@@ -459,27 +459,95 @@ router.get("/mirror/analytics", requireAuth, async (req, res) => {
   }
 });
 
+// GET /sync/mirror/suppliers?search=
+// Supplier picker for GRN entry / payments — reads the mirror_su reference table.
+router.get("/mirror/suppliers", requireAuth, async (req, res) => {
+  const search = String(req.query.search ?? "").trim();
+  try {
+    if (!(await tableExists("mirror_su"))) return res.json([]);
+    const rows = await prisma.$queryRawUnsafe<{ data: unknown }[]>(
+      search
+        ? `SELECT data FROM mirror_su
+           WHERE data->>'names' ILIKE $1 OR data->>'code' ILIKE $1
+           ORDER BY data->>'names' LIMIT 20`
+        : `SELECT data FROM mirror_su ORDER BY data->>'names' LIMIT 20`,
+      ...(search ? [`%${search}%`] : [])
+    );
+    return res.json(rows.map(r => {
+      const d = parseData(r);
+      return { code: String(d.code ?? ""), name: String(d.names ?? d.code ?? "") };
+    }));
+  } catch (e: any) {
+    console.error("[mirror/suppliers]", e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /sync/mirror/grns?search=&page=
+// GRN picker for recording payments against an invoice.
+router.get("/mirror/grns", requireAuth, async (req, res) => {
+  const search  = String(req.query.search ?? "").trim();
+  const pageNum = Math.max(1, parseInt(String(req.query.page ?? "1")) || 1);
+  const pageSize = 25;
+  try {
+    if (!(await tableExists("mirror_grn"))) return res.json({ rows: [], total: 0, page: 1, pages: 0 });
+    const rawRows = await prisma.$queryRawUnsafe<{ data: unknown }[]>(
+      `SELECT data FROM mirror_grn ORDER BY row_date DESC, no DESC LIMIT 500`
+    );
+    let rows = rawRows.map(r => parseData(r));
+    if (search) {
+      const s = search.toLowerCase();
+      rows = rows.filter(g =>
+        String(g.no ?? "").toLowerCase().includes(s) ||
+        String(g.sname ?? "").toLowerCase().includes(s) ||
+        String(g.scode ?? "").toLowerCase().includes(s)
+      );
+    }
+    const total  = rows.length;
+    const sliced = rows.slice((pageNum - 1) * pageSize, pageNum * pageSize);
+    return res.json({
+      total, page: pageNum, pages: Math.ceil(total / pageSize) || 0,
+      rows: sliced.map(g => ({
+        no:      String(g.no ?? ""),
+        ddate:   g.ddate,
+        scode:   String(g.scode ?? ""),
+        sname:   String(g.sname ?? ""),
+        gtotal:  Number(g.gtotal ?? 0),
+        posted:  Number(g.posted ?? 0),
+        // Paid-so-far tracking lands once the GrnPayment posting flow is live —
+        // shown as 0/full-balance until then, which is accurate today.
+        paid:    0,
+      })),
+    });
+  } catch (e: any) {
+    console.error("[mirror/grns]", e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /sync/mirror/reference  body: { table, rows[] }
-// Full-replace reference tables that have no date dimension (e.g. sitems).
+// Full-replace reference tables that have no date dimension (e.g. sitems, su).
+const REFERENCE_TABLES = new Set(["sitems", "su"]);
+
 router.post("/mirror/reference", async (req, res) => {
   if (!checkSecret(req, res)) return;
   const { table, rows } = req.body as {
     table: string; rows: Record<string, unknown>[];
   };
 
-  if (table !== "sitems")
-    return res.status(400).json({ error: "only sitems is supported" });
+  if (!REFERENCE_TABLES.has(table))
+    return res.status(400).json({ error: "table not allowed" });
   if (!Array.isArray(rows))
     return res.status(400).json({ error: "rows required" });
 
   try {
-    await ensureTable("sitems");
+    await ensureTable(table);
     if (rows.length === 0) return res.json({ ok: true, rows: 0 });
 
     const blob = JSON.stringify(rows);
     // CODE field may be uppercase or lowercase depending on MySQL version
     await prisma.$executeRawUnsafe(
-      `INSERT INTO mirror_sitems (code, data, synced_at)
+      `INSERT INTO mirror_${table} (code, data, synced_at)
        SELECT COALESCE(elem->>'CODE', elem->>'code'), elem, NOW()
        FROM   jsonb_array_elements($1::jsonb) AS elem
        WHERE  COALESCE(elem->>'CODE', elem->>'code') IS NOT NULL
@@ -489,7 +557,7 @@ router.post("/mirror/reference", async (req, res) => {
     );
     return res.json({ ok: true, rows: rows.length });
   } catch (e: any) {
-    console.error("[mirror/reference] sitems:", e.message);
+    console.error(`[mirror/reference] ${table}:`, e.message);
     return res.status(500).json({ error: e.message });
   }
 });

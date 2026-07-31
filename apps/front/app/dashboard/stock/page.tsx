@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-type Product = { id: string; sku: string; name: string; price: number; cost: number; wholesalePrice: number | null; specialPrice: number | null; stockQty: number; category: string };
-type GrnLine = { sku: string; name: string; qty: number; costPrice: number };
-type Change  = { id: string; type: string; payload: any; status: string; createdAt: string; appliedAt: string | null; failReason: string | null };
+type Product  = { id: string; sku: string; name: string; price: number; cost: number; wholesalePrice: number | null; specialPrice: number | null; stockQty: number; category: string };
+type GrnLine  = { sku: string; name: string; qty: number; costPrice: number };
+type Change   = { id: string; type: string; payload: any; status: string; createdAt: string; appliedAt: string | null; failReason: string | null };
+type Supplier = { code: string; name: string };
+type Grn      = { no: string; ddate: string; scode: string; sname: string; gtotal: number; posted: number; paid: number };
 
 const ADJUST_REASONS = [
   "Count Correction",
@@ -76,6 +78,62 @@ function ProductSearch({ onSelect, placeholder = "Search product name or SKU…"
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Shared supplier search component ───────────────────────────
+function SupplierSearch({ onSelect, placeholder = "Search supplier name or code…" }: {
+  onSelect: (s: Supplier) => void;
+  placeholder?: string;
+}) {
+  const [q, setQ]             = useState("");
+  const [results, setResults] = useState<Supplier[]>([]);
+  const [open, setOpen]       = useState(false);
+  const token                 = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") ?? "" : "";
+  const timer                 = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function search(val: string) {
+    setQ(val);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      const r = await fetch(`${apiBase}/sync/mirror/suppliers?search=${encodeURIComponent(val)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(r => r.json()).catch(() => []);
+      setResults(Array.isArray(r) ? r : []);
+      setOpen(true);
+    }, 250);
+  }
+
+  function pick(s: Supplier) {
+    setQ(s.name);
+    setOpen(false);
+    onSelect(s);
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <input className="input-field" value={q} onChange={e => search(e.target.value)}
+        onFocus={() => { if (!q) search(""); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder} autoComplete="off" />
+      {open && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid var(--border)", borderRadius: 10, zIndex: 50, maxHeight: 260, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}>
+          {results.length > 0 ? results.map(s => (
+            <div key={s.code} onMouseDown={() => pick(s)}
+              style={{ padding: "0.6rem 0.75rem", cursor: "pointer", borderBottom: "1px solid #f3f4f6" }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#f9fafb")}
+              onMouseLeave={e => (e.currentTarget.style.background = "")}>
+              <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{s.name}</div>
+              <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>{s.code}</div>
+            </div>
+          )) : (
+            <div style={{ padding: "0.6rem 0.75rem", fontSize: "0.82rem", color: "var(--muted)" }}>
+              No suppliers found — supplier list syncs from the shop PC every few hours.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -178,10 +236,11 @@ function AdjustTab({ token }: { token: string }) {
 
 // ── Tab 2: Goods Received (GRN) ───────────────────────────────
 function GrnTab({ token }: { token: string }) {
-  const [supplier, setSupplier] = useState("");
-  const [lines, setLines]       = useState<GrnLine[]>([]);
-  const [busy, setBusy]         = useState(false);
-  const [msg, setMsg]           = useState<{ ok: boolean; text: string } | null>(null);
+  const [supplier, setSupplier]         = useState<Supplier | null>(null);
+  const [supplierText, setSupplierText] = useState(""); // fallback free-text if not in su yet
+  const [lines, setLines]               = useState<GrnLine[]>([]);
+  const [busy, setBusy]                 = useState(false);
+  const [msg, setMsg]                   = useState<{ ok: boolean; text: string } | null>(null);
 
   const total = lines.reduce((s, l) => s + l.qty * l.costPrice, 0);
 
@@ -201,8 +260,10 @@ function GrnTab({ token }: { token: string }) {
     setLines(prev => prev.filter((_, idx) => idx !== i));
   }
 
+  const supplierName = supplier?.name || supplierText.trim();
+
   async function submit() {
-    if (!supplier.trim() || lines.length === 0) return;
+    if (!supplierName || lines.length === 0) return;
     if (lines.some(l => l.qty <= 0 || l.costPrice <= 0)) {
       setMsg({ ok: false, text: "All lines must have qty > 0 and cost price > 0." });
       return;
@@ -214,12 +275,12 @@ function GrnTab({ token }: { token: string }) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           type: "goods_received",
-          payload: { supplierName: supplier.trim(), lines },
+          payload: { supplierName, supplierCode: supplier?.code, lines },
         }),
       });
       if (r.ok) {
         setMsg({ ok: true, text: `GRN queued (${lines.length} lines, ${fmt(total)}) — will post to MySQL on next refresh.` });
-        setSupplier(""); setLines([]);
+        setSupplier(null); setSupplierText(""); setLines([]);
       } else {
         setMsg({ ok: false, text: "Failed to queue GRN." });
       }
@@ -230,9 +291,20 @@ function GrnTab({ token }: { token: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       <div style={{ maxWidth: 400 }}>
-        <label className="input-label">Supplier Name</label>
-        <input className="input-field" value={supplier} onChange={e => setSupplier(e.target.value)}
-          placeholder="e.g. Unilever Kenya Ltd" />
+        <label className="input-label">Supplier</label>
+        <SupplierSearch onSelect={s => { setSupplier(s); setSupplierText(""); }} />
+        {!supplier && (
+          <div style={{ marginTop: "0.4rem" }}>
+            <input className="input-field" value={supplierText}
+              onChange={e => { setSupplierText(e.target.value); setSupplier(null); }}
+              placeholder="Not in supplier list? Type a name instead (won't link to accounts payable)" />
+          </div>
+        )}
+        {supplier && (
+          <div className="muted" style={{ fontSize: "0.78rem", marginTop: 4 }}>
+            Linked to supplier <strong>{supplier.code}</strong> — payments against this GRN can post to accounts payable.
+          </div>
+        )}
       </div>
 
       <div>
@@ -304,7 +376,7 @@ function GrnTab({ token }: { token: string }) {
       )}
 
       <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-        <button className="button" disabled={!supplier.trim() || lines.length === 0 || busy} onClick={submit}>
+        <button className="button" disabled={!supplierName || lines.length === 0 || busy} onClick={submit}>
           {busy ? "Queuing…" : `Post GRN (${fmt(total)})`}
         </button>
         {lines.length > 0 && (
@@ -326,9 +398,187 @@ function GrnTab({ token }: { token: string }) {
   );
 }
 
+// ── Tab 3: GRN Payments (cash / cheque / bank transfer instalments) ──
+const PAY_METHODS = ["CASH", "CHEQUE", "BANK"] as const;
+type PayMethod = typeof PAY_METHODS[number];
+
+function GrnPaymentsTab({ token }: { token: string }) {
+  const [search, setSearch]         = useState("");
+  const [grns, setGrns]             = useState<Grn[]>([]);
+  const [loading, setLoading]       = useState(false);
+  const [selected, setSelected]     = useState<Grn | null>(null);
+  const [method, setMethod]         = useState<PayMethod>("CASH");
+  const [amount, setAmount]         = useState("");
+  const [chequeNo, setChequeNo]     = useState("");
+  const [payDate, setPayDate]       = useState(() => new Date().toISOString().slice(0, 10));
+  const [remarks, setRemarks]       = useState("");
+  const [busy, setBusy]             = useState(false);
+  const [msg, setMsg]               = useState<{ ok: boolean; text: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function runSearch(val: string) {
+    setSearch(val);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      setLoading(true);
+      const r = await fetch(`${apiBase}/sync/mirror/grns?search=${encodeURIComponent(val)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(r => r.json()).catch(() => ({ rows: [] }));
+      setGrns(Array.isArray(r.rows) ? r.rows : []);
+      setLoading(false);
+    }, 250);
+  }
+
+  useEffect(() => { runSearch(""); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const balance = selected ? selected.gtotal - selected.paid : 0;
+  const amountNum = Number(amount) || 0;
+
+  function pick(g: Grn) {
+    setSelected(g); setAmount(""); setChequeNo(""); setRemarks(""); setMsg(null);
+  }
+
+  async function submit() {
+    if (!selected || amountNum <= 0) return;
+    if (amountNum > balance) {
+      setMsg({ ok: false, text: `Amount exceeds outstanding balance of ${fmt(balance)}.` });
+      return;
+    }
+    if (method === "CHEQUE" && !chequeNo.trim()) {
+      setMsg({ ok: false, text: "Cheque number is required for cheque payments." });
+      return;
+    }
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch(`${apiBase}/sync/pending-changes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          type: "grn_payment",
+          payload: {
+            grnNo: selected.no, supplierCode: selected.scode,
+            method, amount: amountNum,
+            chequeNo: method === "CHEQUE" ? chequeNo.trim() : undefined,
+            paymentDate: payDate, remarks: remarks.trim(),
+          },
+        }),
+      });
+      if (r.ok) {
+        setMsg({ ok: true, text: "Payment queued. Note: posting to accounts payable is still being tested against a copy of the shop database — this will currently show as \"Failed\" in Recent Changes until that work lands, which is expected." });
+        setAmount(""); setChequeNo(""); setRemarks("");
+      } else {
+        setMsg({ ok: false, text: "Failed to queue payment." });
+      }
+    } catch { setMsg({ ok: false, text: "Network error." }); }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ padding: "0.65rem 0.75rem", borderRadius: 10, fontSize: "0.82rem",
+        background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}>
+        Payment posting into FumasV5's accounts payable ledger is still being tested against a
+        copy of the shop's database before it goes live — you can search invoices and queue
+        payments now, but they won't post to MySQL until that testing is complete.
+      </div>
+
+      <div style={{ maxWidth: 480 }}>
+        <label className="input-label">Search Invoice (GRN)</label>
+        <input className="input-field" value={search} onChange={e => runSearch(e.target.value)}
+          placeholder="Search by GRN number or supplier…" />
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="table-wrap" style={{ maxHeight: 260, overflowY: "auto" }}>
+          <table className="data-table">
+            <thead><tr><th>GRN</th><th>Supplier</th><th>Date</th><th>Total</th><th>Balance</th><th></th></tr></thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={6} className="muted">Loading…</td></tr>
+              ) : grns.length === 0 ? (
+                <tr><td colSpan={6} className="muted">No GRNs found.</td></tr>
+              ) : grns.map(g => (
+                <tr key={g.no} onClick={() => pick(g)}
+                  style={{ cursor: "pointer", background: selected?.no === g.no ? "#f0fdf4" : undefined }}>
+                  <td style={{ fontWeight: 700 }}>{g.no}</td>
+                  <td>{g.sname || g.scode}</td>
+                  <td className="muted">{g.ddate ? String(g.ddate).slice(0, 10) : "—"}</td>
+                  <td>{fmt(g.gtotal)}</td>
+                  <td style={{ fontWeight: 700, color: g.gtotal - g.paid > 0 ? "#dc2626" : "#16a34a" }}>
+                    {fmt(g.gtotal - g.paid)}
+                  </td>
+                  <td>{selected?.no === g.no ? "✓" : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {selected && (
+        <div className="card" style={{ padding: "1rem", maxWidth: 520, display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <div>
+            <div style={{ fontWeight: 700 }}>{selected.no} — {selected.sname || selected.scode}</div>
+            <div className="muted" style={{ fontSize: "0.82rem" }}>
+              Total {fmt(selected.gtotal)} · Paid {fmt(selected.paid)} · Balance <strong>{fmt(balance)}</strong>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div>
+              <label className="input-label">Method</label>
+              <select className="input-field" value={method} onChange={e => setMethod(e.target.value as PayMethod)}>
+                {PAY_METHODS.map(m => <option key={m} value={m}>{m === "BANK" ? "BANK TRANSFER" : m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="input-label">Amount</label>
+              <input className="input-field" type="number" min={0} step={0.01} value={amount}
+                onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+            </div>
+            {method === "CHEQUE" && (
+              <div>
+                <label className="input-label">Cheque No.</label>
+                <input className="input-field" value={chequeNo} onChange={e => setChequeNo(e.target.value)} />
+              </div>
+            )}
+            <div>
+              <label className="input-label">Date</label>
+              <input className="input-field" type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="input-label">Remarks (optional)</label>
+            <input className="input-field" value={remarks} onChange={e => setRemarks(e.target.value)} />
+          </div>
+
+          {amountNum > balance && amountNum > 0 && (
+            <div style={{ fontSize: "0.8rem", color: "#dc2626" }}>
+              Amount exceeds the outstanding balance of {fmt(balance)}.
+            </div>
+          )}
+
+          <button className="button" disabled={amountNum <= 0 || amountNum > balance || busy} onClick={submit}>
+            {busy ? "Queuing…" : `Record ${method === "BANK" ? "Bank Transfer" : method === "CHEQUE" ? "Cheque" : "Cash"} Payment`}
+          </button>
+        </div>
+      )}
+
+      {msg && (
+        <div style={{ padding: "0.65rem 0.75rem", borderRadius: 10, fontWeight: 600, maxWidth: 520,
+          background: msg.ok ? "#f0fdf4" : "#fef2f2",
+          border: `1px solid ${msg.ok ? "#86efac" : "#fca5a5"}`,
+          color: msg.ok ? "#166534" : "#991b1b" }}>
+          {msg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function StockPage() {
-  const [tab, setTab]       = useState<"adjust" | "grn">("adjust");
+  const [tab, setTab]       = useState<"adjust" | "grn" | "payments">("adjust");
   const [token, setToken]   = useState("");
   const [history, setHistory] = useState<Change[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -345,7 +595,8 @@ export default function StockPage() {
     const r = await fetch(`${apiBase}/sync/pending-changes/history`, {
       headers: { Authorization: `Bearer ${t}` },
     }).then(r => r.json()).catch(() => []);
-    setHistory(Array.isArray(r) ? r.filter((c: Change) => c.type === "stock_adjustment" || c.type === "goods_received") : []);
+    setHistory(Array.isArray(r) ? r.filter((c: Change) =>
+      c.type === "stock_adjustment" || c.type === "goods_received" || c.type === "grn_payment") : []);
     setLoadingHistory(false);
   }
 
@@ -357,25 +608,26 @@ export default function StockPage() {
         <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Stock Management</h2>
         <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.85rem" }}>
           Adjustments and GRNs queue here and are applied to MySQL within 30 seconds of the next dashboard refresh.
+          GRN payments can be recorded but won't post to MySQL until accounts-payable testing is complete.
         </p>
       </div>
 
       {/* Tab selector */}
       <div style={{ display: "flex", gap: "0.5rem", borderBottom: "1px solid var(--border)", paddingBottom: "0.5rem" }}>
-        {(["adjust", "grn"] as const).map(t => (
+        {(["adjust", "grn", "payments"] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             style={{ border: "none", cursor: "pointer", fontFamily: "inherit",
               padding: "0.4rem 0.9rem", borderRadius: 8, fontWeight: tab === t ? 700 : 400,
               color: tab === t ? "var(--teal)" : "var(--muted)",
               background: tab === t ? "#f0fdf4" : "none" } as any}>
-            {t === "adjust" ? "Adjust Stock" : "Receive Goods (GRN)"}
+            {t === "adjust" ? "Adjust Stock" : t === "grn" ? "Receive Goods (GRN)" : "GRN Payments"}
           </button>
         ))}
       </div>
 
       {/* Active tab */}
       <div className="card">
-        {tab === "adjust" ? <AdjustTab token={token} /> : <GrnTab token={token} />}
+        {tab === "adjust" ? <AdjustTab token={token} /> : tab === "grn" ? <GrnTab token={token} /> : <GrnPaymentsTab token={token} />}
       </div>
 
       {/* Recent changes */}
@@ -403,8 +655,8 @@ export default function StockPage() {
                     <tr key={c.id}>
                       <td>
                         <span style={{ fontWeight: 700, fontSize: "0.8rem",
-                          color: c.type === "goods_received" ? "#0f5ba7" : "#7c3aed" }}>
-                          {c.type === "goods_received" ? "GRN" : "Adjustment"}
+                          color: c.type === "goods_received" ? "#0f5ba7" : c.type === "grn_payment" ? "#b45309" : "#7c3aed" }}>
+                          {c.type === "goods_received" ? "GRN" : c.type === "grn_payment" ? "Payment" : "Adjustment"}
                         </span>
                       </td>
                       <td style={{ fontSize: "0.85rem" }}>
@@ -413,6 +665,13 @@ export default function StockPage() {
                             <strong>{c.payload.name || c.payload.sku}</strong>
                             {" "}{Number(c.payload.delta) > 0 ? "+" : ""}{c.payload.delta} units
                             {c.payload.reason ? <span className="muted"> · {c.payload.reason}</span> : null}
+                          </>
+                        ) : c.type === "grn_payment" ? (
+                          <>
+                            <strong>{c.payload.grnNo}</strong>
+                            {" · "}{c.payload.method}
+                            {c.payload.chequeNo ? ` #${c.payload.chequeNo}` : ""}
+                            {" · "}{fmt(Number(c.payload.amount ?? 0))}
                           </>
                         ) : (
                           <>

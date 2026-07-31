@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260523-29";
+const AGENT_VERSION   = "20260731-30";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -492,6 +492,18 @@ async function syncProducts(products) {
   log(`Products synced: ${synced} of ${products.length}`);
 }
 
+// ── Supplier master sync ───────────────────────────────────────
+// Runs on the same throttle as the product catalogue (su is a small,
+// rarely-changing master table — one cheap query, no join, no scan).
+async function syncSuppliers(conn) {
+  const rows = await query(conn, "SELECT code, names, active FROM su WHERE active = 1");
+  if (!rows.length) return;
+  const r = await apiPost("/sync/mirror/reference",
+    { table: "su", rows: rows.map(cleanRow) }, SECRET);
+  if (r.status === 200) log(`Suppliers synced: ${rows.length}`);
+  else log(`Supplier sync failed [${r.status}]: ${r.body.slice(0, 120)}`);
+}
+
 // ── Remote receipt printing ───────────────────────────────────
 // Triggered by a print_receipt pending change from the dashboard POS.
 // Formats the receipt as plain text and sends it to the Windows default
@@ -936,8 +948,19 @@ async function applyPendingChanges(conn, token) {
         }
 
       } else if (change.type === "goods_received") {
-        // Goods received note — writes grn header, grn_d lines, and stran entries
-        const { supplierName, lines } = change.payload;
+        // Goods received note — writes grn header, grn_d lines, and stran entries.
+        // supplierCode is optional for backward compatibility with older
+        // dashboard builds that only sent free-text supplierName; when present
+        // it links the GRN to a real su row so AP payments can reference it.
+        const { supplierName, supplierCode, lines } = change.payload;
+
+        let scode = "WEB";
+        let sname = supplierName || "Web Entry";
+        if (supplierCode) {
+          const [su] = await query(conn,
+            "SELECT code, names FROM su WHERE code = ? AND active = 1", [supplierCode]);
+          if (su) { scode = su.code; sname = su.names || sname; }
+        }
 
         // Generate a unique WEB-prefixed GRN number (separate from POS GRN sequence)
         const [maxGrn] = await query(conn,
@@ -949,8 +972,8 @@ async function applyPendingChanges(conn, token) {
         // GRN header
         await query(conn,
           `INSERT INTO grn (no, scode, sname, ddate, posted, screate, dcreate, gtotal, exclvat)
-           VALUES (?, 'WEB', ?, ?, 1, 'WEB', NOW(), ?, ?)`,
-          [grnNo, supplierName || "Web Entry", today, Math.round(total), Math.round(total)]);
+           VALUES (?, ?, ?, ?, 1, 'WEB', NOW(), ?, ?)`,
+          [grnNo, scode, sname, today, Math.round(total), Math.round(total)]);
 
         for (const line of lines) {
           const lineTotal = Number(line.qty) * Number(line.costPrice);
@@ -967,6 +990,21 @@ async function applyPendingChanges(conn, token) {
              Number(line.costPrice), Math.round(lineTotal)]);
         }
         log(`  GRN ${grnNo}: ${lines.length} line(s), KES ${Math.round(total).toLocaleString("en-KE")}`);
+
+        // Push the new GRN straight into the mirror so it shows up in the
+        // dashboard's GRN picker immediately, without waiting for the next
+        // scheduled/on-demand mirror batch.
+        await apiPost("/sync/mirror/rows", {
+          table: "grn", date: today,
+          rows: [{ no: grnNo, ddate: today, scode, sname, posted: 1, gtotal: Math.round(total) }],
+        }, SECRET).catch(e => log("  mirror push (grn) skipped: " + e.message));
+
+      } else {
+        // Unrecognized change type — fail loudly rather than silently marking
+        // it "applied" while doing nothing (that used to happen here, since
+        // the mark-change-applied call below ran unconditionally regardless
+        // of whether any branch above matched).
+        throw new Error(`Unknown change type: ${change.type}`);
       }
 
       await apiPost("/sync/mark-change-applied", { id: change.id }, SECRET);
@@ -1055,10 +1093,78 @@ function openConn() {
   });
 }
 
+// ── One-time test database setup ──────────────────────────────
+// Creates a lightweight mwalimuinvest_test database for safely testing the
+// upcoming GRN-payment posting logic (journal_transactions/creditors_transactions)
+// without touching real accounting data. Gated by a checkpoint flag so this
+// runs exactly once, ever, then becomes a no-op. Only copies small reference
+// tables (never pos_header/pos_details/stran) to keep the one-time cost cheap.
+async function setupTestDatabase() {
+  const cp = loadCheckpoint();
+  if (cp.testDbReady) return;
+
+  log("=== One-time test database setup starting ===");
+  const conn = await openConn().catch(e => { log("Test DB setup: MySQL connect failed: " + e.message); return null; });
+  if (!conn) return;
+
+  try {
+    await query(conn, "CREATE DATABASE IF NOT EXISTS mwalimuinvest_test");
+
+    // Small reference/master tables, copied in full — needed for the posting
+    // logic to resolve real GL accounts, currency, periods, and auto-numbers.
+    const REFERENCE_TABLES = ["su", "accounts", "currency", "currency_periods", "periods", "nauto"];
+    for (const t of REFERENCE_TABLES) {
+      try {
+        const exists = await query(conn, "SHOW TABLES LIKE ?", [t]);
+        if (!exists.length) { log(`  skip ${t}: not found`); continue; }
+        await query(conn, `CREATE TABLE IF NOT EXISTS mwalimuinvest_test.${t} LIKE mwalimuinvest.${t}`);
+        const [{ cnt }] = await query(conn, `SELECT COUNT(*) AS cnt FROM mwalimuinvest_test.${t}`);
+        if (Number(cnt) === 0) {
+          await query(conn, `INSERT INTO mwalimuinvest_test.${t} SELECT * FROM mwalimuinvest.${t}`);
+        }
+        log(`  ${t}: copied`);
+      } catch (e) { log(`  ${t} copy failed (non-fatal): ${e.message}`); }
+    }
+
+    // Posting-target tables — schema only, left empty so test postings start
+    // from a clean slate. No real transaction history needed for this.
+    const EMPTY_TABLES = ["grn", "grn_d", "ap_prepayment", "creditors_transactions", "journal_transactions"];
+    for (const t of EMPTY_TABLES) {
+      try {
+        const exists = await query(conn, "SHOW TABLES LIKE ?", [t]);
+        if (!exists.length) { log(`  skip ${t}: not found`); continue; }
+        await query(conn, `CREATE TABLE IF NOT EXISTS mwalimuinvest_test.${t} LIKE mwalimuinvest.${t}`);
+        log(`  ${t}: schema ready (empty)`);
+      } catch (e) { log(`  ${t} schema copy failed (non-fatal): ${e.message}`); }
+    }
+
+    // One synthetic supplier + one synthetic GRN (KES 2,000,000) — enough to
+    // test the 10-instalment cheque scenario without touching real data.
+    const today = kenyanDate();
+    await query(conn,
+      `INSERT IGNORE INTO mwalimuinvest_test.su (code, names, active) VALUES ('TESTSUP01','Test Supplier (Instalment Demo)',1)`);
+    await query(conn,
+      `INSERT IGNORE INTO mwalimuinvest_test.grn (no, scode, sname, ddate, posted, screate, dcreate, gtotal, exclvat)
+       VALUES ('TEST000001','TESTSUP01','Test Supplier (Instalment Demo)',?,1,'WEB',NOW(),2000000,2000000)`,
+      [today]);
+    await query(conn,
+      `INSERT IGNORE INTO mwalimuinvest_test.grn_d (no, code, descr, qty, uprice, total)
+       VALUES ('TEST000001','TESTSKU','Test Line Item — Instalment Demo',1,2000000,2000000)`);
+
+    log("=== Test database ready: mwalimuinvest_test (test GRN TEST000001, KES 2,000,000) ===");
+    saveCheckpoint({ ...cp, testDbReady: true });
+  } catch (e) {
+    log("Test DB setup failed: " + e.message);
+  } finally {
+    conn.end();
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────
 async function run() {
   await checkForUpdate();
   await checkFumasUpdate(); // once-daily FumasV5 version check
+  await setupTestDatabase().catch(e => log("Test DB setup error: " + e.message));
 
   // Check if a refresh was requested from the dashboard.
   // Use POST — on some networks GET requests time out but POST works reliably.
@@ -1094,6 +1200,7 @@ async function run() {
     if (conn1) {
       const result = await buildProducts(conn1, cp).catch(e => { log("Products build error: " + e.message); return null; });
       if (result) { productsData = result.products; costMap = result.costMap; stockMap = result.stockMap; }
+      await syncSuppliers(conn1).catch(e => log("Supplier sync error: " + e.message));
       conn1.end();
     }
   }
