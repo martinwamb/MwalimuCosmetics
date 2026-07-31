@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260731-30";
+const AGENT_VERSION   = "20260731-31";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -999,6 +999,12 @@ async function applyPendingChanges(conn, token) {
           rows: [{ no: grnNo, ddate: today, scode, sname, posted: 1, gtotal: Math.round(total) }],
         }, SECRET).catch(e => log("  mirror push (grn) skipped: " + e.message));
 
+      } else if (change.type === "grn_payment") {
+        // Instalment cheque/cash/bank-transfer payment against a GRN — posts
+        // into FumasV5's real AP ledger. Still targets mwalimuinvest_test
+        // (see GRN_PAYMENT_DB) until verified end-to-end.
+        await postGrnPayment(change.payload);
+
       } else {
         // Unrecognized change type — fail loudly rather than silently marking
         // it "applied" while doing nothing (that used to happen here, since
@@ -1160,11 +1166,223 @@ async function setupTestDatabase() {
   }
 }
 
+// ── GRN instalment payments → FumasV5's real AP ledger ────────
+// Replicates FPrepayment_creditors.cs's post_PAYMENT_roll() flow exactly
+// (Source Code/FumasV5/FPrepayment_creditors.cs:973-1023, plus
+// mglobal.do_gl_journal_roll/do_gl_Creditors_roll): two GL journal legs
+// (cash/bank credit + AP control-account debit), a creditor subledger
+// entry, the ap_prepayment voucher, and the creditor's running
+// accounts.prepaid balance — all in one DB transaction so a partial
+// failure can never leave the books unbalanced.
+//
+// TESTING GATE: still points at mwalimuinvest_test, not the real
+// mwalimuinvest database, until this has been verified end-to-end
+// (posted payments checked against FumasV5's own creditor statement and
+// trial balance reports run against the test copy). Flip
+// GRN_PAYMENT_DB to MYSQL.database only after that passes.
+const GRN_PAYMENT_DB = "mwalimuinvest_test";
+
+function openTestConn() {
+  return new Promise((res, rej) => {
+    const c = mysql.createConnection({ ...MYSQL, database: GRN_PAYMENT_DB });
+    c.connect(e => e ? rej(e) : res(c));
+  });
+}
+
+function beginTx(conn)    { return new Promise((res, rej) => conn.beginTransaction(e => e ? rej(e) : res())); }
+function commitTx(conn)   { return new Promise((res, rej) => conn.commit(e => e ? rej(e) : res())); }
+function rollbackTx(conn) { return new Promise(res => conn.rollback(() => res())); }
+
+async function getNautoSetting(conn, col) {
+  const [row] = await query(conn, `SELECT ${col} AS v FROM nauto`);
+  return row?.v ?? "";
+}
+
+async function getActivePeriod(conn) {
+  const [row] = await query(conn,
+    `SELECT period FROM currency_periods WHERE active = 'YES' ORDER BY period DESC LIMIT 1`).catch(() => []);
+  return row?.period ?? "";
+}
+
+async function isPeriodLocked(conn, dateStr) {
+  const [row] = await query(conn,
+    `SELECT locked FROM periods WHERE yr = YEAR(?) AND period = MONTH(?)`, [dateStr, dateStr]).catch(() => null);
+  return !!row && String(row.locked).toUpperCase() !== "NO";
+}
+
+// Mirrors mglobal.get_control_ac: supplier's own glcategory mapping, then
+// the currency's default creditors account, then the global default.
+async function getControlAc(conn, ccode) {
+  try {
+    const [row] = await query(conn,
+      `SELECT b.accountcode AS ac FROM su a, glcategory b
+       WHERE a.glcategory = b.code AND a.code = ? AND b.code <> ''`, [ccode]);
+    if (row?.ac) return row.ac;
+  } catch {}
+  try {
+    const currency = await getNautoSetting(conn, "currency_s");
+    const [row] = await query(conn, `SELECT creditorsac AS ac FROM currency WHERE code = ?`, [currency]);
+    if (row?.ac) return row.ac;
+  } catch {}
+  const fallback = await getNautoSetting(conn, "creditorsacct");
+  return fallback || "SUSPENSE";
+}
+
+// Mirrors mglobal.get_auto_new("PREP-PAY", "Yes")
+async function getNextPrepayNo(conn) {
+  await query(conn, "UPDATE nauto SET prepaid = prepaid + 1");
+  const [row] = await query(conn, "SELECT CONCAT(pprepaid, prepaid) AS pno FROM nauto");
+  return row.pno;
+}
+
+async function postGrnPayment(payload) {
+  const { grnNo, supplierCode, method, amount: rawAmount, chequeNo, paymentDate, remarks } = payload;
+  const amount = Number(rawAmount);
+
+  if (!supplierCode) throw new Error("Payment requires a linked supplier — this GRN doesn't reference a real supplier code.");
+  if (!(amount > 0)) throw new Error("Payment amount must be greater than 0.");
+  if (!grnNo || !paymentDate) throw new Error("grnNo and paymentDate are required.");
+
+  const conn = await openTestConn();
+  try {
+    const [grn] = await query(conn, "SELECT no, gtotal FROM grn WHERE no = ?", [grnNo]);
+    if (!grn) throw new Error(`GRN ${grnNo} not found in ${GRN_PAYMENT_DB}.`);
+
+    const [supplier] = await query(conn, "SELECT code, names FROM su WHERE code = ? AND active = 1", [supplierCode]);
+    if (!supplier) throw new Error(`Supplier ${supplierCode} not found or inactive in ${GRN_PAYMENT_DB}.`);
+
+    // Additive safety FumasV5 itself doesn't have (FOutgoing_cheques.cs has
+    // no amount-vs-balance check either): don't let instalments overpay the
+    // invoice. Matched via the "GRN <no>" tag written into ap_prepayment.remarks.
+    const [{ paidSoFar }] = await query(conn,
+      `SELECT COALESCE(SUM(amount), 0) AS paidSoFar FROM ap_prepayment WHERE ccode = ? AND remarks LIKE ? AND posted = 1`,
+      [supplierCode, `GRN ${grnNo}%`]);
+    if (Number(paidSoFar) + amount > Number(grn.gtotal) + 0.5) {
+      throw new Error(`Payment would exceed GRN ${grnNo}'s balance (already paid ${paidSoFar} of ${grn.gtotal}).`);
+    }
+
+    if (await isPeriodLocked(conn, paymentDate)) {
+      throw new Error(`Accounting period for ${paymentDate} is locked.`);
+    }
+
+    const rtype       = method === "CASH" ? "C" : method === "BANK" ? "S" : "Q";
+    const cashAccount = await getNautoSetting(conn, "cashaccount");
+    const currency    = await getNautoSetting(conn, "currency_s");
+    const cperiod     = await getActivePeriod(conn);
+    const controlAc   = await getControlAc(conn, supplierCode);
+    const chequeReal  = chequeNo || "";
+
+    const [accRow] = await query(conn, "SELECT prepaid FROM accounts WHERE code = ?", [supplierCode]).catch(() => []);
+    const balbf = accRow?.prepaid ?? 0;
+    const remarksFull = `GRN ${grnNo}${remarks ? " — " + remarks : ""} Payment`;
+
+    await beginTx(conn);
+    try {
+      const pno = await getNextPrepayNo(conn);
+
+      // 1) GL journal — cash/bank leg (credit: money going out of the till/bank)
+      await query(conn,
+        `INSERT INTO journal_transactions
+           (code,remarks,amount,jtdate,trancode,trantype,staff,staffdate,transign,rec,r_amt,source,cheque_no,cost_center,dcurrency_s,cperiod,rate)
+         VALUES (?,?,?,?,?,?,?,NOW(),'-','n',0,?,?,'',?,?,1)`,
+        [cashAccount, remarksFull, amount, paymentDate, pno, "AP-PAYMENT", "WEB", rtype, chequeReal, currency, cperiod]);
+
+      // 2) GL journal — AP control-account leg (debit)
+      await query(conn,
+        `INSERT INTO journal_transactions
+           (code,remarks,amount,jtdate,trancode,trantype,staff,staffdate,transign,rec,r_amt,source,cheque_no,cost_center,dcurrency_s,cperiod,rate)
+         VALUES (?,?,?,?,?,?,?,NOW(),'+','n',0,?,?,'',?,?,1)`,
+        [controlAc, remarksFull, amount, paymentDate, pno, "AP-PAYMENT", "WEB", rtype, chequeReal, currency, cperiod]);
+
+      // 3) Creditor subledger (cheque_no stored as literal '0' here, matching
+      // FumasV5's own behavior — the real cheque number lives on the journal
+      // legs and the ap_prepayment header, not on this row)
+      await query(conn,
+        `INSERT INTO creditors_transactions
+           (code,remarks,amount,jtdate,trancode,trantype,staff,staffdate,transign,rec,r_amt,source,cheque_no,dcurrency_s,cperiod,rate)
+         VALUES (?,?,?,?,?,?,?,NOW(),'+','n',0,?,'0',?,?,1)`,
+        [supplierCode, remarksFull, amount, paymentDate, pno, "AP-PAYMENT", "WEB", rtype, currency, cperiod]);
+
+      // 4) Payment voucher header — posted immediately (FumasV5 itself always
+      // posts on save in practice; see `evpost` in FPrepayment_creditors.cs)
+      await query(conn, "DELETE FROM ap_prepayment WHERE pno = ?", [pno]);
+      await query(conn,
+        `INSERT INTO ap_prepayment
+           (pno,pdate,ccode,cname,amount,account,cheque_no,remarks,balbf,prepaid,staff,staffdate,rtype,dcurrency_s,cperiod,rate,csale,posted)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?,?,1,1,1)`,
+        [pno, paymentDate, supplierCode, supplier.names, amount, cashAccount, chequeReal, remarksFull, balbf, balbf, "WEB", rtype, currency, cperiod]);
+
+      // 5) Creditor's running balance — ensure the accounts row exists first
+      // (defensive: a newly-linked supplier may not have one yet), then update.
+      await query(conn,
+        "INSERT IGNORE INTO accounts (code, description, nb, prepaid, active) VALUES (?, ?, 'Creditors', 0, 1)",
+        [supplierCode, supplier.names]);
+      await query(conn, "UPDATE accounts SET prepaid = prepaid + ? WHERE code = ?", [amount, supplierCode]);
+
+      await commitTx(conn);
+      log(`  GRN payment posted [${GRN_PAYMENT_DB}]: ${pno} — ${method} KES ${amount.toLocaleString("en-KE")} against ${grnNo}`);
+      return pno;
+    } catch (e) {
+      await rollbackTx(conn);
+      throw e;
+    }
+  } finally {
+    conn.end();
+  }
+}
+
+// ── One-time self-test of postGrnPayment ───────────────────────
+// Exercises the posting logic against the TEST000001 / TESTSUP01 fixtures
+// created by setupTestDatabase(), including the overpayment guard, and
+// logs a clear pass/fail summary — verification ahead of ever pointing
+// GRN_PAYMENT_DB at production. Gated to run exactly once.
+async function runPaymentSelfTest() {
+  const cp = loadCheckpoint();
+  if (cp.grnPaymentSelfTestDone) return;
+  if (!cp.testDbReady) return; // wait until the test DB actually exists
+
+  log("=== GRN payment self-test starting (against " + GRN_PAYMENT_DB + ") ===");
+  const results = [];
+
+  for (let i = 1; i <= 3; i++) {
+    try {
+      const pno = await postGrnPayment({
+        grnNo: "TEST000001", supplierCode: "TESTSUP01",
+        method: i === 2 ? "CHEQUE" : "CASH", amount: 200000,
+        chequeNo: i === 2 ? "TESTCHQ001" : undefined,
+        paymentDate: kenyanDate(), remarks: `Self-test instalment ${i}/10`,
+      });
+      results.push(`  [PASS] instalment ${i}: posted as ${pno}`);
+    } catch (e) {
+      results.push(`  [FAIL] instalment ${i}: ${e.message}`);
+    }
+  }
+
+  // This one should be rejected: 3 x 200,000 already posted (600,000), the
+  // GRN is only 2,000,000, so requesting the full remaining 2,000,000 again
+  // must fail the overpayment guard rather than silently posting.
+  try {
+    await postGrnPayment({
+      grnNo: "TEST000001", supplierCode: "TESTSUP01", method: "BANK",
+      amount: 2000000, paymentDate: kenyanDate(), remarks: "Self-test overpayment (should be rejected)",
+    });
+    results.push("  [FAIL] overpayment guard: payment was accepted but should have been rejected");
+  } catch (e) {
+    results.push(`  [PASS] overpayment guard correctly rejected: ${e.message}`);
+  }
+
+  log("=== GRN payment self-test results ===");
+  for (const r of results) log(r);
+  log("=== Self-test complete — check accounts.prepaid, ap_prepayment, creditors_transactions, journal_transactions in " + GRN_PAYMENT_DB + " ===");
+  saveCheckpoint({ ...cp, grnPaymentSelfTestDone: true });
+}
+
 // ── Main ─────────────────────────────────────────────────────
 async function run() {
   await checkForUpdate();
   await checkFumasUpdate(); // once-daily FumasV5 version check
   await setupTestDatabase().catch(e => log("Test DB setup error: " + e.message));
+  await runPaymentSelfTest().catch(e => log("Payment self-test error: " + e.message));
 
   // Check if a refresh was requested from the dashboard.
   // Use POST — on some networks GET requests time out but POST works reliably.

@@ -337,7 +337,7 @@ router.post("/bridge-log", (req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260731-30";
+const AGENT_VERSION = "20260731-31";
 
 router.get("/agent-version",  (_req, res) => res.json({ version: AGENT_VERSION }));
 router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }));

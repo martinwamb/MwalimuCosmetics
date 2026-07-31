@@ -464,7 +464,7 @@ function GrnPaymentsTab({ token }: { token: string }) {
         }),
       });
       if (r.ok) {
-        setMsg({ ok: true, text: "Payment queued. Note: posting to accounts payable is still being tested against a copy of the shop database — this will currently show as \"Failed\" in Recent Changes until that work lands, which is expected." });
+        setMsg({ ok: true, text: "Payment queued. Note: posting still targets a test copy of the shop database while this is being verified — this will currently show as \"Failed: GRN not found in mwalimuinvest_test\" in Recent Changes for real invoices, which is expected until verification is complete." });
         setAmount(""); setChequeNo(""); setRemarks("");
       } else {
         setMsg({ ok: false, text: "Failed to queue payment." });
@@ -477,9 +477,10 @@ function GrnPaymentsTab({ token }: { token: string }) {
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       <div style={{ padding: "0.65rem 0.75rem", borderRadius: 10, fontSize: "0.82rem",
         background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}>
-        Payment posting into FumasV5's accounts payable ledger is still being tested against a
-        copy of the shop's database before it goes live — you can search invoices and queue
-        payments now, but they won't post to MySQL until that testing is complete.
+        Payment posting into FumasV5's accounts payable ledger is implemented but still points at
+        a test copy of the shop's database for verification — you can search invoices and queue
+        payments now, but they won't post against real invoices until that verification is complete
+        and this is switched over to the live database.
       </div>
 
       <div style={{ maxWidth: 480 }}>
