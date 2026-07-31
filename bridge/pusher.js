@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260731-31";
+const AGENT_VERSION   = "20260731-32";
 const MYSQL = {
   host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
   database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
@@ -1338,7 +1338,7 @@ async function postGrnPayment(payload) {
 // GRN_PAYMENT_DB at production. Gated to run exactly once.
 async function runPaymentSelfTest() {
   const cp = loadCheckpoint();
-  if (cp.grnPaymentSelfTestDone) return;
+  if (cp.grnPaymentSelfTestV2Done) return;
   if (!cp.testDbReady) return; // wait until the test DB actually exists
 
   log("=== GRN payment self-test starting (against " + GRN_PAYMENT_DB + ") ===");
@@ -1371,10 +1371,37 @@ async function runPaymentSelfTest() {
     results.push(`  [PASS] overpayment guard correctly rejected: ${e.message}`);
   }
 
+  // Read back the actual posted rows rather than just trusting that no
+  // error was thrown — confirm each payment's two journal legs net to zero
+  // (debits = credits) and the creditor subledger / running balance agree.
+  try {
+    const vconn = await openTestConn();
+    try {
+      const jt = await query(vconn,
+        `SELECT trancode, SUM(CASE WHEN transign = '+' THEN amount ELSE -amount END) AS net
+         FROM journal_transactions WHERE trantype = 'AP-PAYMENT' GROUP BY trancode`);
+      for (const r of jt) results.push(`  journal_transactions ${r.trancode}: net ${r.net} (0 = balanced)`);
+
+      const [ct] = await query(vconn,
+        "SELECT COALESCE(SUM(amount), 0) AS total FROM creditors_transactions WHERE code = 'TESTSUP01'");
+      const [acc] = await query(vconn, "SELECT prepaid FROM accounts WHERE code = 'TESTSUP01'");
+      const match = Number(ct.total) === Number(acc?.prepaid ?? -1);
+      results.push(`  creditors_transactions total: ${ct.total}  vs  accounts.prepaid: ${acc?.prepaid} — ${match ? "MATCH" : "MISMATCH"}`);
+
+      const apRows = await query(vconn,
+        "SELECT pno, amount, rtype, posted FROM ap_prepayment WHERE ccode = 'TESTSUP01' ORDER BY pno");
+      results.push(`  ap_prepayment rows: ${apRows.map(r => `${r.pno}(${r.rtype},KES${r.amount},posted=${r.posted})`).join(", ")}`);
+    } finally {
+      vconn.end();
+    }
+  } catch (e) {
+    results.push(`  [WARN] verification read-back failed: ${e.message}`);
+  }
+
   log("=== GRN payment self-test results ===");
   for (const r of results) log(r);
-  log("=== Self-test complete — check accounts.prepaid, ap_prepayment, creditors_transactions, journal_transactions in " + GRN_PAYMENT_DB + " ===");
-  saveCheckpoint({ ...cp, grnPaymentSelfTestDone: true });
+  log("=== Self-test complete — review the balances above before ever pointing GRN_PAYMENT_DB at production ===");
+  saveCheckpoint({ ...cp, grnPaymentSelfTestV2Done: true });
 }
 
 // ── Main ─────────────────────────────────────────────────────
