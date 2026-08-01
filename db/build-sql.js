@@ -82,16 +82,38 @@ if (routines) {
 }
 
 // ── Engines ─────────────────────────────────────────────────────
-const engines = read("engines");
-if (engines) {
+// Read from the captured DDL rather than SHOW TABLE STATUS: every CREATE
+// TABLE already states its engine, so this needs no extra query and cannot
+// disagree with the schema we actually restore from.
+if (schema) {
+  const engineOf = ddl => ((ddl || "").match(/ENGINE=(\w+)/) || [])[1] || "unknown";
+  const counts = {};
+  for (const { ddl } of schema) {
+    const e = engineOf(ddl);
+    counts[e] = (counts[e] || 0) + 1;
+  }
+
+  // If any of these is not InnoDB then BEGIN/COMMIT is silently a no-op and
+  // no amount of application code can make a sale atomic.
   const LEDGER = ["pos_header", "pos_details", "pos_payment_details",
                   "journal_transactions", "creditors_transactions",
-                  "stran", "nauto", "ap_prepayment", "accounts"];
-  const bad = engines.filter(e => LEDGER.includes(e.name) &&
-                                  String(e.engine).toLowerCase() !== "innodb");
+                  "stran", "nauto", "ap_prepayment", "accounts", "sq"];
+  const bad = LEDGER
+    .map(t => ({ t, e: engineOf((schema.find(s => s.table === t) || {}).ddl) }))
+    .filter(x => x.e.toLowerCase() !== "innodb");
+
+  console.log(`engines      — ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")}`);
   console.log(bad.length
-    ? `engines      — WARNING: not InnoDB: ${bad.map(e => `${e.name}=${e.engine}`).join(", ")}`
-    : `engines      — all ledger tables InnoDB`);
-} else {
-  console.log("engines      — not captured; re-run the probe for this");
+    ? `             *** WARNING: not InnoDB: ${bad.map(x => `${x.t}=${x.e}`).join(", ")}`
+    : `             all ${LEDGER.length} ledger tables InnoDB — transactions roll back`);
+}
+
+// ── GL rounding residuals ───────────────────────────────────────
+const residuals = read("gl_residuals");
+if (residuals) {
+  console.log("residuals    — per transaction type, entries whose debits != credits:");
+  for (const r of residuals) {
+    const flag = Number(r.unbalanced) > 0 ? " <-- " : "     ";
+    console.log(`${flag}${String(r.trantype).padEnd(18)} ${r.unbalanced}/${r.trancodes} unbalanced, worst ${r.worst}, net drift ${r.cumulative_drift}`);
+  }
 }
