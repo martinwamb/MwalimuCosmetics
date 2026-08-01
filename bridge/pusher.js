@@ -898,6 +898,36 @@ async function applyPendingChanges(conn, token) {
           log("FumasV5 " + serverVer + " staged — will apply next time launch-pos.bat is run.");
         } catch (e) { log("FumasV5 update error: " + e.message); }
 
+      } else if (change.type === "schema_probe") {
+        // Phase 0 ground-truth capture for the replacement desktop system.
+        // Strictly read-only: it runs SHOW and SELECT statements only.
+        //
+        // Fetches the current probe and its credential helper, then runs it in
+        // a separate process so a fault in the probe cannot take down the sync
+        // loop. The probe ships its own results to the server and also leaves
+        // a local copy.
+        try {
+          log("Downloading schema probe…");
+          for (const name of ["db-config.js", "schema-probe.js"]) {
+            const dl = await apiRequest("POST", "/sync/agent/get-file", { filename: name }, null, null, 60000);
+            if (dl.status !== 200) { log(`${name} download failed: ${dl.status}`); throw new Error(name); }
+            fs.writeFileSync("C:\\MwalimuSync\\" + name, dl.body, "utf8");
+          }
+
+          log("Running schema probe (read-only)…");
+          const { execFile } = require("child_process");
+          await new Promise(resolve => {
+            execFile(process.execPath, ["C:\\MwalimuSync\\schema-probe.js"],
+              { cwd: "C:\\MwalimuSync", timeout: 600000, maxBuffer: 20 * 1024 * 1024 },
+              (err, stdout, stderr) => {
+                (stdout || "").split("\n").filter(Boolean).forEach(l => log("  probe| " + l.trim()));
+                if (err) log("Schema probe failed: " + err.message + " " + (stderr || "").slice(0, 500));
+                else     log("Schema probe finished.");
+                resolve();
+              });
+          });
+        } catch (e) { log("Schema probe error: " + e.message); }
+
       } else if (change.type === "print_receipt") {
         await printReceipt(change.payload);
 
