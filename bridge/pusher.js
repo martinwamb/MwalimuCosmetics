@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260801-34";
+const AGENT_VERSION   = "20260801-35";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -914,10 +914,14 @@ async function applyPendingChanges(conn, token) {
             fs.writeFileSync("C:\\MwalimuSync\\" + name, dl.body, "utf8");
           }
 
-          log("Running schema probe (read-only)…");
+          // payload.args lets a run be narrowed, e.g. { args: ["--only","engines"] },
+          // so a retry need not repeat the expensive full-schema capture.
+          const probeArgs = Array.isArray(change.payload && change.payload.args)
+            ? change.payload.args.map(String) : [];
+          log(`Running schema probe (read-only) ${probeArgs.join(" ")}…`);
           const { execFile } = require("child_process");
           await new Promise(resolve => {
-            execFile(process.execPath, ["C:\\MwalimuSync\\schema-probe.js"],
+            execFile(process.execPath, ["C:\\MwalimuSync\\schema-probe.js", ...probeArgs],
               { cwd: "C:\\MwalimuSync", timeout: 600000, maxBuffer: 20 * 1024 * 1024 },
               (err, stdout, stderr) => {
                 (stdout || "").split("\n").filter(Boolean).forEach(l => log("  probe| " + l.trim()));

@@ -26,6 +26,13 @@
  *
  * Usage (on the office PC, which can reach 10.10.10.4):
  *   node schema-probe.js
+ *   node schema-probe.js --only engines,orphans     capture just those
+ *   node schema-probe.js --residual-days 730        widen the GL scan
+ *
+ * The GL residual scan aggregates journal_transactions and is the one
+ * genuinely expensive query here, so it defaults to 60 days. That is plenty
+ * to establish whether residuals occur at all. Widen it after hours, not
+ * while the shop is trading on a server this small.
  */
 
 const mysql = require("mysql");
@@ -40,6 +47,20 @@ const SECRET   = process.env.MWALIMU_SYNC_SECRET || "mwalimu-sync-secret";
 const OUT_DIR  = path.join(__dirname, "schema-probe-output");
 // Fixed folder name so re-runs overwrite rather than scatter across dates.
 const SHIP_KEY = "_phase0";
+
+function argValue(flag, fallback) {
+  const i = process.argv.indexOf(flag);
+  return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+}
+
+// --only lets a failed or slow run be retried in pieces rather than whole.
+const ONLY = (() => {
+  const raw = argValue("--only", null);
+  return raw ? new Set(raw.split(",").map(s => s.trim()).filter(Boolean)) : null;
+})();
+const RESIDUAL_DAYS = Number(argValue("--residual-days", 60));
+
+const wanted = (section) => !ONLY || ONLY.has(section);
 
 function log(msg) { console.log(`[${new Date().toLocaleTimeString("en-KE")}] ${msg}`); }
 
@@ -73,6 +94,8 @@ function apiPost(pathname, body) {
 
 /** Persist locally, then ship. A failure to ship must not lose the capture. */
 async function emit(name, rows) {
+  if (!wanted(name)) { log(`  skipped ${name} (not in --only)`); return; }
+
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(path.join(OUT_DIR, `${name}.json`), JSON.stringify(rows, null, 2));
   log(`  saved ${name}.json (${rows.length} rows)`);
@@ -125,8 +148,8 @@ async function run() {
   }
 
   // ── Full schema ─────────────────────────────────────────────
-  const tables = status.map(r => r.Name);
-  log(`Capturing CREATE TABLE for ${tables.length} tables…`);
+  const tables = wanted("schema") ? status.map(r => r.Name) : [];
+  if (tables.length) log(`Capturing CREATE TABLE for ${tables.length} tables…`);
   const schema = [];
   for (const t of tables) {
     try {
@@ -139,12 +162,12 @@ async function run() {
   await emit("schema", schema);
 
   // ── Stored routines (the irreplaceable part) ────────────────
-  const routineList = await query(conn,
+  const routineList = wanted("routines") ? await query(conn,
     `SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS type
        FROM information_schema.ROUTINES
       WHERE ROUTINE_SCHEMA = DATABASE()
-      ORDER BY ROUTINE_TYPE, ROUTINE_NAME`);
-  log(`Capturing ${routineList.length} stored routines…`);
+      ORDER BY ROUTINE_TYPE, ROUTINE_NAME`) : [];
+  if (routineList.length) log(`Capturing ${routineList.length} stored routines…`);
 
   const routines = [];
   for (const { name, type } of routineList) {
@@ -165,14 +188,17 @@ async function run() {
                     "get_smallest_qty", "get_payref", "get_category", "get_average_cost"];
   const captured = new Set(routines.filter(r => r.ddl).map(r => r.name));
   const missing  = CRITICAL.filter(n => !captured.has(n));
-  if (missing.length) log(`  *** WARNING: expected routines not captured: ${missing.join(", ")}`);
-  else                log(`  all ${CRITICAL.length} critical routines captured`);
+  if (routineList.length) {
+    if (missing.length) log(`  *** WARNING: expected routines not captured: ${missing.join(", ")}`);
+    else                log(`  all ${CRITICAL.length} critical routines captured`);
+  }
 
   // ── Rounding residual probe ─────────────────────────────────
   // Per trancode the GL must net to zero. Anything else means the legacy app
   // is already leaving residuals, which we must consciously decide to either
   // replicate or correct — not discover months later in a trial balance.
-  log("Probing GL balance residuals (last 2 years)…");
+  if (wanted("gl_residuals")) {
+  log(`Probing GL balance residuals (last ${RESIDUAL_DAYS} days)…`);
   const residuals = await query(conn,
     `SELECT trantype,
             COUNT(*)                                            AS trancodes,
@@ -183,11 +209,11 @@ async function run() {
          SELECT trancode, trantype,
                 SUM(IF(transign = '+', amount, -amount)) AS net
            FROM journal_transactions
-          WHERE jtdate >= DATE_SUB(CURDATE(), INTERVAL 2 YEAR)
+          WHERE jtdate >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
           GROUP BY trancode, trantype
        ) t
       GROUP BY trantype
-      ORDER BY unbalanced DESC`);
+      ORDER BY unbalanced DESC`, [RESIDUAL_DAYS]);
   await emit("gl_residuals", residuals);
   residuals.forEach(r =>
     log(`  ${r.trantype}: ${r.unbalanced}/${r.trancodes} unbalanced, worst ${r.worst}, drift ${r.cumulative_drift}`));
@@ -201,12 +227,14 @@ async function run() {
       GROUP BY trancode, trantype
      HAVING ABS(net) > 0.005
       ORDER BY jtdate DESC
-      LIMIT 25`);
+      LIMIT 25`, [RESIDUAL_DAYS]);
   await emit("gl_residual_samples", samples);
+  }
 
   // ── Orphan detector ─────────────────────────────────────────
   // Legacy writes pos_* outside its transaction, so pre-existing damage is
   // likely. Sizing it now stops it being blamed on the new app later.
+  if (wanted("orphans")) {
   log("Counting pre-existing orphan rows…");
   const orphans = [];
   const checks = [
@@ -235,6 +263,7 @@ async function run() {
     }
   }
   await emit("orphans", orphans);
+  }
 
   conn.end();
   log(`=== Probe complete — output in ${OUT_DIR} ===`);
