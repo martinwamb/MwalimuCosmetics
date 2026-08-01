@@ -33,11 +33,10 @@ const https = require("https");
 const fs    = require("fs");
 const path  = require("path");
 
-const MYSQL = {
-  host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
-  database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 15000,
-};
-const SECRET   = "mwalimu-sync-secret";
+const { getMysqlConfig, describeConfigSource, toDriverOptions } = require("./db-config");
+
+const MYSQL_CONFIG = getMysqlConfig({ connectTimeout: 15000 });
+const SECRET   = process.env.MWALIMU_SYNC_SECRET || "mwalimu-sync-secret";
 const OUT_DIR  = path.join(__dirname, "schema-probe-output");
 // Fixed folder name so re-runs overwrite rather than scatter across dates.
 const SHIP_KEY = "_phase0";
@@ -89,8 +88,9 @@ async function emit(name, rows) {
 
 async function run() {
   log("=== Phase 0 schema probe starting (read-only) ===");
+  log(describeConfigSource(MYSQL_CONFIG));
 
-  const conn = mysql.createConnection(MYSQL);
+  const conn = mysql.createConnection(toDriverOptions(MYSQL_CONFIG));
   await new Promise((res, rej) => conn.connect(e => e ? rej(e) : res()));
   log("Connected to MySQL.");
 

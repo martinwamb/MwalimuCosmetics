@@ -18,11 +18,25 @@
 const mysql = require("mysql");
 const https = require("https");
 
-const MYSQL = {
-  host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
-  database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
-};
-const SECRET = "mwalimu-sync-secret";
+// Guarded for the same reason as pusher.js: this file is deployed standalone,
+// so it must still run on a PC where db-config.js has not landed yet.
+let MYSQL_CONFIG, describeConfigSource, toDriverOptions;
+try {
+  const cfg = require("./db-config");
+  describeConfigSource = cfg.describeConfigSource;
+  toDriverOptions      = cfg.toDriverOptions;
+  MYSQL_CONFIG         = cfg.getMysqlConfig();
+} catch {
+  MYSQL_CONFIG = {
+    host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
+    database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
+    usingLegacyFallback: true,
+  };
+  describeConfigSource = () => "MySQL credentials: inline fallback (db-config.js not deployed on this PC)";
+  toDriverOptions = ({ usingLegacyFallback, source, ...rest }) => rest;
+}
+
+const SECRET = process.env.MWALIMU_SYNC_SECRET || "mwalimu-sync-secret";
 
 function kenyanDate() {
   return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -87,7 +101,8 @@ async function run() {
   const today = kenyanDate();
   log(`=== Daily backup starting for ${today} ===`);
 
-  const conn = mysql.createConnection(MYSQL);
+  log(describeConfigSource(MYSQL_CONFIG));
+  const conn = mysql.createConnection(toDriverOptions(MYSQL_CONFIG));
   await new Promise((res, rej) => conn.connect(e => e ? rej(e) : res()));
   log("Connected to MySQL.");
 

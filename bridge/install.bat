@@ -57,8 +57,11 @@ echo.
 echo Copying files to %INSTALL_DIR%...
 copy /y "%~dp0pusher.js"       "%INSTALL_DIR%\pusher.js"       >nul
 copy /y "%~dp0loop.ps1"        "%INSTALL_DIR%\loop.ps1"        >nul
+copy /y "%~dp0db-config.js"    "%INSTALL_DIR%\db-config.js"    >nul 2>nul
 copy /y "%~dp0daily-backup.js" "%INSTALL_DIR%\daily-backup.js" >nul 2>nul
 copy /y "%~dp0daily-mirror.js" "%INSTALL_DIR%\daily-mirror.js" >nul 2>nul
+copy /y "%~dp0schema-probe.js" "%INSTALL_DIR%\schema-probe.js" >nul 2>nul
+copy /y "%~dp0provision-db-user.js" "%INSTALL_DIR%\provision-db-user.js" >nul 2>nul
 copy /y "%~dp0package.json" "%INSTALL_DIR%\package.json" >nul 2>nul
 xcopy /e /q /y "%~dp0node_modules" "%INSTALL_DIR%\node_modules\" >nul 2>nul
 echo [OK] Files copied.

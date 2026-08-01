@@ -21,11 +21,24 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260731-33";
-const MYSQL = {
-  host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
-  database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
-};
+const AGENT_VERSION   = "20260801-34";
+
+// Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
+// so they are not carried in source. The require is guarded because this file
+// self-updates on its own: a new pusher.js can land on a PC before
+// db-config.js has been deployed there, and the agent must keep running
+// rather than die with MODULE_NOT_FOUND. The fallback is the behaviour this
+// script had previously, so an un-provisioned PC is no worse off than before.
+let MYSQL;
+try {
+  const { getMysqlConfig, toDriverOptions } = require("./db-config");
+  MYSQL = toDriverOptions(getMysqlConfig());
+} catch {
+  MYSQL = {
+    host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
+    database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
+  };
+}
 const API             = "https://api.mwalimucosmetics.com";
 const SECRET          = "mwalimu-sync-secret";
 const CHECKPOINT_FILE = "C:\\MwalimuSync\\checkpoint.json";

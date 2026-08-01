@@ -55,6 +55,17 @@ echo [OK] pusher.js
 call :download "https://api.mwalimucosmetics.com/sync/agent/loop.ps1"        "%DIR%\loop.ps1"
 if exist "%DIR%\loop.ps1" ( echo [OK] loop.ps1 ) else echo [WARN] loop.ps1 download failed - using existing copy.
 
+:: db-config.js resolves MySQL credentials from db-config.json instead of
+:: source. Download it before the scripts that use it.
+call :download "https://api.mwalimucosmetics.com/sync/agent/db-config.js"    "%DIR%\db-config.js"
+if exist "%DIR%\db-config.js" ( echo [OK] db-config.js ) else echo [WARN] db-config.js not downloaded - scripts will use built-in fallback credentials.
+
+call :download "https://api.mwalimucosmetics.com/sync/agent/schema-probe.js" "%DIR%\schema-probe.js"
+if exist "%DIR%\schema-probe.js" ( echo [OK] schema-probe.js ) else echo [WARN] schema-probe.js not downloaded.
+
+call :download "https://api.mwalimucosmetics.com/sync/agent/provision-db-user.js" "%DIR%\provision-db-user.js"
+if exist "%DIR%\provision-db-user.js" ( echo [OK] provision-db-user.js ) else echo [WARN] provision-db-user.js not downloaded.
+
 call :download "https://api.mwalimucosmetics.com/sync/agent/daily-backup.js" "%DIR%\daily-backup.js"
 if exist "%DIR%\daily-backup.js" ( echo [OK] daily-backup.js ) else echo [WARN] daily-backup.js not downloaded.
 
