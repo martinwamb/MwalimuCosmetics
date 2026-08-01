@@ -3,6 +3,10 @@ name: Deploy to Hetzner
 on:
   push:
     branches: [ "main" ]
+    # The desktop app is a separate deliverable released by desktop-release.yml.
+    # Without this, every desktop commit redeploys the website.
+    paths-ignore:
+      - 'apps/desktop/**'
 
 jobs:
   deploy:
@@ -30,6 +34,7 @@ jobs:
             -e "ssh -o StrictHostKeyChecking=no" \
             --exclude ".git" \
             --exclude "node_modules/" \
+            --exclude "apps/desktop/" \
             --exclude ".next/" \
             --exclude "apps/front/.next/" \
             --exclude "apps/front/out/" \
@@ -57,8 +62,11 @@ jobs:
             fi
           fi
 
-          # Install dependencies (npm install — no lockfile required)
-          npm install
+          # Install dependencies (npm install — no lockfile required).
+          # ELECTRON_SKIP_BINARY_DOWNLOAD guards against a workspace ever pulling
+          # the ~200MB Electron binary onto the web server; the desktop app is
+          # excluded from the rsync above, so this is belt-and-braces.
+          ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install
 
           # Regenerate Prisma client against the installed version
           DATABASE_URL=$(grep '^DATABASE_URL=' apps/back/.env | cut -d= -f2-) \

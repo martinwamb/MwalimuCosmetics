@@ -287,8 +287,14 @@ router.post("/backup", async (req, res) => {
     return res.status(400).json({ error: "date, table, rows required" });
   }
 
-  // Whitelist tables accepted for backup
-  const allowed = ["pos_header", "pos_details", "pos_payment_details", "stran", "grn"];
+  // Whitelist tables accepted for backup. The schema/* entries are written by
+  // bridge/schema-probe.js rather than the daily backup, and carry DDL and
+  // diagnostics instead of transaction rows.
+  const allowed = [
+    "pos_header", "pos_details", "pos_payment_details", "stran", "grn",
+    "schema", "routines", "engines", "vars",
+    "gl_residuals", "gl_residual_samples", "orphans",
+  ];
   if (!allowed.includes(table)) return res.status(400).json({ error: "table not allowed" });
 
   try {
