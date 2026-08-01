@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260801-36";
+const AGENT_VERSION   = "20260801-37";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -29,15 +29,18 @@ const AGENT_VERSION   = "20260801-36";
 // db-config.js has been deployed there, and the agent must keep running
 // rather than die with MODULE_NOT_FOUND. The fallback is the behaviour this
 // script had previously, so an un-provisioned PC is no worse off than before.
-let MYSQL;
+let MYSQL, MYSQL_SOURCE;
 try {
-  const { getMysqlConfig, toDriverOptions } = require("./db-config");
-  MYSQL = toDriverOptions(getMysqlConfig());
+  const { getMysqlConfig, describeConfigSource, toDriverOptions } = require("./db-config");
+  const cfg = getMysqlConfig();
+  MYSQL = toDriverOptions(cfg);
+  MYSQL_SOURCE = describeConfigSource(cfg);
 } catch {
   MYSQL = {
     host: "10.10.10.4", port: 3306, user: "root", password: "allowme",
     database: "mwalimuinvest", ssl: false, insecureAuth: true, connectTimeout: 8000,
   };
+  MYSQL_SOURCE = "MySQL credentials: inline fallback (db-config.js not deployed on this PC)";
 }
 const API             = "https://api.mwalimucosmetics.com";
 const SECRET          = "mwalimu-sync-secret";
@@ -1579,6 +1582,11 @@ async function run() {
     costMap:         costMap || cp.costMap || null,
     stockMap:        Object.keys(stockMap || {}).length > 0 ? stockMap : (cp.stockMap || null),
   });
+  // Logged at the END of the cycle on purpose. The forwarded log is only the
+  // last 60 lines, so anything reported at startup is evicted long before it
+  // reaches the server. This line is how we confirm remotely that a PC has
+  // actually moved off the root credentials that are in git history.
+  log(MYSQL_SOURCE);
   log("=== Sync complete ===");
 }
 
