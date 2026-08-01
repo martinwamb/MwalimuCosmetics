@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260801-35";
+const AGENT_VERSION   = "20260801-36";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -931,6 +931,40 @@ async function applyPendingChanges(conn, token) {
               });
           });
         } catch (e) { log("Schema probe error: " + e.message); }
+
+      } else if (change.type === "provision_db_user") {
+        // Create a least-privilege MySQL account for this PC and write its
+        // credentials to db-config.json, so the scripts stop using the root
+        // login that is sitting in this repository's git history.
+        //
+        // Additive and safe to run while trading: it creates a new account
+        // and changes nothing about how existing software connects. Notably
+        // it does NOT touch root, which FumasV5 uses from every till.
+        try {
+          for (const name of ["db-config.js", "provision-db-user.js"]) {
+            const dl = await apiRequest("POST", "/sync/agent/get-file", { filename: name }, null, null, 60000);
+            if (dl.status !== 200) { log(`${name} download failed: ${dl.status}`); throw new Error(name); }
+            fs.writeFileSync("C:\\MwalimuSync\\" + name, dl.body, "utf8");
+          }
+
+          const role = (change.payload && change.payload.role) || "sync";
+          log(`Provisioning MySQL role '${role}'…`);
+          const { execFile } = require("child_process");
+          await new Promise(resolve => {
+            execFile(process.execPath, ["C:\\MwalimuSync\\provision-db-user.js", role],
+              { cwd: "C:\\MwalimuSync", timeout: 120000, maxBuffer: 4 * 1024 * 1024 },
+              (err, stdout, stderr) => {
+                // A failing GRANT ... IDENTIFIED BY can come back with the
+                // generated password echoed inside the driver's error text.
+                // These lines are relayed to the server log, so redact first.
+                const redact = s => String(s || "").replace(/IDENTIFIED BY\s+'[^']*'/gi, "IDENTIFIED BY '<redacted>'");
+                redact(stdout).split("\n").filter(Boolean).forEach(l => log("  provision| " + l.trim()));
+                if (err) log("Provisioning failed: " + redact(err.message).slice(0, 300) + " " + redact(stderr).slice(0, 500));
+                else     log("Provisioning finished.");
+                resolve();
+              });
+          });
+        } catch (e) { log("Provisioning error: " + e.message); }
 
       } else if (change.type === "print_receipt") {
         await printReceipt(change.payload);
