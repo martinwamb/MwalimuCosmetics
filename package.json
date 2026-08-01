@@ -13,6 +13,8 @@
     "dev:worker": "npm run dev --workspace=@mwalimu/worker",
     "dev:pos": "npm run dev --workspace=@mwalimu/pos",
     "build": "npm run build --workspace=@mwalimu/front",
+    "testdb:reset": "node db/reset-testdb.js",
+    "db:build-sql": "node db/build-sql.js",
     "format": "npm run format --workspaces",
     "lint": "npm run lint --workspaces"
   },
