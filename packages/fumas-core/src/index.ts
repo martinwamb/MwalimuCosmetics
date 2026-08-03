@@ -14,6 +14,7 @@ export {
   QueryError,
   type ConnectionOptions,
   type Queryable,
+  PRODUCTION_SQL_MODE,
   type Transaction,
 } from "./db/connection";
 
@@ -57,3 +58,29 @@ export {
   type FormRights,
   type MenuEntry,
 } from "./domain/auth";
+
+export {
+  loadSettings,
+  getPeriodStatus,
+  assertPeriodOpen,
+  findUpcomingPeriodProblems,
+  PeriodLockedError,
+  type Settings,
+  type PeriodStatus,
+} from "./domain/settings";
+
+export {
+  searchItems,
+  getLowStock,
+  getStockMovements,
+  getSales,
+  getSaleLines,
+  getDaySummary,
+  getPaymentMix,
+  getTopProducts,
+  getSupplierBalances,
+  findUnbalancedEntries,
+  type ItemSummary,
+  type SaleSummary,
+  type DaySummary,
+} from "./domain/reports";

@@ -33,7 +33,22 @@ export interface ConnectionOptions {
    * UTC+3 offset. Reading dates as strings keeps them exactly as stored.
    */
   dateStrings?: boolean;
+  /**
+   * Session sql_mode, applied to every connection.
+   *
+   * Pinned rather than inherited so the application behaves the same however
+   * the server it happens to be pointed at is configured. The shop runs
+   * MySQL 5.1 with 'IGNORE_SPACE', while a modern local instance defaults to
+   * a much stricter set — so without this, tests reject rows that production
+   * accepts and the fixture stops representing reality.
+   *
+   * Setting it to null inherits the server's own configuration.
+   */
+  sessionSqlMode?: string | null;
 }
+
+/** What the shop's MySQL 5.1.73 reports, captured by the schema probe. */
+export const PRODUCTION_SQL_MODE = "IGNORE_SPACE";
 
 /** A handle that can run queries. Both the pool and a transaction provide one. */
 export interface Queryable {
@@ -119,6 +134,20 @@ export class Database implements Queryable {
       connectionLimit: 4,
       queueLimit: 0,
     });
+
+    // Applied per physical connection, so it holds for pooled connections and
+    // for the dedicated one a transaction borrows.
+    const sqlMode = options.sessionSqlMode === undefined
+      ? PRODUCTION_SQL_MODE
+      : options.sessionSqlMode;
+    if (sqlMode !== null) {
+      this.pool.on("connection", conn => {
+        conn.query("SET SESSION sql_mode = ?", [sqlMode], () => {
+          // A server that rejects the mode is left on its own default rather
+          // than having every query fail; the mismatch surfaces in testing.
+        });
+      });
+    }
   }
 
   /** Serialise through a single chain so pacing cannot be bypassed. */
