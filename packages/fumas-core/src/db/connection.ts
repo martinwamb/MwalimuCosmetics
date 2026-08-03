@@ -131,7 +131,11 @@ export class Database implements Queryable {
   ) {
     this.pool = mysql.createPool({
       ...buildDriverOptions(options),
-      connectionLimit: 4,
+      // Two connections, not a conventional pool. Statements are already
+      // serialised by the pacing gate, so extra connections buy nothing here
+      // and only give this application more ways to occupy a server that is
+      // simultaneously serving the tills.
+      connectionLimit: 2,
       queueLimit: 0,
     });
 

@@ -31,8 +31,14 @@ export interface AppConfig {
    * Minimum gap between statements, in milliseconds.
    *
    * The shop's server also runs the tills and cannot be worked on out of
-   * hours, because every machine is powered down when the shop closes. A
-   * small gap keeps an exploring user from slowing down a queue.
+   * hours, because every machine is powered down when the shop closes.
+   *
+   * Set deliberately high. This application is for looking at figures, where
+   * a screen taking two seconds instead of half a second costs nobody
+   * anything — while a till hesitating mid-sale costs a customer waiting at
+   * a counter. Measured on the live server, FumasV5's own stock check can
+   * occupy it for up to three seconds at a time, so there is no headroom
+   * worth competing for.
    */
   queryPacingMs: number;
 }
@@ -45,7 +51,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   mysqlDatabase: "mwalimuinvest",
   terminalId: os.hostname(),
   writesEnabled: false,
-  queryPacingMs: 50,
+  queryPacingMs: 600,
 };
 
 function configDir(): string {

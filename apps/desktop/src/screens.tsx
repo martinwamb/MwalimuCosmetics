@@ -42,13 +42,19 @@ function Panel({ loading, error, children }: {
 export function Dashboard() {
   const [date, setDate] = useState(today());
 
+  // The headline figures load immediately; everything else waits until the
+  // user asks. Opening this screen used to fire seven queries at once, which
+  // is exactly the kind of burst that makes a till hesitate mid-sale on a
+  // server this size.
+  const [showMore, setShowMore] = useState(false);
+
   const day = useLoader<DaySummary>(() => api.data.daySummary(date), [date]);
-  const mix = useLoader(() => api.data.paymentMix(date), [date]);
-  const top = useLoader(() => api.data.topProducts(daysAgo(7), date, 8), [date]);
-  const low = useLoader(() => api.data.lowStock(8), []);
-  const trend = useLoader(() => api.data.dailyTrend(daysAgo(13), date), [date]);
-  const periods = useLoader(() => api.data.upcomingPeriodProblems(), []);
-  const unbalanced = useLoader(() => api.data.unbalancedEntries(daysAgo(7), date), [date]);
+  const mix = useLoader(() => showMore ? api.data.paymentMix(date) : Promise.resolve([]), [date, showMore]);
+  const top = useLoader(() => showMore ? api.data.topProducts(daysAgo(7), date, 8) : Promise.resolve([]), [date, showMore]);
+  const low = useLoader(() => showMore ? api.data.lowStock(8) : Promise.resolve([]), [showMore]);
+  const trend = useLoader(() => showMore ? api.data.dailyTrend(daysAgo(13), date) : Promise.resolve([]), [date, showMore]);
+  const periods = useLoader(() => showMore ? api.data.upcomingPeriodProblems() : Promise.resolve([]), [showMore]);
+  const unbalanced = useLoader(() => showMore ? api.data.unbalancedEntries(daysAgo(7), date) : Promise.resolve([]), [date, showMore]);
 
   const d = day.data;
   const net = d ? d.gross - d.returnValue : 0;
@@ -62,8 +68,20 @@ export function Dashboard() {
           <label>Trading day</label>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />
         </div>
-        <button onClick={() => { day.reload(); mix.reload(); top.reload(); }}>Refresh</button>
+        <button onClick={() => { day.reload(); if (showMore) { mix.reload(); top.reload(); trend.reload(); } }}>
+          Refresh
+        </button>
+        {!showMore && (
+          <button onClick={() => setShowMore(true)}>Load charts &amp; alerts</button>
+        )}
       </div>
+
+      {!showMore && (
+        <p className="muted" style={{ fontSize: "0.83rem", marginTop: "-0.6rem" }}>
+          Charts, stock alerts and ledger checks are left unloaded so opening this
+          screen costs the shop's server almost nothing. Load them when you want them.
+        </p>
+      )}
 
       {/* Periods fail closed, so a missing row stops the tills. Better to warn
           weeks ahead than to discover it on the first morning of a month. */}
