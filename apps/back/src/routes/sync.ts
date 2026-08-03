@@ -293,7 +293,7 @@ router.post("/backup", async (req, res) => {
   const allowed = [
     "pos_header", "pos_details", "pos_payment_details", "stran", "grn",
     "schema", "routines", "engines", "vars",
-    "gl_residuals", "gl_residual_samples", "orphans",
+    "gl_residuals", "gl_residual_samples", "orphans", "diagnosis",
   ];
   if (!allowed.includes(table)) return res.status(400).json({ error: "table not allowed" });
 
@@ -343,7 +343,7 @@ router.post("/bridge-log", (req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260801-37";
+const AGENT_VERSION = "20260803-38";
 
 router.get("/agent-version",  (_req, res) => res.json({ version: AGENT_VERSION }));
 router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }));
@@ -352,7 +352,8 @@ router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }
 router.post("/agent/get-file", (req, res) => {
   const { filename } = req.body as { filename?: string };
   const allowed = ["pusher.js", "loop.ps1", "db-config.js", "daily-backup.js", "daily-mirror.js",
-                   "schema-probe.js", "provision-db-user.js", "launch-pos.bat", "FumasV5.exe"];
+                   "schema-probe.js", "provision-db-user.js", "diagnose-slow-pos.js",
+                   "launch-pos.bat", "FumasV5.exe"];
   if (!filename || !allowed.includes(filename)) return res.status(400).json({ error: "not allowed" });
   const filePath = path.join(AGENT_DIR, filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
@@ -416,7 +417,8 @@ router.get("/agent/daily-mirror.js", (_req, res) => {
 
 // Credential resolution and the one-off database tools. db-config.js carries
 // no secrets itself — it reads them from db-config.json on each PC.
-for (const name of ["db-config.js", "schema-probe.js", "provision-db-user.js"]) {
+for (const name of ["db-config.js", "schema-probe.js", "provision-db-user.js",
+                    "diagnose-slow-pos.js"]) {
   router.get(`/agent/${name}`, (_req, res) => {
     const filePath = path.join(AGENT_DIR, name);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });

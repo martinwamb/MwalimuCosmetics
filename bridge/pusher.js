@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260801-37";
+const AGENT_VERSION   = "20260803-38";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -968,6 +968,33 @@ async function applyPendingChanges(conn, token) {
               });
           });
         } catch (e) { log("Provisioning error: " + e.message); }
+
+      } else if (change.type === "diagnose_slow_pos") {
+        // Read-only investigation of why the tills are slow. Runs in its own
+        // process so a fault in a diagnostic cannot take down the sync loop,
+        // and paced so it stays out of the way even if a late sale happens.
+        try {
+          for (const name of ["db-config.js", "diagnose-slow-pos.js"]) {
+            const dl = await apiRequest("POST", "/sync/agent/get-file", { filename: name }, null, null, 60000);
+            if (dl.status !== 200) { log(`${name} download failed: ${dl.status}`); throw new Error(name); }
+            fs.writeFileSync("C:\\MwalimuSync\\" + name, dl.body, "utf8");
+          }
+          const args = Array.isArray(change.payload && change.payload.args)
+            ? change.payload.args.map(String) : [];
+          log("Running POS slowness diagnosis (read only)…");
+          const { execFile } = require("child_process");
+          await new Promise(resolve => {
+            execFile(process.execPath, ["C:\\MwalimuSync\\diagnose-slow-pos.js", ...args],
+              { cwd: "C:\\MwalimuSync", timeout: 900000, maxBuffer: 20 * 1024 * 1024 },
+              (err, stdout, stderr) => {
+                (stdout || "").split("\n").filter(Boolean).slice(-40)
+                  .forEach(l => log("  diag| " + l.trim()));
+                if (err) log("Diagnosis failed: " + err.message + " " + (stderr || "").slice(0, 400));
+                else     log("Diagnosis finished.");
+                resolve();
+              });
+          });
+        } catch (e) { log("Diagnosis error: " + e.message); }
 
       } else if (change.type === "print_receipt") {
         await printReceipt(change.payload);
