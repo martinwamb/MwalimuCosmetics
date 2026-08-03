@@ -125,12 +125,15 @@ tbody tr.clickable { cursor: pointer; }
 /* Scrolls rather than clipping: the startup checks make this card tall, and
    on a short till screen the sign-in button must still be reachable. */
 .login { min-height: 100vh; display: flex; align-items: center; justify-content: center; overflow-y: auto; padding: 1.5rem 0; }
-.login-card { width: 380px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 2rem; margin: auto; }
-.login-card h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
-.login-card p.sub { margin: 0 0 1.5rem; color: var(--text-dim); font-size: 0.9rem; }
+/* Kept compact so the Sign in button stays above the fold on a short or
+   scaled-up till screen, where the startup checks would otherwise push it
+   out of view. */
+.login-card { width: 380px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.4rem 1.6rem; margin: auto; }
+.login-card h1 { margin: 0 0 0.2rem; font-size: 1.25rem; }
+.login-card p.sub { margin: 0 0 0.9rem; color: var(--text-dim); font-size: 0.85rem; }
 
-.checks { list-style: none; padding: 0; margin: 0 0 1rem; font-size: 0.85rem; }
-.checks li { display: flex; gap: 0.5rem; padding: 0.25rem 0; }
+.checks { list-style: none; padding: 0; margin: 0 0 0.9rem; font-size: 0.78rem; line-height: 1.35; }
+.checks li { display: flex; gap: 0.45rem; padding: 0.12rem 0; }
 .checks .mark { width: 1rem; flex-shrink: 0; }
 .checks .mark.ok { color: var(--good); }
 .checks .mark.no { color: var(--bad); }
