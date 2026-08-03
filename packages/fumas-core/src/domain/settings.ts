@@ -22,6 +22,14 @@ export interface Settings {
   accounts: {
     vatOutput: string | null;
     discountGiven: string | null;
+    /**
+     * Shop-wide fallbacks. FumasV5 resolves these per item from
+     * si.revenue / si.cost_of_sales / si.inventory and only falls back to
+     * these when an item names none, so resolveItemAccounts is what a sale
+     * should use; these are the backstop.
+     */
+    revenue: string | null;
+    costOfSales: string | null;
     inventory: string | null;
     creditors: string | null;
     /** Where sub-shilling rounding differences are posted. */
@@ -67,6 +75,8 @@ export async function loadSettings(db: Queryable): Promise<Settings> {
     accounts: {
       vatOutput:     str(r.vatoutput ?? r.vat_output),
       discountGiven: str(r.discountgiven ?? r.Discount_in),
+      revenue:       str(r.revenue ?? r.salesac ?? r.sales_account),
+      costOfSales:   str(r.cost_of_sales ?? r.cogs ?? r.cogsac),
       inventory:     str(r.inventory ?? r.Inventory_ac),
       creditors:     str(r.creditors ?? r.creditors_account),
       // The legacy app has no rounding account, because it never balanced
@@ -76,6 +86,55 @@ export async function loadSettings(db: Queryable): Promise<Settings> {
     },
     raw: r,
   };
+}
+
+export interface ItemAccounts {
+  revenue: string | null;
+  costOfSales: string | null;
+  inventory: string | null;
+}
+
+/**
+ * The GL accounts each item posts to.
+ *
+ * FumasV5 takes these from the item record and only falls back to the
+ * shop-wide settings when an item names none, so revenue for different
+ * product groups can land in different accounts. Reading the shop-wide value
+ * for everything would post to the wrong account for any item that has been
+ * given its own, and nothing would flag it.
+ *
+ * Fetched for the whole basket in one statement rather than per line.
+ */
+export async function resolveItemAccounts(
+  db: Queryable, codes: readonly string[], settings: Settings,
+): Promise<Map<string, ItemAccounts>> {
+  const out = new Map<string, ItemAccounts>();
+  const unique = [...new Set(codes.filter(Boolean))];
+  if (!unique.length) return out;
+
+  const rows = await db.query<any>(
+    `SELECT CODE, revenue, cost_of_sales, inventory
+       FROM si WHERE CODE IN (${unique.map(() => "?").join(",")})`,
+    unique);
+
+  for (const r of rows) {
+    out.set(String(r.CODE), {
+      revenue:     str(r.revenue)       ?? settings.accounts.revenue,
+      costOfSales: str(r.cost_of_sales) ?? settings.accounts.costOfSales,
+      inventory:   str(r.inventory)     ?? settings.accounts.inventory,
+    });
+  }
+  // An item missing from `si` still needs somewhere to post.
+  for (const code of unique) {
+    if (!out.has(code)) {
+      out.set(code, {
+        revenue: settings.accounts.revenue,
+        costOfSales: settings.accounts.costOfSales,
+        inventory: settings.accounts.inventory,
+      });
+    }
+  }
+  return out;
 }
 
 export interface PeriodStatus {

@@ -85,3 +85,26 @@ export {
   type SaleSummary,
   type DaySummary,
 } from "./domain/reports";
+
+export {
+  postSale,
+  allocateReceiptNo,
+  SaleValidationError,
+  type SaleInput,
+  type SaleLineInput,
+  type SaleTenderInput,
+  type PostedSale,
+} from "./domain/sale";
+
+export {
+  getReceipt,
+  getShopDetails,
+  findRecentReceipts,
+  getPosPrinters,
+  type Receipt,
+  type ReceiptLine,
+  type ReceiptTender,
+  type ShopDetails,
+} from "./domain/receipt";
+
+export { resolveItemAccounts, type ItemAccounts } from "./domain/settings";

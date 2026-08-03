@@ -68,6 +68,12 @@ export interface LineAmounts {
    *   if(inclusive='YES', total - disc, total + vat - disc)
    */
   net: Cents;
+  /**
+   * Whether the price already contained the tax. Carried through because how
+   * revenue is separated from VAT depends on it, and re-deriving it later
+   * from the amounts alone is not reliably possible.
+   */
+  inclusive: boolean;
 }
 
 /**
@@ -97,7 +103,7 @@ export function computeLine(input: LineInput, vatRate: number): LineAmounts {
 
   const net = inclusive ? total - discount : total + vat - discount;
 
-  return { total, vat, discount, net };
+  return { total, vat, discount, net, inclusive };
 }
 
 /**
