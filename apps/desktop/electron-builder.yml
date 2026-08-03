@@ -1,0 +1,32 @@
+appId: com.mwalimucosmetics.desktop
+productName: Mwalimu Cosmetics
+copyright: Mwalimu Cosmetics
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - "!**/*.map"
+
+# The MySQL driver is pure JavaScript, so nothing needs rebuilding per machine.
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: Mwalimu-Setup-${version}.exe
+
+nsis:
+  # A real installer rather than a one-click, so the shop can choose where it
+  # goes and can uninstall it cleanly.
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Mwalimu Cosmetics

@@ -19,3 +19,8 @@ mwalimu/
 # Bridge build artifacts and sensitive scripts
 bridge/MwalimuSyncAgent.zip
 bridge/fix-mysql-privileges.bat
+
+# Desktop build output
+apps/desktop/dist-electron
+apps/desktop/release
+apps/desktop/*.log
