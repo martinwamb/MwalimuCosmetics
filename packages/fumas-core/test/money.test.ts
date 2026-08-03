@@ -3,6 +3,7 @@ import {
   toCents, fromCents, centsToSqlString, parseMoney,
   computeLine, headerAmount, sumVat,
   assertBalanced, UnbalancedLedgerError,
+  balanceWithRounding, RoundingTooLargeError,
   type GlLeg,
 } from "../src/money";
 
@@ -132,6 +133,75 @@ describe("header amount", () => {
     // 20.30 ceils once to 21.00; rounding each line first would give 22.00.
     expect(headerAmount(lines)).toBe(toCents(21));
     expect(sumVat(lines)).toBe(0);
+  });
+});
+
+describe("balanceWithRounding", () => {
+  const leg = (account: string, amount: number, debit: boolean): GlLeg =>
+    ({ account, amount: toCents(amount), debit, remarks: "test" });
+
+  it("leaves an already-balanced entry untouched", () => {
+    const legs = [leg("CASH", 100, true), leg("SALES", 100, false)];
+    const out = balanceWithRounding(legs, "ROUNDING");
+    expect(out).toHaveLength(2);
+    expect(() => assertBalanced(out)).not.toThrow();
+  });
+
+  it("closes the gap when the cash debit was rounded up", () => {
+    // Customer pays a whole 12/=, the lines only justify 11.72.
+    const legs = [leg("CASH", 12, true), leg("SALES", 11.72, false)];
+    const out = balanceWithRounding(legs, "ROUNDING");
+
+    expect(out).toHaveLength(3);
+    const rounding = out[2]!;
+    expect(rounding.account).toBe("ROUNDING");
+    expect(rounding.amount).toBe(28);     // 0.28
+    expect(rounding.debit).toBe(false);   // credit, to offset the extra debit
+    expect(() => assertBalanced(out)).not.toThrow();
+  });
+
+  it("closes the gap in the other direction too", () => {
+    const legs = [leg("CASH", 11.72, true), leg("SALES", 12, false)];
+    const out = balanceWithRounding(legs, "ROUNDING");
+    expect(out[2]!.debit).toBe(true);
+    expect(out[2]!.amount).toBe(28);
+    expect(() => assertBalanced(out)).not.toThrow();
+  });
+
+  it("handles the largest possible rounding gap of 99 cents", () => {
+    const legs = [leg("CASH", 100, true), leg("SALES", 99.01, false)];
+    const out = balanceWithRounding(legs, "ROUNDING");
+    expect(out[2]!.amount).toBe(99);
+    expect(() => assertBalanced(out)).not.toThrow();
+  });
+
+  it("refuses a full shilling — that is no longer rounding", () => {
+    const legs = [leg("CASH", 101, true), leg("SALES", 100, false)];
+    expect(() => balanceWithRounding(legs, "ROUNDING")).toThrow(RoundingTooLargeError);
+  });
+
+  it("refuses the worst residual seen in production rather than hiding it", () => {
+    // 240/= is a real calculation fault in the legacy app. A plug account with
+    // no ceiling would absorb it silently, which is the failure this guards.
+    const legs = [leg("CASH", 1240, true), leg("SALES", 1000, false)];
+    expect(() => balanceWithRounding(legs, "ROUNDING")).toThrow(RoundingTooLargeError);
+    try {
+      balanceWithRounding(legs, "ROUNDING");
+    } catch (e) {
+      expect((e as RoundingTooLargeError).message).toContain("240");
+      expect((e as RoundingTooLargeError).message).toContain("not a rounding remainder");
+    }
+  });
+
+  it("always yields a balanced entry across a sweep of gaps", () => {
+    // The property that matters: for any sub-shilling gap, the result balances.
+    for (let cents = -99; cents <= 99; cents++) {
+      const legs: GlLeg[] = [
+        { account: "CASH",  amount: toCents(100) + cents, debit: true,  remarks: "t" },
+        { account: "SALES", amount: toCents(100),         debit: false, remarks: "t" },
+      ];
+      expect(() => assertBalanced(balanceWithRounding(legs, "ROUNDING"))).not.toThrow();
+    }
   });
 });
 

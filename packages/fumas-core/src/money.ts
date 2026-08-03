@@ -159,11 +159,84 @@ export class UnbalancedLedgerError extends Error {
  * no floating-point epsilon to tolerate.
  */
 export function assertBalanced(legs: readonly GlLeg[]): void {
+  const { debits, credits } = totals(legs);
+  if (debits !== credits) throw new UnbalancedLedgerError(debits, credits, legs);
+}
+
+function totals(legs: readonly GlLeg[]): { debits: Cents; credits: Cents } {
   let debits = 0;
   let credits = 0;
   for (const leg of legs) {
     if (leg.debit) debits += leg.amount;
     else credits += leg.amount;
   }
-  if (debits !== credits) throw new UnbalancedLedgerError(debits, credits, legs);
+  return { debits, credits };
+}
+
+/**
+ * Largest difference we are willing to treat as rounding: one shilling.
+ *
+ * The header total is rounded up to whole shillings while the GL legs are
+ * derived from unrounded line values, so a genuine rounding gap can never
+ * reach a full shilling. Anything at or above this is arithmetic that went
+ * wrong somewhere else, and must not be quietly absorbed.
+ */
+export const MAX_ROUNDING_CENTS = 100;
+
+export class RoundingTooLargeError extends Error {
+  constructor(readonly difference: Cents, readonly legs: readonly GlLeg[]) {
+    super(
+      `Entry is out by ${fromCents(difference)}, which is too large to be rounding ` +
+      `(limit ${fromCents(MAX_ROUNDING_CENTS)}). This is a calculation fault, not a ` +
+      `rounding remainder, and will not be posted to the rounding account. ` +
+      `Legs: ${legs.map(l => `${l.account} ${l.debit ? "Dr" : "Cr"} ${fromCents(l.amount)}`).join(", ")}`,
+    );
+    this.name = "RoundingTooLargeError";
+  }
+}
+
+/**
+ * Close a sub-shilling gap by posting the remainder to a rounding account,
+ * so the entry balances exactly.
+ *
+ * Why this exists: `pos_header.amount` is rounded UP to whole shillings while
+ * the ledger legs come from unrounded line values, so the two disagree by up
+ * to 99 cents on many receipts. The legacy app posts both and lets the
+ * difference sit there. Measured on live data, 646 of 17,762 POS entries over
+ * two years do not balance — every other transaction type is clean.
+ *
+ * Two decisions are deliberate:
+ *
+ *  - The remainder is posted to a NAMED account rather than absorbed into
+ *    revenue or VAT. Rounding then shows up in one place where it can be
+ *    reviewed, instead of quietly distorting the figures that matter.
+ *
+ *  - Anything at or beyond one shilling is REFUSED, not plugged. The largest
+ *    residual in production is 240 shillings, which is far too big to be
+ *    rounding and is a real defect in the legacy calculation. A plug account
+ *    with no ceiling would hide exactly that class of bug, which is worse
+ *    than the imbalance it was meant to fix.
+ *
+ * @throws RoundingTooLargeError when the gap is too big to be rounding.
+ */
+export function balanceWithRounding(
+  legs: readonly GlLeg[],
+  roundingAccount: string,
+  remarks = "Rounding",
+): GlLeg[] {
+  const { debits, credits } = totals(legs);
+  const difference = debits - credits;
+  if (difference === 0) return [...legs];
+
+  if (Math.abs(difference) >= MAX_ROUNDING_CENTS) {
+    throw new RoundingTooLargeError(difference, legs);
+  }
+
+  // Debits exceeding credits needs a credit to close it, and vice versa.
+  return [...legs, {
+    account: roundingAccount,
+    amount: Math.abs(difference),
+    debit: difference < 0,
+    remarks,
+  }];
 }
