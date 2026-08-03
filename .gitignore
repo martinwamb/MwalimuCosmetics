@@ -24,3 +24,4 @@ bridge/fix-mysql-privileges.bat
 apps/desktop/dist-electron
 apps/desktop/release
 apps/desktop/*.log
+bridge/schema-probe-output/
