@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  api, money, shillings, today, daysAgo,
+  api, money, today, daysAgo,
   type ItemSummary, type SaleSummary, type DaySummary, type AppConfigView,
 } from "./api";
+import { TrendChart, PaymentMixChart, StockChart } from "./charts";
 
 /** Runs an async load, surfacing errors rather than leaving a blank panel. */
 function useLoader<T>(load: () => Promise<T>, deps: unknown[]): {
@@ -45,6 +46,7 @@ export function Dashboard() {
   const mix = useLoader(() => api.data.paymentMix(date), [date]);
   const top = useLoader(() => api.data.topProducts(daysAgo(7), date, 8), [date]);
   const low = useLoader(() => api.data.lowStock(8), []);
+  const trend = useLoader(() => api.data.dailyTrend(daysAgo(13), date), [date]);
   const periods = useLoader(() => api.data.upcomingPeriodProblems(), []);
   const unbalanced = useLoader(() => api.data.unbalancedEntries(daysAgo(7), date), [date]);
 
@@ -109,24 +111,16 @@ export function Dashboard() {
       </Panel>
 
       <div className="card">
+        <h3>Takings, last 14 days</h3>
+        <Panel loading={trend.loading} error={trend.error}>
+          <TrendChart data={trend.data ?? []} />
+        </Panel>
+      </div>
+
+      <div className="card">
         <h3>How today was paid</h3>
         <Panel loading={mix.loading} error={mix.error}>
-          {mix.data && mix.data.length > 0 ? (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Method</th><th className="num">Receipts</th><th className="num">Amount</th></tr></thead>
-                <tbody>
-                  {mix.data.map(m => (
-                    <tr key={m.method}>
-                      <td>{m.method}</td>
-                      <td className="num">{m.transactions}</td>
-                      <td className="num">{money(m.total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : <p className="muted">Nothing taken on this day.</p>}
+          <PaymentMixChart data={mix.data ?? []} />
         </Panel>
       </div>
 
@@ -156,22 +150,10 @@ export function Dashboard() {
       <div className="card">
         <h3>Running low</h3>
         <Panel loading={low.loading} error={low.error}>
-          {low.data && low.data.length > 0 ? (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Code</th><th>Product</th><th className="num">On hand</th></tr></thead>
-                <tbody>
-                  {low.data.map(i => (
-                    <tr key={i.code}>
-                      <td className="muted">{i.code}</td>
-                      <td>{i.description}</td>
-                      <td className="num"><span className={`badge ${i.onHand <= 0 ? "bad" : "warn"}`}>{i.onHand}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : <p className="muted">Nothing at or below its reorder level.</p>}
+          <StockChart data={(low.data ?? []).map(i => ({
+            code: i.code, description: i.description,
+            onHand: i.onHand, reorder: (i as any).reorder ?? 0,
+          }))} />
         </Panel>
       </div>
     </>

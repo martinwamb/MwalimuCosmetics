@@ -81,7 +81,9 @@ export async function searchItems(
 }
 
 /** Items at or below their reorder level, worst first. */
-export async function getLowStock(db: Queryable, limit = 50): Promise<ItemSummary[]> {
+export async function getLowStock(
+  db: Queryable, limit = 50,
+): Promise<Array<ItemSummary & { reorder: number }>> {
   const rows = await db.query<any>(
     `SELECT i.CODE AS code, i.descr, i.categ, i.PRICE, i.WPRICE, i.cost, i.active,
             COALESCE(SUM(q.quantity), 0) AS onHand, i.rolqty
@@ -103,6 +105,7 @@ export async function getLowStock(db: Queryable, limit = 50): Promise<ItemSummar
     cost: parseMoney(r.cost),
     active: Number(r.active) === 1,
     onHand: Number(r.onHand ?? 0),
+    reorder: Number(r.rolqty ?? 0),
   }));
 }
 
@@ -246,6 +249,35 @@ export async function getDaySummary(db: Queryable, date: string): Promise<DaySum
   };
 }
 
+/**
+ * Takings per day across a range, for the trend chart.
+ *
+ * One grouped query rather than one per day: fourteen round trips to a server
+ * that is also running the tills is fourteen times the disturbance for the
+ * same answer.
+ */
+export async function getDailyTrend(
+  db: Queryable, fromDate: string, toDate: string,
+): Promise<Array<{ date: string; gross: Cents; transactions: number }>> {
+  const rows = await db.query<any>(
+    `SELECT DATE(trandate) AS d,
+            COUNT(*) AS transactions,
+            COALESCE(SUM(amount), 0) AS gross
+       FROM pos_header
+      WHERE DATE(trandate) BETWEEN ? AND ?
+        AND posted = 1 AND is_return = 0 AND receiptno <> 'AUTO'
+      GROUP BY DATE(trandate)
+      ORDER BY d`,
+    [fromDate, toDate],
+  );
+
+  return rows.map(r => ({
+    date: String(r.d ?? "").slice(0, 10),
+    gross: parseMoney(r.gross),
+    transactions: Number(r.transactions ?? 0),
+  }));
+}
+
 /** How a day's takings were tendered. */
 export async function getPaymentMix(
   db: Queryable, date: string,
@@ -299,7 +331,13 @@ export async function getTopProducts(
  * Supplier balances.
  *
  * `accounts.prepaid` is the running balance the legacy app maintains per
- * creditor, and `nb` identifies which accounts are creditors.
+ * creditor, and `nb` classifies the account.
+ *
+ * That classification is free text and inconsistent in practice. The live
+ * database holds 487 accounts labelled 'Trade Creditors' and another 7 as
+ * 'Creditor' — an exact match on 'Creditors' finds none of them and the
+ * screen silently shows nothing, which is worse than an error. Matching the
+ * stem covers every spelling in use without also catching 'Debtors'.
  */
 export async function getSupplierBalances(
   db: Queryable, limit = 100,
@@ -308,7 +346,7 @@ export async function getSupplierBalances(
     `SELECT a.code, COALESCE(s.names, a.description) AS name, a.prepaid AS balance
        FROM accounts a
        LEFT JOIN su s ON s.code = a.code
-      WHERE a.nb = 'Creditors'
+      WHERE a.nb LIKE '%Creditor%'
       ORDER BY ABS(COALESCE(a.prepaid, 0)) DESC
       LIMIT ${Math.min(Math.max(limit, 1), 500)}`,
   );

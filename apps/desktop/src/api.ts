@@ -50,7 +50,7 @@ interface Api {
     periodStatus(date: string): Promise<{ year: number; month: number; exists: boolean; locked: boolean }>;
     upcomingPeriodProblems(): Promise<Array<{ year: number; month: number; exists: boolean; locked: boolean }>>;
     searchItems(opts: { search?: string; limit?: number; activeOnly?: boolean }): Promise<ItemSummary[]>;
-    lowStock(limit?: number): Promise<ItemSummary[]>;
+    lowStock(limit?: number): Promise<Array<ItemSummary & { reorder: number }>>;
     stockMovements(code: string, limit?: number): Promise<Array<{
       date: string; description: string; reference: string;
       location: string; quantity: number; direction: "in" | "out";
@@ -62,6 +62,9 @@ interface Api {
     }>>;
     daySummary(date: string): Promise<DaySummary>;
     paymentMix(date: string): Promise<Array<{ method: string; transactions: number; total: number }>>;
+    dailyTrend(from: string, to: string): Promise<Array<{
+      date: string; gross: number; transactions: number;
+    }>>;
     topProducts(from: string, to: string, limit?: number): Promise<Array<{
       code: string; description: string; qty: number; revenue: number;
     }>>;

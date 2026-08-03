@@ -77,6 +77,7 @@ export {
   getSaleLines,
   getDaySummary,
   getPaymentMix,
+  getDailyTrend,
   getTopProducts,
   getSupplierBalances,
   findUnbalancedEntries,

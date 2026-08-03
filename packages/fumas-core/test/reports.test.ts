@@ -48,9 +48,9 @@ beforeAll(async () => {
   await db.query(
     `INSERT INTO pos_header (receiptno, amount, tax, disc, arname, staff, trandate, posdate, posted, is_return)
      VALUES (?,?,?,?,?,?,?,?,?,?), (?,?,?,?,?,?,?,?,?,?)`,
-    ["RPT-R1", 1160, 160, 0, "Walk-in", "TESTCASH", "2026-08-01 10:00:00", "2026-08-01", 1, 0,
+    ["RPT-R1", 1160, 160, 0, "Walk-in", "TESTCASH", "2099-03-15 10:00:00", "2099-03-15", 1, 0,
      // Parked and never paid for: must not count towards the day's takings.
-     "RPT-R2",  500,  69, 0, "Walk-in", "TESTCASH", "2026-08-01 11:00:00", "2026-08-01", 0, 0]);
+     "RPT-R2",  500,  69, 0, "Walk-in", "TESTCASH", "2099-03-15 11:00:00", "2099-03-15", 0, 0]);
 
   await db.query("DELETE FROM pos_details WHERE receiptno IN ('RPT-R1','RPT-R2')");
   await db.query(
@@ -63,6 +63,17 @@ beforeAll(async () => {
     `INSERT INTO pos_payment_details (receiptno, paynumber, payname, pamount, pdebtorsac)
      VALUES (?,?,?,?,?)`,
     ["RPT-R1", 1, "Cash", 1160, "CASH"]);
+
+  // Creditor accounts, labelled the several ways the live database actually
+  // spells them, plus a debtor that must not be picked up.
+  await db.query("DELETE FROM accounts WHERE code IN ('RPTCR1','RPTCR2','RPTCR3','RPTDR1')");
+  await db.query(
+    `INSERT INTO accounts (code, description, nb, prepaid, active)
+     VALUES (?,?,?,?,1), (?,?,?,?,1), (?,?,?,?,1), (?,?,?,?,1)`,
+    ["RPTCR1", "Trade Supplier A", "Trade Creditors", 500000,
+     "RPTCR2", "Supplier B",       "Creditor",        250000,
+     "RPTCR3", "Supplier C",       "Creditors",       125000,
+     "RPTDR1", "A Customer",       "Debtors",         900000]);
 });
 
 afterAll(async () => {
@@ -73,6 +84,7 @@ afterAll(async () => {
     await db.query("DELETE FROM pos_details WHERE receiptno IN ('RPT-R1','RPT-R2')");
     await db.query("DELETE FROM pos_payment_details WHERE receiptno IN ('RPT-R1','RPT-R2')");
     await db.query("DELETE FROM periods WHERE yr = 2099");
+    await db.query("DELETE FROM accounts WHERE code IN ('RPTCR1','RPTCR2','RPTCR3','RPTDR1')");
   }
   if (db) await db.close();
 });
@@ -113,7 +125,7 @@ describe("catalogue and stock", () => {
 
 describe("sales", () => {
   maybe("lists receipts in a date range", async () => {
-    const sales = await getSales(db, { fromDate: "2026-08-01", toDate: "2026-08-01" });
+    const sales = await getSales(db, { fromDate: "2099-03-15", toDate: "2099-03-15" });
     expect(sales.map(s => s.receiptNo)).toContain("RPT-R1");
   });
 
@@ -127,21 +139,21 @@ describe("sales", () => {
   maybe("counts only posted receipts towards the day's takings", async () => {
     // RPT-R2 is parked: the money was never collected, so including it would
     // overstate the day.
-    const day = await getDaySummary(db, "2026-08-01");
+    const day = await getDaySummary(db, "2099-03-15");
     expect(day.transactions).toBe(1);
     expect(day.gross).toBe(116000);  // 1160.00, not 1660.00
     expect(day.tax).toBe(16000);
   });
 
   maybe("breaks the day down by tender", async () => {
-    const mix = await getPaymentMix(db, "2026-08-01");
+    const mix = await getPaymentMix(db, "2099-03-15");
     expect(mix).toHaveLength(1);
     expect(mix[0]!.method).toBe("Cash");
     expect(mix[0]!.total).toBe(116000);
   });
 
   maybe("ranks top products using the canonical net-line formula", async () => {
-    const top = await getTopProducts(db, "2026-08-01", "2026-08-01", 10);
+    const top = await getTopProducts(db, "2099-03-15", "2099-03-15", 10);
     const row = top.find(t => t.code === "RPT001");
     expect(row).toBeDefined();
     // Exclusive line: total + vat - disc = 1000 + 160 - 0
@@ -151,12 +163,29 @@ describe("sales", () => {
 });
 
 describe("suppliers and reconciliation", () => {
-  maybe("reads creditor balances", async () => {
-    expect(Array.isArray(await getSupplierBalances(db, 10))).toBe(true);
+  maybe("finds creditors however the account label is spelled", async () => {
+    // The live database labels 487 accounts 'Trade Creditors' and 7 'Creditor'.
+    // An exact match on 'Creditors' found none of them and the screen showed
+    // nothing at all, which reads as "no suppliers" rather than as a fault.
+    const rows = await getSupplierBalances(db, 100);
+    const codes = rows.map(r => r.code);
+    expect(codes).toContain("RPTCR1"); // Trade Creditors
+    expect(codes).toContain("RPTCR2"); // Creditor
+    expect(codes).toContain("RPTCR3"); // Creditors
+  });
+
+  maybe("does not mistake debtors for creditors", async () => {
+    const codes = (await getSupplierBalances(db, 100)).map(r => r.code);
+    expect(codes).not.toContain("RPTDR1");
+  });
+
+  maybe("reports balances in cents", async () => {
+    const row = (await getSupplierBalances(db, 100)).find(r => r.code === "RPTCR1");
+    expect(row!.balance).toBe(50000000); // 500,000.00
   });
 
   maybe("reports entries whose debits and credits differ", async () => {
-    const bad = await findUnbalancedEntries(db, "2026-08-01", "2026-08-01", 10);
+    const bad = await findUnbalancedEntries(db, "2099-03-15", "2099-03-15", 10);
     expect(Array.isArray(bad)).toBe(true);
   });
 });
@@ -173,6 +202,7 @@ describe("accounting periods", () => {
 
   maybe("allows posting into an open period", async () => {
     await db.query("DELETE FROM periods WHERE yr = 2099");
+    await db.query("DELETE FROM accounts WHERE code IN ('RPTCR1','RPTCR2','RPTCR3','RPTDR1')");
     await db.query("INSERT INTO periods (yr, period, locked) VALUES (?,?,?)", [2099, 6, "0"]);
     const status = await getPeriodStatus(db, "2099-06-15");
     expect(status.exists).toBe(true);
@@ -182,6 +212,7 @@ describe("accounting periods", () => {
 
   maybe("blocks a locked period", async () => {
     await db.query("DELETE FROM periods WHERE yr = 2099");
+    await db.query("DELETE FROM accounts WHERE code IN ('RPTCR1','RPTCR2','RPTCR3','RPTDR1')");
     await db.query("INSERT INTO periods (yr, period, locked) VALUES (?,?,?)", [2099, 7, "1"]);
     await expect(assertPeriodOpen(db, "2099-07-15")).rejects.toThrow(PeriodLockedError);
   });

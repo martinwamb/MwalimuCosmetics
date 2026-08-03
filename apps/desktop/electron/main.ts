@@ -25,6 +25,7 @@ import {
   getSaleLines,
   getDaySummary,
   getPaymentMix,
+  getDailyTrend,
   getTopProducts,
   getSupplierBalances,
   findUnbalancedEntries,
@@ -81,7 +82,7 @@ function createWindow() {
     height: 820,
     minWidth: 1024,
     minHeight: 700,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#ffffff",
     show: false,
     title: "Mwalimu Cosmetics",
     webPreferences: {
@@ -269,6 +270,11 @@ handle("data:daySummary", async (date: string) => {
 handle("data:paymentMix", async (date: string) => {
   requireUser();
   return getPaymentMix(database(), date);
+});
+
+handle("data:dailyTrend", async (from: string, to: string) => {
+  requireUser();
+  return getDailyTrend(database(), from, to);
 });
 
 handle("data:topProducts", async (from: string, to: string, limit: number) => {

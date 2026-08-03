@@ -49,6 +49,7 @@ const api = {
     saleLines:       (receiptNo: string) => call<any[]>("data:saleLines", receiptNo),
     daySummary:      (date: string) => call<any>("data:daySummary", date),
     paymentMix:      (date: string) => call<any[]>("data:paymentMix", date),
+    dailyTrend:      (from: string, to: string) => call<any[]>("data:dailyTrend", from, to),
     topProducts:     (from: string, to: string, limit?: number) =>
                        call<any[]>("data:topProducts", from, to, limit),
     supplierBalances: (limit?: number) => call<any[]>("data:supplierBalances", limit),
