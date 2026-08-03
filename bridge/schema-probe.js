@@ -60,7 +60,20 @@ const ONLY = (() => {
 })();
 const RESIDUAL_DAYS = Number(argValue("--residual-days", 60));
 
+// Milliseconds to wait between statements. This server also runs the tills
+// and cannot be worked on out of hours, because everything is powered down
+// when the shop closes. So diagnostics run while people are selling, and the
+// only responsible way to do that is slowly, one statement at a time.
+const PACE_MS = Number(argValue("--pace", 3000));
+
+// How far back the orphan census looks. Unbounded LEFT JOINs across the full
+// history of pos_details are exactly the kind of query that makes a till
+// hesitate; a recent window answers the question just as well.
+const ORPHAN_DAYS = Number(argValue("--orphan-days", 90));
+
 const wanted = (section) => !ONLY || ONLY.has(section);
+
+const pause = (ms) => new Promise(r => setTimeout(r, ms));
 
 function log(msg) { console.log(`[${new Date().toLocaleTimeString("en-KE")}] ${msg}`); }
 
@@ -96,9 +109,19 @@ function apiPost(pathname, body) {
 async function emit(name, rows) {
   if (!wanted(name)) { log(`  skipped ${name} (not in --only)`); return; }
 
+  // Never publish findings taken from a test database into the shared folder:
+  // zeros from an empty fixture look exactly like a clean bill of health from
+  // production, and there would be no way to tell them apart afterwards.
+  const isTestDb = /test/i.test(String(MYSQL_CONFIG.database || ""));
+
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(path.join(OUT_DIR, `${name}.json`), JSON.stringify(rows, null, 2));
   log(`  saved ${name}.json (${rows.length} rows)`);
+
+  if (isTestDb) {
+    log(`  not shipping ${name} — source is a test database (${MYSQL_CONFIG.database})`);
+    return;
+  }
 
   try {
     const r = await apiPost("/sync/backup", { date: SHIP_KEY, table: name, rows });
@@ -120,38 +143,69 @@ async function run() {
   // ── Server variables ────────────────────────────────────────
   // The local test instance must mirror sql_mode or tests pass while
   // production rejects the same statement (5.7 is far stricter than 5.1).
-  const vars = await query(conn,
-    `SELECT @@version AS version, @@sql_mode AS sql_mode,
-            @@storage_engine AS default_engine, @@old_passwords AS old_passwords,
-            DATABASE() AS db, NOW() AS server_time`);
-  await emit("vars", vars);
-  log(`  MySQL ${vars[0].version}, sql_mode='${vars[0].sql_mode}'`);
+  let vars = [];
+  if (wanted("vars")) {
+    // @@storage_engine exists on the shop's 5.1 but was removed by 5.7, and
+    // @@old_passwords likewise varies. Read the portable ones first so a
+    // missing variable cannot abort the whole probe, then try the rest.
+    vars = await query(conn,
+      `SELECT @@version AS version, @@sql_mode AS sql_mode,
+              DATABASE() AS db, NOW() AS server_time`);
+    for (const [alias, variable] of [["default_engine", "@@storage_engine"],
+                                     ["default_engine", "@@default_storage_engine"],
+                                     ["old_passwords",  "@@old_passwords"]]) {
+      if (vars[0][alias] !== undefined) continue;
+      try {
+        const r = await query(conn, `SELECT ${variable} AS v`);
+        vars[0][alias] = r[0].v;
+      } catch { /* not present on this server version */ }
+    }
+    await emit("vars", vars);
+    log(`  MySQL ${vars[0].version}, sql_mode='${vars[0].sql_mode}'`);
+  }
 
-  // ── Table engines ───────────────────────────────────────────
-  const status = await query(conn, `SHOW TABLE STATUS`);
-  const engines = status.map(r => ({
-    name: r.Name, engine: r.Engine, rows: r.Rows,
-    dataLength: r.Data_length, collation: r.Collation,
-  }));
-  await emit("engines", engines);
+  // ── Table list and engines ──────────────────────────────────
+  // SHOW TABLE STATUS makes InnoDB gather per-table statistics, which across
+  // 428 tables is not cheap. Only run it when something actually needs it,
+  // and prefer information_schema.TABLES when only the names are wanted.
+  let status = [];
+  if (wanted("engines")) {
+    status = await query(conn, `SHOW TABLE STATUS`);
+    const engines = status.map(r => ({
+      name: r.Name, engine: r.Engine, rows: r.Rows,
+      dataLength: r.Data_length, collation: r.Collation,
+    }));
+    await emit("engines", engines);
 
-  const LEDGER = ["pos_header", "pos_details", "pos_payment_details",
-                  "journal_transactions", "creditors_transactions",
-                  "stran", "nauto", "ap_prepayment", "accounts"];
-  const nonInnodb = engines.filter(e =>
-    LEDGER.includes(e.name) && String(e.engine).toLowerCase() !== "innodb");
-  if (nonInnodb.length) {
-    log(`  *** WARNING: these ledger tables are NOT InnoDB — transactions will NOT roll back:`);
-    nonInnodb.forEach(e => log(`      ${e.name} = ${e.engine}`));
-  } else {
-    log(`  all ${LEDGER.length} ledger tables are InnoDB (transactions are real)`);
+    const LEDGER = ["pos_header", "pos_details", "pos_payment_details",
+                    "journal_transactions", "creditors_transactions",
+                    "stran", "nauto", "ap_prepayment", "accounts"];
+    const nonInnodb = engines.filter(e =>
+      LEDGER.includes(e.name) && String(e.engine).toLowerCase() !== "innodb");
+    if (nonInnodb.length) {
+      log(`  *** WARNING: these ledger tables are NOT InnoDB — transactions will NOT roll back:`);
+      nonInnodb.forEach(e => log(`      ${e.name} = ${e.engine}`));
+    } else {
+      log(`  all ${LEDGER.length} ledger tables are InnoDB (transactions are real)`);
+    }
   }
 
   // ── Full schema ─────────────────────────────────────────────
-  const tables = wanted("schema") ? status.map(r => r.Name) : [];
+  let tables = [];
+  if (wanted("schema")) {
+    tables = status.length
+      ? status.map(r => r.Name)
+      : (await query(conn,
+          `SELECT TABLE_NAME AS name FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME`)).map(r => r.name);
+  }
   if (tables.length) log(`Capturing CREATE TABLE for ${tables.length} tables…`);
   const schema = [];
+  // 428 statements back to back is what made the earlier runs noticeable at
+  // the counter. A short breath between them costs minutes we can afford.
+  const schemaPace = Math.min(PACE_MS, 250);
   for (const t of tables) {
+    if (schema.length) await pause(schemaPace);
     try {
       const r = await query(conn, `SHOW CREATE TABLE \`${t}\``);
       schema.push({ table: t, ddl: r[0]["Create Table"] || r[0]["Create View"] || null });
@@ -235,31 +289,51 @@ async function run() {
   // Legacy writes pos_* outside its transaction, so pre-existing damage is
   // likely. Sizing it now stops it being blamed on the new app later.
   if (wanted("orphans")) {
-  log("Counting pre-existing orphan rows…");
+  log(`Counting orphan rows over the last ${ORPHAN_DAYS} days, ${PACE_MS}ms apart…`);
   const orphans = [];
+
+  // Each check is anchored on pos_header and bounded by date, so the join
+  // drives off a recent slice rather than the whole history.
   const checks = [
-    ["details_without_header",
-     `SELECT COUNT(*) AS n FROM pos_details d
-        LEFT JOIN pos_header h ON h.receiptno = d.receiptno
-       WHERE h.receiptno IS NULL`],
     ["headers_without_details",
      `SELECT COUNT(*) AS n FROM pos_header h
-        LEFT JOIN pos_details d ON h.receiptno = d.receiptno
-       WHERE d.receiptno IS NULL AND h.receiptno <> 'AUTO'`],
+        LEFT JOIN pos_details d ON d.receiptno = h.receiptno
+       WHERE h.trandate >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+         AND h.receiptno <> 'AUTO' AND d.receiptno IS NULL`],
     ["posted_headers_without_payment",
      `SELECT COUNT(*) AS n FROM pos_header h
-        LEFT JOIN pos_payment_details p ON h.receiptno = p.receiptno
-       WHERE p.receiptno IS NULL AND h.posted = 1 AND h.receiptno <> 'AUTO'`],
+        LEFT JOIN pos_payment_details p ON p.receiptno = h.receiptno
+       WHERE h.trandate >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+         AND h.receiptno <> 'AUTO' AND h.posted = 1 AND p.receiptno IS NULL`],
     ["unposted_headers",
-     `SELECT COUNT(*) AS n FROM pos_header WHERE posted = 0 AND receiptno <> 'AUTO'`],
+     `SELECT COUNT(*) AS n FROM pos_header h
+       WHERE h.trandate >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+         AND h.receiptno <> 'AUTO' AND h.posted = 0`],
+    ["headers_without_stock_movement",
+     `SELECT COUNT(*) AS n FROM pos_header h
+        LEFT JOIN stran s ON s.trancode = h.receiptno
+       WHERE h.trandate >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+         AND h.receiptno <> 'AUTO' AND h.posted = 1 AND s.trancode IS NULL`],
   ];
+
   for (const [name, sql] of checks) {
+    await pause(PACE_MS);
     try {
-      const r = await query(conn, sql);
-      orphans.push({ check: name, count: r[0].n });
-      log(`  ${name}: ${r[0].n}`);
+      const started = Date.now();
+      const r = await query(conn, sql, [ORPHAN_DAYS]);
+      const ms = Date.now() - started;
+      orphans.push({ check: name, count: r[0].n, ms, days: ORPHAN_DAYS });
+      log(`  ${name}: ${r[0].n} (${ms}ms)`);
+
+      // If a single count is already labouring, stop rather than run three
+      // more like it. Better an incomplete census than a slow till.
+      if (ms > 15000) {
+        log(`  *** ${name} took ${ms}ms — stopping the census early to stay out of the way.`);
+        break;
+      }
     } catch (e) {
       orphans.push({ check: name, count: null, error: e.message });
+      log(`  ${name}: failed — ${e.message}`);
     }
   }
   await emit("orphans", orphans);
