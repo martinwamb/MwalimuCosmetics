@@ -10,6 +10,14 @@
  */
 
 export {
+  Database,
+  QueryError,
+  type ConnectionOptions,
+  type Queryable,
+  type Transaction,
+} from "./db/connection";
+
+export {
   encryptPassword,
   decryptPassword,
   verifyCryptoAvailable,
