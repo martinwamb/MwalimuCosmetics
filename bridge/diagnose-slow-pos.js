@@ -52,14 +52,35 @@ function query(conn, sql, params) {
     conn.query(sql, params || [], (e, r) => e ? rej(e) : res(r)));
 }
 
+/**
+ * Longest any single statement here may run before the whole script gives up.
+ *
+ * A previous version's first query aggregated the entire 2.4-million-row
+ * ledger, ran for a quarter of an hour and was killed without reporting
+ * anything. Read-only is not the same as cheap, and this is the backstop for
+ * that distinction: if a statement is slow enough to be felt at a counter,
+ * this script stops rather than continuing to lean on the server.
+ */
+const MAX_STATEMENT_MS = 8000;
+
+class TooSlow extends Error {
+  constructor(label, ms) {
+    super(`"${label}" took ${ms}ms, beyond the ${MAX_STATEMENT_MS}ms limit — stopping so this does not affect the tills`);
+    this.name = "TooSlow";
+  }
+}
+
 /** Run a statement, timed, after waiting out the pacing gap. */
 async function timed(conn, label, sql, params) {
   await pause(PACE_MS);
   const started = Date.now();
   try {
     const rows = await query(conn, sql, params);
-    return { label, ms: Date.now() - started, rows };
+    const ms = Date.now() - started;
+    if (ms > MAX_STATEMENT_MS) throw new TooSlow(label, ms);
+    return { label, ms, rows };
   } catch (e) {
+    if (e instanceof TooSlow) throw e;
     return { label, ms: Date.now() - started, error: e.message };
   }
 }
@@ -96,19 +117,43 @@ async function run() {
   const conn = mysql.createConnection(toDriverOptions(MYSQL_CONFIG));
   await new Promise((res, rej) => conn.connect(e => e ? rej(e) : res()));
 
-  const findings = [];
+  const findings = collected;
   const record = (r) => {
     findings.push(r);
     log(`  ${r.label}: ${r.error ? "FAILED " + r.error : r.ms + "ms"}`);
   };
 
-  // 1. Which items carry the most history — the worst case for this query.
-  const heavy = await timed(conn, "items with most movement rows",
-    "SELECT CODE, COUNT(*) AS rows_ FROM stran GROUP BY CODE ORDER BY rows_ DESC LIMIT 5");
-  record(heavy);
-  const worstCode = heavy.rows?.[0]?.CODE;
-  if (heavy.rows) {
-    heavy.rows.forEach(r => log(`      ${String(r.CODE).padEnd(18)} ${Number(r.rows_).toLocaleString()} rows`));
+  // 1. Pick a busy item to test against.
+  //
+  // The obvious way to find the busiest item is GROUP BY CODE across the
+  // whole table. That is a scan and sort of 2.4 million rows and is NOT a
+  // light query — an earlier version of this script did exactly that, ran
+  // for a quarter of an hour and had to be killed. Never again.
+  //
+  // Instead: take a recent slice of sales and use one of the items actually
+  // being sold. That is the case the tills care about anyway, and it reads a
+  // few hundred rows through an index rather than the entire ledger.
+  const recent = await timed(conn, "pick a recently sold item (indexed, bounded)",
+    `SELECT d.code, COUNT(*) AS times_sold
+       FROM pos_details d
+       JOIN pos_header h ON h.receiptno = d.receiptno
+      WHERE h.trandate >= DATE_SUB(NOW(), INTERVAL 2 DAY)
+      GROUP BY d.code
+      ORDER BY times_sold DESC
+      LIMIT 5`);
+  record(recent);
+  const worstCode = recent.rows?.[0]?.code;
+  if (recent.rows) {
+    recent.rows.forEach(r => log(`      ${String(r.code).padEnd(18)} sold ${r.times_sold}x in 2 days`));
+  }
+
+  // 2. How much history that item has. Counting rows for ONE code uses the
+  //    index on CODE and touches only that item's rows.
+  if (worstCode) {
+    const depth = await timed(conn, "movement rows for that one item",
+      "SELECT COUNT(*) AS rows_ FROM stran WHERE CODE = ?", [worstCode]);
+    record(depth);
+    if (depth.rows) log(`      ${Number(depth.rows[0].rows_).toLocaleString()} rows of history`);
   }
 
   // 2. What the planner actually does with the till's query.
@@ -159,13 +204,16 @@ async function run() {
   // 8. Does `sq` already hold the answer the till is computing the hard way?
   //    If it does, the cheapest fix is a code change in FumasV5 rather than
   //    anything done to this table.
+  // COUNT(DISTINCT CODE) over stran would be another full scan of 2.4 million
+  // rows — the same mistake as before. `sq` is small enough to count directly,
+  // and `si` gives the number of items to compare it against.
   const sqCheck = await timed(conn, "sq cache coverage",
-    `SELECT (SELECT COUNT(DISTINCT CODE) FROM sq) AS in_sq,
-            (SELECT COUNT(DISTINCT CODE) FROM stran) AS in_stran`);
+    `SELECT (SELECT COUNT(*) FROM sq) AS sq_rows,
+            (SELECT COUNT(*) FROM si) AS items`);
   record(sqCheck);
   if (sqCheck.rows?.[0]) {
-    const { in_sq, in_stran } = sqCheck.rows[0];
-    log(`      sq covers ${Number(in_sq).toLocaleString()} of ${Number(in_stran).toLocaleString()} items`);
+    const { sq_rows, items } = sqCheck.rows[0];
+    log(`      sq holds ${Number(sq_rows).toLocaleString()} rows for ${Number(items).toLocaleString()} items`);
   }
 
   // 9. Whether sq agrees with the ledger for the worst item. If it does, the
@@ -195,13 +243,28 @@ async function run() {
     log(`      (an ADD INDEX on 5.1 rebuilds all of that while holding a lock)`);
   }
 
-  await emit("diagnosis", findings.map(f => ({
-    label: f.label, ms: f.ms, error: f.error ?? null,
-    rows: f.rows ? JSON.parse(JSON.stringify(f.rows)) : null,
-  })));
-
+  await shipFindings(findings);
   conn.end();
   log("=== diagnosis complete — nothing was modified ===");
 }
 
-run().catch(err => { log("Fatal: " + err.message); process.exit(1); });
+/** Ship whatever was gathered, even a partial set. */
+async function shipFindings(findings) {
+  if (!findings.length) { log("nothing gathered, nothing to ship"); return; }
+  await emit("diagnosis", findings.map(f => ({
+    label: f.label, ms: f.ms, error: f.error ?? null,
+    rows: f.rows ? JSON.parse(JSON.stringify(f.rows)) : null,
+  })));
+}
+
+// Findings are collected here rather than inside run(), so that a run cut
+// short still reports what it managed to learn. The earlier version gathered
+// everything and shipped at the very end, so being killed part-way meant
+// losing the lot and knowing nothing about why.
+const collected = [];
+
+run().catch(async (err) => {
+  log("Stopped early: " + err.message);
+  try { await shipFindings(collected); } catch { /* keep the local copy */ }
+  process.exit(1);
+});
