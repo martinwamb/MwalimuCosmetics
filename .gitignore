@@ -25,3 +25,4 @@ apps/desktop/dist-electron
 apps/desktop/release
 apps/desktop/*.log
 bridge/schema-probe-output/
+apps/front/tsconfig.tsbuildinfo
