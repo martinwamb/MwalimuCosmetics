@@ -120,6 +120,65 @@ export async function allocateReceiptNo(db: Database, staff: string): Promise<st
   });
 }
 
+export interface PaymentMode {
+  /** payname — what appears on the receipt and in pos_payment_details. */
+  name: string;
+  /** Cash / Bank / Mobile Money / Card. */
+  term: string;
+  /** GL account the money lands in. */
+  account: string;
+  /** Whether a reference (M-Pesa code, card slip) must be captured. */
+  requiresReference: boolean;
+  order: number;
+}
+
+/**
+ * The tender types the shop accepts, as configured in FumasV5.
+ *
+ * Read from the shop's own table rather than hardcoded, so the new POS offers
+ * exactly what the tills already offer — including the several bank accounts
+ * this shop settles into.
+ */
+export async function getPaymentModes(db: Database): Promise<PaymentMode[]> {
+  const rows = await db.query<any>(
+    `SELECT payterm, paynumber, payname, pdebtorsac, hasref
+       FROM pos_payment_mode
+      WHERE payname <> ''
+      ORDER BY paynumber`);
+
+  return rows.map(r => ({
+    name: String(r.payname ?? "").trim(),
+    term: String(r.payterm ?? "").trim(),
+    account: String(r.pdebtorsac ?? "").trim(),
+    requiresReference: Number(r.hasref) === 1,
+    order: Number(r.paynumber ?? 0),
+  }));
+}
+
+/**
+ * Cost per unit for a set of items, for the buy_cost each sale line carries.
+ *
+ * The shop runs costing mode 0 (standard cost), so this is si.cost. Written
+ * as its own function because the mode is a setting: if it ever changes to a
+ * ledger-walking mode, this is the one place that has to follow.
+ */
+export async function getItemCosts(
+  db: Database, codes: readonly string[],
+): Promise<Map<string, Cents>> {
+  const out = new Map<string, Cents>();
+  const unique = [...new Set(codes.filter(Boolean))];
+  if (!unique.length) return out;
+
+  const rows = await db.query<any>(
+    `SELECT CODE, cost FROM si WHERE CODE IN (${unique.map(() => "?").join(",")})`,
+    unique);
+  for (const r of rows) {
+    out.set(String(r.CODE), Math.round(parseFloat(String(r.cost ?? 0)) * 100) || 0);
+  }
+  for (const c of unique) if (!out.has(c)) out.set(c, 0);
+  return out;
+}
+
 interface PreparedLine {
   input: SaleLineInput;
   amounts: LineAmounts;

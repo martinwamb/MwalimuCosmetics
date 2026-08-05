@@ -38,6 +38,18 @@ const api = {
     rights: (formName: string) => call<any>("auth:rights", formName),
   },
 
+  pos: {
+    paymentModes: () => call<any[]>("pos:paymentModes"),
+    itemCosts:    (codes: string[]) => call<Record<string, number>>("pos:itemCosts", codes),
+    postSale:     (draft: unknown) => call<any>("pos:postSale", draft),
+  },
+
+  receipt: {
+    get:    (receiptNo: string) => call<any>("receipt:get", receiptNo),
+    recent: (opts: unknown) => call<any[]>("receipt:recent", opts),
+    shop:   () => call<any>("receipt:shop"),
+  },
+
   data: {
     settings:        () => call<any>("data:settings"),
     periodStatus:    (date: string) => call<any>("data:periodStatus", date),

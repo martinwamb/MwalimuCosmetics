@@ -29,6 +29,12 @@ import {
   getTopProducts,
   getSupplierBalances,
   findUnbalancedEntries,
+  postSale,
+  getPaymentModes,
+  getItemCosts,
+  getReceipt,
+  getShopDetails,
+  findRecentReceipts,
   verifyCryptoAvailable,
   type User,
 } from "@mwalimu/fumas-core";
@@ -290,6 +296,60 @@ handle("data:supplierBalances", async (limit: number) => {
 handle("data:unbalancedEntries", async (from: string, to: string) => {
   requireUser();
   return findUnbalancedEntries(database(), from, to, 50);
+});
+
+// ── Selling ──────────────────────────────────────────────────────
+
+/**
+ * Writes are refused here, in the main process, rather than by hiding a
+ * button. The renderer cannot talk itself past this, and an installation left
+ * read-only stays read-only whatever the interface is persuaded to do.
+ */
+function requireWrites(): void {
+  if (!config.writesEnabled) {
+    throw new Error(
+      "This installation is read-only. Turn on writing in Settings once you are " +
+      "satisfied it should record real sales.");
+  }
+}
+
+handle("pos:paymentModes", async () => {
+  requireUser();
+  return getPaymentModes(database());
+});
+
+handle("pos:itemCosts", async (codes: string[]) => {
+  requireUser();
+  const map = await getItemCosts(database(), codes ?? []);
+  return Object.fromEntries(map);
+});
+
+handle("pos:postSale", async (draft: any) => {
+  const user = requireUser();
+  requireWrites();
+  return postSale(database(), {
+    ...draft,
+    // Taken from the signed-in session, never from the renderer, so a sale is
+    // always attributed to whoever actually signed in.
+    staff: user.usercode,
+    terminal: config.terminalId,
+  });
+});
+
+// ── Receipts ─────────────────────────────────────────────────────
+handle("receipt:get", async (receiptNo: string) => {
+  requireUser();
+  return getReceipt(database(), receiptNo);
+});
+
+handle("receipt:recent", async (opts: any) => {
+  requireUser();
+  return findRecentReceipts(database(), opts);
+});
+
+handle("receipt:shop", async () => {
+  requireUser();
+  return getShopDetails(database());
 });
 
 // ── Lifecycle ────────────────────────────────────────────────────

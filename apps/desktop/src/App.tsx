@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, type Check, type User } from "./api";
 import { Dashboard, Items, Sales, Suppliers, Settings } from "./screens";
+import { PointOfSale, Reprint } from "./pos";
 
-type Screen = "dashboard" | "items" | "sales" | "suppliers" | "settings";
+type Screen = "dashboard" | "pos" | "reprint" | "items" | "sales" | "suppliers" | "settings";
 
 /**
  * Screens are gated on the same per-form rights FumasV5 uses, so a cashier
@@ -11,6 +12,8 @@ type Screen = "dashboard" | "items" | "sales" | "suppliers" | "settings";
  */
 const SCREENS: Array<{ id: Screen; label: string; form: string | null }> = [
   { id: "dashboard", label: "Dashboard", form: null },
+  { id: "pos",       label: "Sell",          form: "FPOS" },
+  { id: "reprint",   label: "Reprint",       form: "FPosList" },
   { id: "items",     label: "Items & stock", form: "Fitemlist" },
   { id: "sales",     label: "Sales",         form: "FPosList" },
   { id: "suppliers", label: "Suppliers",     form: "FPrepayment_creditors" },
@@ -162,6 +165,8 @@ export default function App() {
 
       <main className="main">
         {screen === "dashboard" && <Dashboard />}
+        {screen === "pos"       && <PointOfSale writesEnabled={writesEnabled} />}
+        {screen === "reprint"   && <Reprint />}
         {screen === "items"     && <Items />}
         {screen === "sales"     && <Sales />}
         {screen === "suppliers" && <Suppliers />}

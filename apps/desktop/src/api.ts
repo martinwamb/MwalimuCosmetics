@@ -45,6 +45,21 @@ interface Api {
     current(): Promise<User | null>;
     rights(formName: string): Promise<Record<string, boolean>>;
   };
+  pos: {
+    paymentModes(): Promise<Array<{
+      name: string; term: string; account: string; requiresReference: boolean; order: number;
+    }>>;
+    itemCosts(codes: string[]): Promise<Record<string, number>>;
+    postSale(draft: unknown): Promise<{
+      receiptNo: string; total: number; vat: number; discount: number;
+      change: number; glLegs: number; roundingApplied: number;
+    }>;
+  };
+  receipt: {
+    get(receiptNo: string): Promise<any | null>;
+    recent(opts: unknown): Promise<any[]>;
+    shop(): Promise<any>;
+  };
   data: {
     settings(): Promise<any>;
     periodStatus(date: string): Promise<{ year: number; month: number; exists: boolean; locked: boolean }>;

@@ -89,6 +89,9 @@ export {
 export {
   postSale,
   allocateReceiptNo,
+  getPaymentModes,
+  getItemCosts,
+  type PaymentMode,
   SaleValidationError,
   type SaleInput,
   type SaleLineInput,

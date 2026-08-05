@@ -196,3 +196,39 @@ tbody tr.clickable { cursor: pointer; }
 .checks .mark { width: 0.9rem; flex-shrink: 0; font-weight: 600; }
 .checks .mark.ok { color: var(--good); }
 .checks .mark.no { color: var(--bad); }
+
+/* ── Receipt ────────────────────────────────────────────── */
+/* Narrow, monospaced and monochrome: this is what a thermal printer wants,
+   and it also reads on screen as the piece of paper it will become. */
+.receipt {
+  max-width: 340px;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.receipt-head { text-align: center; margin-bottom: 0.7rem; }
+.receipt-meta { border-top: 1px dashed var(--rule-firm); border-bottom: 1px dashed var(--rule-firm);
+                padding: 0.5rem 0; margin-bottom: 0.5rem; }
+.receipt-lines, .receipt-totals { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.receipt-lines th, .receipt-lines td,
+.receipt-totals td { border: none; padding: 0.12rem 0; white-space: normal; }
+.receipt-lines th { border-bottom: 1px dashed var(--rule-firm); text-transform: none;
+                    letter-spacing: 0; font-size: 0.72rem; }
+.receipt-totals { border-top: 1px dashed var(--rule-firm); margin-top: 0.4rem; padding-top: 0.4rem; }
+.receipt-words { margin-top: 0.5rem; font-style: italic; }
+.receipt-foot { text-align: center; margin-top: 0.5rem; font-size: 0.72rem; color: var(--ink-2); }
+
+@media print {
+  /* Print the receipt alone — no sidebar, no buttons, no page chrome. */
+  body * { visibility: hidden; }
+  #printable-receipt, #printable-receipt * { visibility: visible; }
+  #printable-receipt {
+    position: absolute; left: 0; top: 0;
+    width: 100%; max-width: none; border: none; padding: 0;
+  }
+  @page { margin: 6mm; }
+}
