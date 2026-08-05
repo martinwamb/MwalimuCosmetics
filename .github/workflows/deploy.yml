@@ -43,6 +43,7 @@ jobs:
             --filter "P .env.*" \
             --filter "P bridge/FumasV5.exe" \
             --filter "P bridge/FumasV5-version.txt" \
+            --filter "P bridge/FumasV5-updated.exe" \
             ./ $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_DIR/
 
       - name: Install, migrate, build, restart
