@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260803-38";
+const AGENT_VERSION   = "20260805-39";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -45,6 +45,7 @@ try {
 const API             = "https://api.mwalimucosmetics.com";
 const SECRET          = "mwalimu-sync-secret";
 const CHECKPOINT_FILE = "C:\\MwalimuSync\\checkpoint.json";
+const AGENT_HOME      = "C:\\MwalimuSync\\";
 const SELF_PATH       = "C:\\MwalimuSync\\pusher.js";
 
 function kenyanDate() {
@@ -995,6 +996,59 @@ async function applyPendingChanges(conn, token) {
               });
           });
         } catch (e) { log("Diagnosis error: " + e.message); }
+
+      } else if (change.type === "check_drafts") {
+        // Nightly draft census. Read-only; see check-drafts.js for why this
+        // measures rather than assumes.
+        try {
+          for (const name of ["db-config.js", "check-drafts.js"]) {
+            const dl = await apiRequest("POST", "/sync/agent/get-file", { filename: name }, null, null, 60000);
+            if (dl.status !== 200) { log(`${name} download failed: ${dl.status}`); throw new Error(name); }
+            fs.writeFileSync(AGENT_HOME + name, dl.body, "utf8");
+          }
+          const args = Array.isArray(change.payload && change.payload.args)
+            ? change.payload.args.map(String) : [];
+          log("Running the draft census (read only)…");
+          const { execFile } = require("child_process");
+          await new Promise(resolve => {
+            execFile(process.execPath, [AGENT_HOME + "check-drafts.js", ...args],
+              { cwd: AGENT_HOME, timeout: 600000, maxBuffer: 20 * 1024 * 1024 },
+              (err, stdout, stderr) => {
+                (stdout || "").split(/\r?\n/).filter(Boolean).slice(-30)
+                  .forEach(l => log("  drafts| " + l.trim()));
+                if (err) log("Draft census failed: " + err.message + " " + (stderr || "").slice(0, 300));
+                else     log("Draft census finished.");
+                resolve();
+              });
+          });
+        } catch (e) { log("Draft census error: " + e.message); }
+
+      } else if (change.type === "install_updated_fumas") {
+        // Installs the updated FumasV5 ALONGSIDE the existing one and adds a
+        // second desktop shortcut. The running build is never replaced, so
+        // staff can go back to it simply by using the old shortcut.
+        try {
+          const dl = await apiRequest("POST", "/sync/agent/get-file",
+            { filename: "install-updated-fumas.bat" }, null, null, 60000);
+          if (dl.status !== 200) { log(`installer download failed: ${dl.status}`); throw new Error("installer"); }
+          const batPath = AGENT_HOME + "install-updated-fumas.bat";
+          fs.writeFileSync(batPath, dl.body, "utf8");
+
+          log("Installing the updated FumasV5 alongside the current one…");
+          const { execFile } = require("child_process");
+          await new Promise(resolve => {
+            // Driven unattended, so the script's pause must not hold it open.
+            execFile("cmd.exe", ["/c", "echo.", "|", batPath],
+              { cwd: AGENT_HOME, timeout: 600000, maxBuffer: 8 * 1024 * 1024 },
+              (err, stdout, stderr) => {
+                (stdout || "").split(/\r?\n/).filter(Boolean).slice(-25)
+                  .forEach(l => log("  install| " + l.trim()));
+                if (err) log("Side-by-side install failed: " + err.message + " " + (stderr || "").slice(0, 300));
+                else     log("Side-by-side install finished — both versions now on the desktop.");
+                resolve();
+              });
+          });
+        } catch (e) { log("Side-by-side install error: " + e.message); }
 
       } else if (change.type === "print_receipt") {
         await printReceipt(change.payload);

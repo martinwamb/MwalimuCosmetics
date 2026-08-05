@@ -294,6 +294,7 @@ router.post("/backup", async (req, res) => {
     "pos_header", "pos_details", "pos_payment_details", "stran", "grn",
     "schema", "routines", "engines", "vars",
     "gl_residuals", "gl_residual_samples", "orphans", "diagnosis",
+    "summary", "drafts", "by_cashier",
   ];
   if (!allowed.includes(table)) return res.status(400).json({ error: "table not allowed" });
 
@@ -343,7 +344,7 @@ router.post("/bridge-log", (req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260803-38";
+const AGENT_VERSION = "20260805-39";
 
 router.get("/agent-version",  (_req, res) => res.json({ version: AGENT_VERSION }));
 router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }));
@@ -353,6 +354,7 @@ router.post("/agent/get-file", (req, res) => {
   const { filename } = req.body as { filename?: string };
   const allowed = ["pusher.js", "loop.ps1", "db-config.js", "daily-backup.js", "daily-mirror.js",
                    "schema-probe.js", "provision-db-user.js", "diagnose-slow-pos.js",
+                   "check-drafts.js", "install-updated-fumas.bat", "FumasV5-updated.exe",
                    "launch-pos.bat", "FumasV5.exe"];
   if (!filename || !allowed.includes(filename)) return res.status(400).json({ error: "not allowed" });
   const filePath = path.join(AGENT_DIR, filename);
@@ -408,6 +410,24 @@ router.get("/agent/launch-pos.bat", (_req, res) => {
   res.sendFile(filePath);
 });
 
+// The updated FumasV5 build, served for side-by-side installation. Deliberately
+// a separate name from FumasV5.exe so fetching it can never overwrite the
+// build a till is already running.
+router.get("/agent/FumasV5-updated.exe", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "FumasV5-updated.exe");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", "attachment; filename=FumasV5-updated.exe");
+  res.sendFile(filePath);
+});
+
+router.get("/agent/install-updated-fumas.bat", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "install-updated-fumas.bat");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
+});
+
 router.get("/agent/daily-mirror.js", (_req, res) => {
   const filePath = path.join(AGENT_DIR, "daily-mirror.js");
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
@@ -418,7 +438,8 @@ router.get("/agent/daily-mirror.js", (_req, res) => {
 // Credential resolution and the one-off database tools. db-config.js carries
 // no secrets itself — it reads them from db-config.json on each PC.
 for (const name of ["db-config.js", "schema-probe.js", "provision-db-user.js",
-                    "diagnose-slow-pos.js"]) {
+                    "diagnose-slow-pos.js", "check-drafts.js",
+                    "install-updated-fumas.bat"]) {
   router.get(`/agent/${name}`, (_req, res) => {
     const filePath = path.join(AGENT_DIR, name);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
