@@ -20,6 +20,11 @@
 
 setlocal
 
+:: /quiet suppresses every prompt. The agent runs this unattended, where a
+:: pause is not a pause but a hang until something kills it.
+set "QUIET="
+if /i "%~1"=="/quiet" set "QUIET=1"
+
 set "FUMAS_DIR=C:\mwalimu\Debugv5"
 set "SOURCE=https://api.mwalimucosmetics.com/sync/agent/FumasV5-updated.exe"
 set "NEW_EXE=%FUMAS_DIR%\FumasV5-updated.exe"
@@ -30,6 +35,9 @@ echo.
 echo  ==========================================================
 echo   Installing the updated FumasV5 NEXT TO the current one
 echo  ==========================================================
+:: Named explicitly, because this is usually run remotely and the first
+:: question afterwards is always "which machine did that actually touch?"
+echo   Machine: %COMPUTERNAME%    User: %USERNAME%
 echo.
 
 :: --- The existing installation must be there to sit beside ----
@@ -38,7 +46,7 @@ if not exist "%FUMAS_DIR%\FumasV5.exe" (
   echo         This PC does not appear to have FumasV5 installed,
   echo         so there is nothing to install alongside.
   echo.
-  pause
+  if not defined QUIET pause
   exit /b 1
 )
 echo  [OK] Found the current FumasV5 at %FUMAS_DIR%
@@ -53,7 +61,7 @@ if errorlevel 1 (
   echo         Nothing has been changed on this PC.
   del /q "%NEW_EXE%.part" 2>nul
   echo.
-  pause
+  if not defined QUIET pause
   exit /b 1
 )
 
@@ -63,7 +71,7 @@ if %SIZE% LSS 20000000 (
   echo  [STOP] The download looks incomplete ^(%SIZE% bytes^). Nothing changed.
   del /q "%NEW_EXE%.part" 2>nul
   echo.
-  pause
+  if not defined QUIET pause
   exit /b 1
 )
 
@@ -119,7 +127,7 @@ if %SHORTCUT_RESULT% NEQ 0 (
   echo           %NEW_EXE%
   echo         Or run this installer again as Administrator.
   echo.
-  pause
+  if not defined QUIET pause
   exit /b 1
 )
 
@@ -135,4 +143,4 @@ echo   Nothing was removed. If the updated one misbehaves, simply
 echo   use the original shortcut; it is untouched.
 echo  ==========================================================
 echo.
-pause
+if not defined QUIET pause

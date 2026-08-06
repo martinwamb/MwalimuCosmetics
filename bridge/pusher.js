@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260805-39";
+const AGENT_VERSION   = "20260806-40";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -1037,8 +1037,10 @@ async function applyPendingChanges(conn, token) {
           log("Installing the updated FumasV5 alongside the current one…");
           const { execFile } = require("child_process");
           await new Promise(resolve => {
-            // Driven unattended, so the script's pause must not hold it open.
-            execFile("cmd.exe", ["/c", "echo.", "|", batPath],
+            // /quiet skips every prompt. Without it the script sits on
+            // "Press any key" until this handler's timeout kills it, which
+            // leaves the install half-done and the job stuck pending.
+            execFile("cmd.exe", ["/c", batPath, "/quiet"],
               { cwd: AGENT_HOME, timeout: 600000, maxBuffer: 8 * 1024 * 1024 },
               (err, stdout, stderr) => {
                 (stdout || "").split(/\r?\n/).filter(Boolean).slice(-25)
