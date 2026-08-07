@@ -25,10 +25,36 @@ setlocal
 set "QUIET="
 if /i "%~1"=="/quiet" set "QUIET=1"
 
-set "FUMAS_DIR=C:\mwalimu\Debugv5"
 set "SOURCE=https://api.mwalimucosmetics.com/sync/agent/FumasV5-updated.exe"
-set "NEW_EXE=%FUMAS_DIR%\FumasV5-updated.exe"
 set "PS1=%TEMP%\mwalimu-shortcut.ps1"
+
+:: --- Find where FumasV5 actually lives on THIS machine ---------
+:: It is not in the same place everywhere: C:\mwalimu\Debugv5 on one PC,
+:: C:\futuresoft\Debugv5 on another. Hardcoding one path meant the script
+:: refused to run on a perfectly good machine.
+set "FUMAS_DIR="
+if not "%~2"=="" if /i "%~1"=="/dir" set "FUMAS_DIR=%~2"
+if not "%~1"=="" if /i not "%~1"=="/quiet" if /i not "%~1"=="/dir" set "FUMAS_DIR=%~1"
+
+if not defined FUMAS_DIR (
+  for %%P in (
+    "C:\futuresoft\Debugv5"
+    "C:\mwalimu\Debugv5"
+    "C:\futuresoft\Debug"
+    "C:\mwalimu\Debug"
+    "C:\Debugv5"
+    "C:\FumasV5"
+    "C:\Program Files (x86)\FumasV5"
+    "C:\Program Files\FumasV5"
+  ) do if not defined FUMAS_DIR if exist "%%~P\FumasV5.exe" set "FUMAS_DIR=%%~P"
+)
+
+:: Still nothing? Look one level under the obvious roots before giving up.
+if not defined FUMAS_DIR (
+  for /d %%R in ("C:\futuresoft\*" "C:\mwalimu\*") do (
+    if not defined FUMAS_DIR if exist "%%~R\FumasV5.exe" set "FUMAS_DIR=%%~R"
+  )
+)
 
 title Install updated FumasV5 (alongside the current one)
 echo.
@@ -40,16 +66,31 @@ echo  ==========================================================
 echo   Machine: %COMPUTERNAME%    User: %USERNAME%
 echo.
 
+:: Locating the existing install before anything is downloaded.
+
 :: --- The existing installation must be there to sit beside ----
-if not exist "%FUMAS_DIR%\FumasV5.exe" (
-  echo  [STOP] No FumasV5 found at %FUMAS_DIR%
-  echo         This PC does not appear to have FumasV5 installed,
-  echo         so there is nothing to install alongside.
-  echo.
-  if not defined QUIET pause
-  exit /b 1
-)
+if not defined FUMAS_DIR goto :notfound
+if not exist "%FUMAS_DIR%\FumasV5.exe" goto :notfound
 echo  [OK] Found the current FumasV5 at %FUMAS_DIR%
+set "NEW_EXE=%FUMAS_DIR%\FumasV5-updated.exe"
+goto :found
+
+:notfound
+echo  [STOP] Could not find FumasV5 on this PC.
+echo.
+echo         Looked in the usual places, including:
+echo           C:\futuresoft\Debugv5
+echo           C:\mwalimu\Debugv5
+echo.
+echo         If it is somewhere else, run this again with the folder:
+echo           %~nx0 /dir "D:\wherever\Debugv5"
+echo.
+echo         Nothing has been changed on this PC.
+echo.
+if not defined QUIET pause
+exit /b 1
+
+:found
 
 :: --- Download beside, never over ------------------------------
 echo.
