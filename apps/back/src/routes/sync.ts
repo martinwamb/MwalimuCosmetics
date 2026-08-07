@@ -344,7 +344,12 @@ router.post("/bridge-log", (req, res) => {
 // /sync/agent/pusher.js, overwrite themselves, and restart.
 
 const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetics/bridge";
-const AGENT_VERSION = "20260807-41";
+
+// MUST match AGENT_VERSION in bridge/pusher.js. The agent compares its own
+// embedded constant with whatever this endpoint reports and only updates when
+// they differ — so shipping a new pusher.js without bumping this leaves every
+// PC on the old code with no sign anything is wrong. Bump both together.
+const AGENT_VERSION = "20260807-42";
 
 router.get("/agent-version",  (_req, res) => res.json({ version: AGENT_VERSION }));
 router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }));
