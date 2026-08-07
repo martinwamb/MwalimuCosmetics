@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260806-40";
+const AGENT_VERSION   = "20260807-41";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -996,6 +996,43 @@ async function applyPendingChanges(conn, token) {
               });
           });
         } catch (e) { log("Diagnosis error: " + e.message); }
+
+      } else if (change.type === "metrics_backfill") {
+        // Recompute and push the dashboard figures for specific past days.
+        //
+        // The nightly refresh normally covers this, but a night the agent is
+        // down leaves a permanent hole — 6 August went missing exactly that
+        // way. buildMetrics already takes the date, so this reuses it rather
+        // than duplicating any aggregation.
+        //
+        // payload: { dates: ["2026-08-06", ...] }  or  { date: "2026-08-06" }
+        try {
+          const wanted = Array.isArray(change.payload && change.payload.dates)
+            ? change.payload.dates
+            : [change.payload && change.payload.date].filter(Boolean);
+
+          if (!wanted.length) {
+            log("metrics_backfill: no dates given, nothing to do");
+          } else {
+            // One connection for the whole set, closed even if a day fails.
+            const bconn = await openConn();
+            try {
+              for (const d of wanted) {
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d))) {
+                  log(`metrics_backfill: skipping "${d}", not a date`);
+                  continue;
+                }
+                const data = await buildMetrics(bconn, d);
+                data.agentVersion = AGENT_VERSION;
+                const ok = await pushMetrics(data).catch(e => {
+                  log(`metrics_backfill ${d}: push failed — ${e.message}`); return false;
+                });
+                log(`metrics_backfill ${d}: ${ok ? "pushed" : "not pushed"} ` +
+                    `(${data.transactions} receipts)`);
+              }
+            } finally { bconn.end(); }
+          }
+        } catch (e) { log("metrics_backfill error: " + e.message); }
 
       } else if (change.type === "check_drafts") {
         // Nightly draft census. Read-only; see check-drafts.js for why this
