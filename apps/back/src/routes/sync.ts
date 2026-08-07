@@ -352,9 +352,14 @@ router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }
 // POST endpoint to serve agent files — works on networks that block GET
 router.post("/agent/get-file", (req, res) => {
   const { filename } = req.body as { filename?: string };
-  const allowed = ["pusher.js", "loop.ps1", "db-config.js", "daily-backup.js", "daily-mirror.js",
+  // ar-payment.js is a sidecar module pusher.js requires. checkForUpdate
+  // downloads sidecars BEFORE overwriting pusher.js, so a new agent never
+  // starts against a dependency that has not landed — see SIDECAR_MODULES.
+  const allowed = ["pusher.js", "loop.ps1", "db-config.js", "ar-payment.js",
+                   "daily-backup.js", "daily-mirror.js",
                    "schema-probe.js", "provision-db-user.js", "diagnose-slow-pos.js",
-                   "check-drafts.js", "install-updated-fumas.bat", "FumasV5-updated.exe",
+                   "check-drafts.js", "create-cheque-clearing.js",
+                   "install-updated-fumas.bat", "FumasV5-updated.exe",
                    "launch-pos.bat", "FumasV5.exe"];
   if (!filename || !allowed.includes(filename)) return res.status(400).json({ error: "not allowed" });
   const filePath = path.join(AGENT_DIR, filename);

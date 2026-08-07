@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260807-41";
+const AGENT_VERSION   = "20260807-42";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -47,6 +47,24 @@ const SECRET          = "mwalimu-sync-secret";
 const CHECKPOINT_FILE = "C:\\MwalimuSync\\checkpoint.json";
 const AGENT_HOME      = "C:\\MwalimuSync\\";
 const SELF_PATH       = "C:\\MwalimuSync\\pusher.js";
+
+// Files this script requires that are NOT part of it. checkForUpdate downloads
+// these before overwriting pusher.js, so a new version never starts against a
+// missing dependency.
+const SIDECAR_MODULES = ["db-config.js", "ar-payment.js"];
+
+// Guarded for the same reason as db-config below: a self-updated pusher.js can
+// land on a PC before its sidecars do. A missing module must cost one feature,
+// never the whole sync — the agent being down for a night has already happened
+// once and lost a night's data.
+let postArPayment = null;
+try {
+  ({ postArPayment } = require("./ar-payment"));
+} catch {
+  postArPayment = async () => {
+    throw new Error("ar-payment.js is not deployed on this PC yet — the payment stays queued and will apply once it is.");
+  };
+}
 
 function kenyanDate() {
   return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -187,6 +205,28 @@ async function checkForUpdate() {
     if (version === AGENT_VERSION) return;
 
     log(`New agent version available (${version}). Downloading…`);
+
+    // Sidecars first, then pusher.js. The order matters: this script updates
+    // itself by overwriting one file, so a new pusher.js that requires a module
+    // which has not landed yet would fail on the next cycle and take the agent
+    // down. Writing the dependencies first means the new pusher.js only ever
+    // starts once everything it needs is already on disk. Every require of
+    // these is still guarded, so a sidecar that fails to download degrades one
+    // feature rather than stopping the sync.
+    for (const filename of SIDECAR_MODULES) {
+      try {
+        const s = await apiRequest("POST", "/sync/agent/get-file", { filename }, null, null, 60000);
+        if (s.status === 200) {
+          fs.writeFileSync(AGENT_HOME + filename, s.body, "utf8");
+          log(`  sidecar updated: ${filename}`);
+        } else {
+          log(`  sidecar ${filename} not available (${s.status}) — continuing`);
+        }
+      } catch (e) {
+        log(`  sidecar ${filename} failed (${e.message}) — continuing`);
+      }
+    }
+
     const dl = await apiRequest("POST", "/sync/agent/get-file", { filename: "pusher.js" }, null, null, 60000);
     if (dl.status !== 200) { log("Download failed: " + dl.status); return; }
 
@@ -1209,6 +1249,18 @@ async function applyPendingChanges(conn, token) {
         // Instalment cheque/cash/bank-transfer payment against a GRN — posts
         // into FumasV5's real AP ledger (see GRN_PAYMENT_DB).
         await postGrnPayment(change.payload);
+
+      } else if (change.type === "ar_payment") {
+        // Customer payment against an invoice — the twin of ArReceipt.Post in
+        // FumasV5, kept identical by bridge/test-ar-parity.js. The posting
+        // itself lives in ar-payment.js so the test can import it; requiring
+        // this file would start a sync.
+        const arConn = await openTestConn();
+        try {
+          await postArPayment(arConn, change.payload, { staff: "WEB", log });
+        } finally {
+          arConn.end();
+        }
 
       } else {
         // Unrecognized change type — fail loudly rather than silently marking
