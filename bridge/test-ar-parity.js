@@ -257,8 +257,13 @@ async function postViaFumas(payload) {
                              incheque_date = CONCAT(COALESCE(incheque_date,''),' ',?)
           WHERE invno = ?`, [cheque, bankingDate, invoiceNo]);
     }
-    await q("INSERT IGNORE INTO accounts (code,description,nb,prepaid,active) VALUES (?,?,'Debtors',0,1)",
-      [clientCode, clientName]);
+    // Mirrors the corrected ArReceipt.cs. Not INSERT IGNORE: accounts has no
+    // unique key on code, so IGNORE inserts a duplicate every time.
+    await q(
+      `INSERT INTO accounts (code, description, nb, prepaid, active)
+       SELECT ?, ?, 'Debtors', 0, 1 FROM DUAL
+        WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE code = ?)`,
+      [clientCode, clientName, clientCode]);
     await q("UPDATE accounts SET prepaid = COALESCE(prepaid,0) + ? WHERE code = ?", [amount, clientCode]);
     if (rtype === "Q") {
       await q(
@@ -363,6 +368,14 @@ async function testParity() {
 async function testInstalments() {
   console.log("\n[4] Three cheques against one invoice — only the last closes it");
   await makeInvoice("PINV010", 300000);
+
+  // Measured as a delta from here. Test [1] deliberately zeroes the balance
+  // mid-run so both paths see the same balbf, which breaks any comparison
+  // against the running total of receipts taken since the start.
+  const balBefore = await accountBalance(CLIENT.code);
+  const [{ receiptedBefore }] = await q(
+    "SELECT COALESCE(SUM(amount),0) receiptedBefore FROM ar_prepayment WHERE ccode = ? AND posted = 1",
+    [CLIENT.code]);
   const base = {
     invoiceNo: "PINV010", clientCode: CLIENT.code, clientName: CLIENT.name,
     method: "CHEQUE", bankName: "CO-OP", branchName: "NAIROBI",
@@ -394,6 +407,26 @@ async function testInstalments() {
 
   const bal = await accountBalance(CLIENT.code);
   check(bal > 0, `the customer's running balance moved (${bal})`);
+
+  // accounts has no unique key on `code`, so "INSERT IGNORE" silently inserts a
+  // duplicate every time and the UPDATE that follows adds the payment to every
+  // matching row — doubling the balance, and the payables figure on the
+  // dashboard with it. Three payments must still leave exactly one row.
+  const rows = await q("SELECT COUNT(*) n FROM accounts WHERE code = ?", [CLIENT.code]);
+  check(Number(rows[0].n) === 1,
+    `the customer still has exactly one accounts row (got ${rows[0].n})`);
+
+  // Compared as a delta against what was actually receipted, rather than a
+  // fixed figure: the invariant is that the balance moves by exactly the sum of
+  // the receipts, and a hardcoded number only stays right until someone adds a
+  // test above it.
+  const [{ receiptedNow }] = await q(
+    "SELECT COALESCE(SUM(amount),0) receiptedNow FROM ar_prepayment WHERE ccode = ? AND posted = 1",
+    [CLIENT.code]);
+  const balDelta = Number(bal) - Number(balBefore);
+  const recDelta = Number(receiptedNow) - Number(receiptedBefore);
+  check(balDelta === recDelta,
+    `the balance moved by exactly the receipts taken (balance +${balDelta}, receipts +${recDelta})`);
 }
 
 async function testGuards() {

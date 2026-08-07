@@ -1569,10 +1569,19 @@ async function postGrnPayment(payload) {
         [pno, paymentDate, supplierCode, supplier.names, amount, cashAccount, chequeReal, remarksFull, balbf, balbf, "WEB", rtype, currency, cperiod]);
 
       // 5) Creditor's running balance — ensure the accounts row exists first
-      // (defensive: a newly-linked supplier may not have one yet), then update.
+      // (a newly-linked supplier may not have one yet), then update.
+      //
+      // NOT "INSERT IGNORE", which is what this used to be: accounts has no
+      // unique key on code — only on aid — so IGNORE has nothing to ignore and
+      // inserts a second row every time. The UPDATE below then matches both and
+      // adds the payment to each, doubling the supplier's balance and the
+      // Outstanding Payables figure on the dashboard. Production already
+      // carries 15 duplicated codes from this pattern.
       await query(conn,
-        "INSERT IGNORE INTO accounts (code, description, nb, prepaid, active) VALUES (?, ?, 'Creditors', 0, 1)",
-        [supplierCode, supplier.names]);
+        `INSERT INTO accounts (code, description, nb, prepaid, active)
+         SELECT ?, ?, 'Creditors', 0, 1 FROM DUAL
+          WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE code = ?)`,
+        [supplierCode, supplier.names, supplierCode]);
       await query(conn, "UPDATE accounts SET prepaid = prepaid + ? WHERE code = ?", [amount, supplierCode]);
 
       await commitTx(conn);

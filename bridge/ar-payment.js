@@ -226,11 +226,18 @@ async function postArPayment(conn, payload, opts = {}) {
           WHERE invno = ?`, [cheque, bankingDate, invoiceNo]);
     }
 
-    // A client invoiced but never paid may have no accounts row yet — the same
-    // defensive step the supplier path needed.
+    // A client invoiced but never paid may have no accounts row yet.
+    //
+    // NOT "INSERT IGNORE": accounts has no unique key on code — only on aid —
+    // so IGNORE has nothing to ignore and inserts a second row every time. The
+    // UPDATE below then matches both and adds the amount to each, doubling the
+    // customer's balance. Production already carries 15 duplicated codes from
+    // this pattern.
     await query(conn,
-      "INSERT IGNORE INTO accounts (code, description, nb, prepaid, active) VALUES (?,?,'Debtors',0,1)",
-      [clientCode, name]);
+      `INSERT INTO accounts (code, description, nb, prepaid, active)
+       SELECT ?, ?, 'Debtors', 0, 1 FROM DUAL
+        WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE code = ?)`,
+      [clientCode, name, clientCode]);
     await query(conn,
       "UPDATE accounts SET prepaid = COALESCE(prepaid,0) + ? WHERE code = ?", [amount, clientCode]);
 
