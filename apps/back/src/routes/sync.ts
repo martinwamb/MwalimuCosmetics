@@ -364,7 +364,8 @@ router.post("/agent/get-file", (req, res) => {
                    "daily-backup.js", "daily-mirror.js",
                    "schema-probe.js", "provision-db-user.js", "diagnose-slow-pos.js",
                    "check-drafts.js", "create-cheque-clearing.js",
-                   "install-updated-fumas.bat", "FumasV5-updated.exe",
+                   "install-updated-fumas.bat", "prepare-offline-install.bat",
+                   "FumasV5-updated.exe",
                    "launch-pos.bat", "FumasV5.exe"];
   if (!filename || !allowed.includes(filename)) return res.status(400).json({ error: "not allowed" });
   const filePath = path.join(AGENT_DIR, filename);
@@ -433,6 +434,16 @@ router.get("/agent/FumasV5-updated.exe", (_req, res) => {
 
 router.get("/agent/install-updated-fumas.bat", (_req, res) => {
   const filePath = path.join(AGENT_DIR, "install-updated-fumas.bat");
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.sendFile(filePath);
+});
+
+// Run on one of the two PCs that have internet. Downloads the exe and the
+// installer into a USB stick or a shared folder, so the machines that are
+// offline can be installed from that folder without touching the network.
+router.get("/agent/prepare-offline-install.bat", (_req, res) => {
+  const filePath = path.join(AGENT_DIR, "prepare-offline-install.bat");
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: "not found" });
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.sendFile(filePath);

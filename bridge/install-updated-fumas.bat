@@ -20,21 +20,53 @@
 
 setlocal
 
-:: /quiet suppresses every prompt. The agent runs this unattended, where a
-:: pause is not a pause but a hang until something kills it.
-set "QUIET="
-if /i "%~1"=="/quiet" set "QUIET=1"
+:: Captured BEFORE any argument parsing. "shift" moves %0 along with the rest,
+:: so after parsing a switch or two %~dp0 no longer points at this script - it
+:: points at whatever argument has been shifted into position zero. That caused
+:: a silent fall back to downloading on a PC that had the file sitting right
+:: next to the installer.
+set "HERE=%~dp0"
+set "ME=%~nx0"
 
 set "SOURCE=https://api.mwalimucosmetics.com/sync/agent/FumasV5-updated.exe"
 set "PS1=%TEMP%\mwalimu-shortcut.ps1"
+set "QUIET="
+set "FUMAS_DIR="
+set "SRC="
+
+:: --- Arguments, in any order ----------------------------------
+::   /quiet         no prompts at all. The sync agent runs this unattended,
+::                  where a pause is not a pause but a hang until something
+::                  kills it.
+::   /dir <folder>  where FumasV5 is, if the search below cannot find it
+::   /src <path>    where to copy the new exe FROM: a folder or a file, on a
+::                  USB stick or a network share. Only two PCs in the shop have
+::                  internet, so most machines cannot download anything.
+:parse
+if "%~1"=="" goto parsed
+if /i "%~1"=="/quiet" (set "QUIET=1" & shift & goto parse)
+if /i "%~1"=="/dir"   (set "FUMAS_DIR=%~2" & shift & shift & goto parse)
+if /i "%~1"=="/src"   (set "SRC=%~2" & shift & shift & goto parse)
+:: A bare argument is the FumasV5 folder, which is how this was called before
+:: the switches existed.
+if not defined FUMAS_DIR set "FUMAS_DIR=%~1"
+shift
+goto parse
+:parsed
+
+:: --- Where to get the exe from --------------------------------
+:: A copy sitting next to this script wins over the internet: that is what a
+:: USB stick or a copied share folder looks like, and it means the same script
+:: works on a PC that has never been online.
+if not defined SRC if exist "%HERE%FumasV5-updated.exe" set "SRC=%HERE%FumasV5-updated.exe"
+
+:: If /src names a folder rather than the file, look inside it.
+if defined SRC if exist "%SRC%\FumasV5-updated.exe" set "SRC=%SRC%\FumasV5-updated.exe"
 
 :: --- Find where FumasV5 actually lives on THIS machine ---------
 :: It is not in the same place everywhere: C:\mwalimu\Debugv5 on one PC,
 :: C:\futuresoft\Debugv5 on another. Hardcoding one path meant the script
 :: refused to run on a perfectly good machine.
-set "FUMAS_DIR="
-if not "%~2"=="" if /i "%~1"=="/dir" set "FUMAS_DIR=%~2"
-if not "%~1"=="" if /i not "%~1"=="/quiet" if /i not "%~1"=="/dir" set "FUMAS_DIR=%~1"
 
 if not defined FUMAS_DIR (
   for %%P in (
@@ -83,7 +115,7 @@ echo           C:\futuresoft\Debugv5
 echo           C:\mwalimu\Debugv5
 echo.
 echo         If it is somewhere else, run this again with the folder:
-echo           %~nx0 /dir "D:\wherever\Debugv5"
+echo           %ME% /dir "D:\wherever\Debugv5"
 echo.
 echo         Nothing has been changed on this PC.
 echo.
@@ -92,19 +124,50 @@ exit /b 1
 
 :found
 
-:: --- Download beside, never over ------------------------------
+:: --- Copy or download, beside and never over -------------------
 echo.
+if defined SRC goto :fromlocal
+
 echo  Downloading the updated version (about 33 MB)...
 powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { Invoke-WebRequest -Uri '%SOURCE%' -OutFile '%NEW_EXE%.part' -UseBasicParsing; exit 0 } catch { exit 1 }"
 
 if errorlevel 1 (
-  echo  [STOP] Download failed. Check the internet connection and try again.
+  echo  [STOP] Could not download, and no local copy was given.
+  echo.
+  echo         Only two PCs in the shop have internet. On the rest, put
+  echo         FumasV5-updated.exe next to this script - on a USB stick or a
+  echo         shared folder - and run it again, or point at it:
+  echo.
+  echo           %ME% /src "\\SERVER\share\fumas-update"
+  echo.
   echo         Nothing has been changed on this PC.
   del /q "%NEW_EXE%.part" 2>nul
   echo.
   if not defined QUIET pause
   exit /b 1
 )
+goto :gotfile
+
+:fromlocal
+echo  Copying from %SRC%
+if not exist "%SRC%" (
+  echo  [STOP] Nothing at that path. Nothing has been changed on this PC.
+  echo.
+  if not defined QUIET pause
+  exit /b 1
+)
+copy /y "%SRC%" "%NEW_EXE%.part" >nul
+if errorlevel 1 (
+  echo  [STOP] Could not copy from %SRC%.
+  echo         If it is a network share, check this PC can reach it.
+  echo         Nothing has been changed on this PC.
+  del /q "%NEW_EXE%.part" 2>nul
+  echo.
+  if not defined QUIET pause
+  exit /b 1
+)
+
+:gotfile
 
 :: A truncated download must never be left in place as if it worked.
 for %%A in ("%NEW_EXE%.part") do set SIZE=%%~zA
