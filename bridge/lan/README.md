@@ -120,11 +120,15 @@ Start-Sleep 3; arp -a
   half-copied exe is discarded and retried rather than leaving a till
   broken but looking up to date.
 - Per-PC log: `C:\MwalimuSync\lan-update.log`
-- Two accounts are created: `mwalimuupd` (read-only, on the hub, used by
-  the tills) and `mwalimuadmin` (local admin on each PC, used by the
-  laptop). Their passwords are in the scripts. They are worth changing if
-  the shop LAN ever carries guest traffic; both would need changing in
-  `setup-hub.bat`, `setup-pc.bat`, and the two `.ps1` defaults.
+- Two accounts are created. `mwalimuupd` is read-only and exists only so
+  the tills can pull from the hub share — a compromised till therefore
+  cannot poison the build everyone installs. `mwalimuadmin` is the admin
+  account: on the hub it has write access so the laptop can publish, and
+  on each till it allows remote administration. So the laptop always uses
+  `mwalimuadmin`, the tills always use `mwalimuupd`. Their passwords are in
+  the scripts, worth changing if the shop LAN ever carries guest traffic;
+  both would need changing in `setup-hub.bat`, `setup-pc.bat`, and the two
+  `.ps1` defaults.
 - This is independent of the Hetzner sync agent in `bridge/`. That still
   handles the two internet PCs and its own self-update; this handles
   FumasV5 on everything, online or not.

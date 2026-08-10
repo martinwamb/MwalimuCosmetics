@@ -24,8 +24,12 @@ param(
   [string]$Source   = "C:\Mwalimu\Debugv5\FumasV5-updated.exe",
   [string]$Hub      = "10.10.10.4",
   [string]$Share    = "updates",
-  [string]$User     = "mwalimuupd",
-  [string]$Password = "MwalimuUpd2026"
+  # The PUBLISHER account, not the read-only one the tills use. Publishing
+  # writes to the share, so it must be the account setup-hub.bat granted
+  # CHANGE to. Connecting as the read-only mwalimuupd cannot write and the
+  # copy is denied.
+  [string]$User     = "mwalimuadmin",
+  [string]$Password = "MwalimuAdmin2026"
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +64,12 @@ Say ("Version: {0}" -f $version) "White"
 $unc = "\\$Hub\$Share"
 Say ""
 Say "Connecting to $unc ..."
+# Windows permits only one credential per server at a time. A leftover
+# session to this hub as the read-only account (e.g. from an earlier run)
+# makes the connect below fail with error 1219, so clear it first.
+cmd /c "net use `"$unc`" /delete /y >nul 2>nul"
+cmd /c "net use `"\\$Hub`" /delete /y >nul 2>nul"
+
 # The redirection belongs INSIDE cmd. Doing it PowerShell-side as
 # "2>&1" wraps net use's stderr in a NativeCommandError which, under
 # ErrorActionPreference = Stop, terminates the script before the
