@@ -104,7 +104,7 @@ if errorlevel 1 (
   net user %ADMUSER% %ADMPASS% >nul
   echo  [OK] Account %ADMUSER% already existed - password reset
 )
-wmic useraccount where "name='%ADMUSER%'" set PasswordExpires=false >nul 2>&1
+powershell -NoProfile -Command "Set-LocalUser -Name '%ADMUSER%' -PasswordNeverExpires $true" >nul 2>&1
 net localgroup Administrators %ADMUSER% /add >nul 2>&1
 
 :: Without this, a LOCAL account arriving over the network is

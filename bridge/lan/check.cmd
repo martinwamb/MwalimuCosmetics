@@ -7,13 +7,20 @@
 ::  whole point: this logic can be corrected centrally, from
 ::  the laptop, without anyone walking to a machine again.
 ::
-::  What it does, every 10 minutes on each PC:
-::    - compares the build in the share with the one installed
-::    - if they differ, copies the new one in as FumasV5_new.exe
+::  Every 10 minutes on each PC it:
+::    1. finds FumasV5 wherever it is installed (the shop keeps
+::       it in wildly different places, including a user's
+::       Desktop - so a fixed list is not enough, and there is
+::       a whole-disk fallback that remembers what it finds);
+::    2. compares the build in the share with the installed one;
+::    3. if they differ, copies the new build in and - if the
+::       POS is not open at that moment - applies it there and
+::       then. A running exe is never touched; it is applied on
+::       a later run once staff have closed it.
 ::
-::  It never overwrites a running FumasV5.exe. launch-pos.bat
-::  swaps the staged file in the next time the POS is opened,
-::  when the exe is definitely not in use.
+::  Applying it here, rather than leaving it for launch-pos.bat,
+::  matters because most tills open FumasV5.exe directly and
+::  never go through that launcher.
 ::
 ::  Plain ASCII and no multi-line continuations: both have
 ::  already broken a script in this folder once.
@@ -24,6 +31,7 @@ setlocal enabledelayedexpansion
 set "SHAREROOT=%~dp0.."
 set "LOGDIR=C:\MwalimuSync"
 set "LOG=%LOGDIR%\lan-update.log"
+set "CACHE=%LOGDIR%\fumas-dir.txt"
 
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" 2>nul
 
@@ -36,24 +44,63 @@ for /f "usebackq delims=" %%V in ("%SHAREROOT%\FumasV5-version.txt") do if not d
 if not defined WANT goto :nothing
 
 :: --- Where is FumasV5 on this machine? ----------------------
-:: It is not in the same place everywhere: C:\mwalimu\Debugv5 on
-:: one PC, C:\futuresoft\Debugv5 on another. Hardcoding one path
-:: has already made a script refuse to run on a good machine.
+:: Not in the same place everywhere: C:\futuresoft\Debugv5 on one
+:: PC, C:\Users\<name>\Desktop\Futuresoft\Debugv5 on another. So
+:: try, in order: a path we found before, a list of usual spots,
+:: every user's Desktop, then - only if we have never searched
+:: this PC before - a full sweep of the drive, whose result is
+:: remembered so the expensive sweep runs at most once.
 set "FUMAS_DIR="
-for %%P in (
-  "C:\futuresoft\Debugv5"
-  "C:\mwalimu\Debugv5"
-  "C:\fumasv5\Debugv5"
-  "C:\Debugv5"
-  "C:\FumasV5"
-  "C:\Program Files (x86)\FumasV5"
-  "C:\Program Files\FumasV5"
-) do if not defined FUMAS_DIR if exist "%%~P\FumasV5.exe" set "FUMAS_DIR=%%~P"
+set "SEARCHED="
 
+if exist "%CACHE%" (
+  set "SEARCHED=1"
+  for /f "usebackq delims=" %%D in ("%CACHE%") do if not defined FUMAS_DIR if exist "%%~D\FumasV5.exe" set "FUMAS_DIR=%%~D"
+)
+
+if not defined FUMAS_DIR (
+  for %%P in (
+    "C:\futuresoft\Debugv5"
+    "C:\mwalimu\Debugv5"
+    "C:\fumasv5\Debugv5"
+    "C:\Debugv5"
+    "C:\FumasV5"
+    "C:\Program Files (x86)\FumasV5"
+    "C:\Program Files\FumasV5"
+  ) do if not defined FUMAS_DIR if exist "%%~P\FumasV5.exe" set "FUMAS_DIR=%%~P"
+)
+
+:: One level under the usual roots.
 if not defined FUMAS_DIR (
   for /d %%R in ("C:\futuresoft\*" "C:\mwalimu\*") do (
     if not defined FUMAS_DIR if exist "%%~R\FumasV5.exe" set "FUMAS_DIR=%%~R"
   )
+)
+
+:: Every user's Desktop, one folder deep, with or without a
+:: Debugv5 under it - which is where this shop's tills keep it.
+if not defined FUMAS_DIR (
+  for /d %%U in ("C:\Users\*") do (
+    for /d %%S in ("%%~U\Desktop\*") do (
+      if not defined FUMAS_DIR if exist "%%~S\Debugv5\FumasV5.exe" set "FUMAS_DIR=%%~S\Debugv5"
+      if not defined FUMAS_DIR if exist "%%~S\FumasV5.exe"          set "FUMAS_DIR=%%~S"
+    )
+  )
+)
+
+:: Last resort, once per PC: sweep the whole drive. dir /s here is
+:: a fast metadata search, and gating it on SEARCHED means a PC
+:: that simply has no FumasV5 does not re-sweep every 10 minutes.
+if not defined FUMAS_DIR if not defined SEARCHED (
+  for /f "delims=" %%F in ('dir /b /s "C:\FumasV5.exe" 2^>nul') do if not defined FUMAS_DIR set "FUMAS_DIR=%%~dpF"
+)
+
+:: Normalise a trailing backslash left by %%~dp, then record the
+:: outcome so the sweep never runs again: a path if found, an
+:: empty marker if not. Only written on the first search.
+if defined FUMAS_DIR if "!FUMAS_DIR:~-1!"=="\" set "FUMAS_DIR=!FUMAS_DIR:~0,-1!"
+if not defined SEARCHED (
+  if defined FUMAS_DIR (> "%CACHE%" echo !FUMAS_DIR!) else (type nul > "%CACHE%")
 )
 
 if not defined FUMAS_DIR (
@@ -62,47 +109,81 @@ if not defined FUMAS_DIR (
 )
 
 :: --- Already up to date? ------------------------------------
+:: HAVE is the version actually APPLIED (written only after a
+:: successful swap below), so a build that is staged but not yet
+:: applied still counts as an update still to do.
 set "HAVE="
 if exist "%FUMAS_DIR%\FumasV5-version.txt" (
   for /f "usebackq delims=" %%V in ("%FUMAS_DIR%\FumasV5-version.txt") do if not defined HAVE set "HAVE=%%V"
 )
-if "!HAVE!"=="!WANT!" exit /b 0
-
-call :say "New build !WANT! in the share (this PC has !HAVE!). Copying..."
-
-:: --- Copy, then verify before believing it ------------------
-:: A half-copied exe that gets marked as installed would leave
-:: the till broken and looking up to date, which is worse than
-:: never having tried.
-copy /y "%SHAREROOT%\FumasV5-updated.exe" "%FUMAS_DIR%\FumasV5_new.exe.part" >nul 2>&1
-if errorlevel 1 (
-  call :say "[FAIL] Could not copy from the share. Will retry in 10 minutes."
+if "!HAVE!"=="!WANT!" (
+  :: Applied and current. Tidy any stale staged copy and stop.
+  if exist "%FUMAS_DIR%\FumasV5_new.exe" del /f /q "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
   exit /b 0
 )
 
+:: --- Stage the new build (only if not already staged) -------
+:: A half-copied exe that got applied would leave the till broken,
+:: so the copy is size-verified before it is trusted.
 set "SRCSIZE=0"
-set "DSTSIZE=0"
 for %%A in ("%SHAREROOT%\FumasV5-updated.exe") do set "SRCSIZE=%%~zA"
-for %%A in ("%FUMAS_DIR%\FumasV5_new.exe.part") do set "DSTSIZE=%%~zA"
 
-if not "!SRCSIZE!"=="!DSTSIZE!" (
-  call :say "[FAIL] Copy is incomplete (!DSTSIZE! of !SRCSIZE! bytes). Discarded."
-  del /f /q "%FUMAS_DIR%\FumasV5_new.exe.part" >nul 2>&1
+set "NEEDSTAGE=1"
+if exist "%FUMAS_DIR%\FumasV5_new.exe" (
+  set "STGSIZE=0"
+  for %%A in ("%FUMAS_DIR%\FumasV5_new.exe") do set "STGSIZE=%%~zA"
+  if "!STGSIZE!"=="!SRCSIZE!" set "NEEDSTAGE="
+)
+
+if defined NEEDSTAGE (
+  call :say "New build !WANT! in the share (this PC has !HAVE!). Copying..."
+  copy /y "%SHAREROOT%\FumasV5-updated.exe" "%FUMAS_DIR%\FumasV5_new.exe.part" >nul 2>&1
+  if errorlevel 1 (
+    call :say "[FAIL] Could not copy from the share. Will retry in 10 minutes."
+    exit /b 0
+  )
+  set "DSTSIZE=0"
+  for %%A in ("%FUMAS_DIR%\FumasV5_new.exe.part") do set "DSTSIZE=%%~zA"
+  if not "!DSTSIZE!"=="!SRCSIZE!" (
+    call :say "[FAIL] Copy is incomplete (!DSTSIZE! of !SRCSIZE! bytes). Discarded."
+    del /f /q "%FUMAS_DIR%\FumasV5_new.exe.part" >nul 2>&1
+    exit /b 0
+  )
+  move /y "%FUMAS_DIR%\FumasV5_new.exe.part" "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
+  if errorlevel 1 (
+    call :say "[FAIL] Could not stage the new build."
+    del /f /q "%FUMAS_DIR%\FumasV5_new.exe.part" >nul 2>&1
+    exit /b 0
+  )
+)
+
+:: --- Apply it, but never over a running POS -----------------
+set "RUNNING="
+tasklist /fi "imagename eq FumasV5.exe" 2>nul | find /i "FumasV5.exe" >nul && set "RUNNING=1"
+if defined RUNNING (
+  call :say "Build !WANT! staged in %FUMAS_DIR%; POS is open, will apply once it is closed."
   exit /b 0
 )
 
-move /y "%FUMAS_DIR%\FumasV5_new.exe.part" "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
+copy /y "%FUMAS_DIR%\FumasV5_new.exe" "%FUMAS_DIR%\FumasV5.exe" >nul 2>&1
 if errorlevel 1 (
-  call :say "[FAIL] Could not stage the new build."
-  del /f /q "%FUMAS_DIR%\FumasV5_new.exe.part" >nul 2>&1
+  call :say "[FAIL] Could not apply the staged build. Left staged for the next run."
   exit /b 0
 )
 
-:: Only now is it true that this PC has this version. Writing
-:: this earlier would make a failed copy look like a success.
-> "%FUMAS_DIR%\FumasV5-version.txt" echo !WANT!
+:: Confirm the applied exe matches the staged one before trusting it.
+set "APPSIZE=0"
+for %%A in ("%FUMAS_DIR%\FumasV5.exe") do set "APPSIZE=%%~zA"
+if not "!APPSIZE!"=="!SRCSIZE!" (
+  call :say "[FAIL] Applied exe is the wrong size (!APPSIZE! of !SRCSIZE!). Left staged."
+  exit /b 0
+)
 
-call :say "[OK] Build !WANT! staged in %FUMAS_DIR%. Applies next time the POS is opened."
+del /f /q "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
+
+:: Only now is it true that this PC is running this version.
+> "%FUMAS_DIR%\FumasV5-version.txt" echo !WANT!
+call :say "[OK] Applied build !WANT! on this PC (%FUMAS_DIR%)."
 exit /b 0
 
 :nothing

@@ -65,7 +65,7 @@ if errorlevel 1 (
   net user %PUBUSER% %PUBPASS% >nul
   echo  [OK] Account %PUBUSER% already existed - password reset
 )
-wmic useraccount where "name='%PUBUSER%'" set PasswordExpires=false >nul 2>&1
+powershell -NoProfile -Command "Set-LocalUser -Name '%PUBUSER%' -PasswordNeverExpires $true" >nul 2>&1
 net localgroup Administrators %PUBUSER% /add >nul 2>&1
 
 :: Re-share with BOTH grants: tills read, publisher writes. The old

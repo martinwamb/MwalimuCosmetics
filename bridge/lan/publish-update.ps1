@@ -84,40 +84,12 @@ if (-not (Test-Path $unc)) {
 Say "[OK] Connected." "Green"
 
 try {
-  # What is already published? Nothing to do if it matches.
-  $remoteVersionFile = Join-Path $unc "FumasV5-version.txt"
-  if (Test-Path $remoteVersionFile) {
-    $current = (Get-Content $remoteVersionFile -First 1).Trim()
-    if ($current -eq $version) {
-      Say ""
-      Say "This exact build is already published ($version). Nothing to do." "Yellow"
-      exit 0
-    }
-    Say ("Replacing published build {0}" -f $current)
-  }
-
   if (-not $PSCmdlet.ShouldProcess($unc, "publish build $version")) { exit 0 }
 
-  # Copy to .part first. A till polling mid-copy must never see a
-  # half-written exe sitting under the final name.
-  $part  = Join-Path $unc "FumasV5-updated.exe.part"
-  $final = Join-Path $unc "FumasV5-updated.exe"
-
-  Say ""
-  Say "Copying the build across ..."
-  Copy-Item $src.FullName $part -Force
-
-  $copied = (Get-Item $part).Length
-  if ($copied -ne $src.Length) {
-    Remove-Item $part -Force -ErrorAction SilentlyContinue
-    Say ("[STOP] Copy is incomplete ({0} of {1} bytes)." -f $copied, $src.Length) "Red"
-    exit 1
-  }
-  Move-Item $part $final -Force
-  Say "[OK] FumasV5-updated.exe" "Green"
-
-  # Refresh the central check script while we are here, so its
-  # logic can be corrected without revisiting any till.
+  # The agent logic (check.cmd) is ALWAYS refreshed, even when the build
+  # itself has not changed - a fix to how tills detect or apply updates
+  # must reach them regardless of the exe. This is what makes the share
+  # the single place the logic lives.
   $agentDir = Join-Path $unc "agent"
   if (-not (Test-Path $agentDir)) { New-Item $agentDir -ItemType Directory -Force | Out-Null }
   $checkSrc = Join-Path $PSScriptRoot "check.cmd"
@@ -126,18 +98,53 @@ try {
     Say "[OK] agent\check.cmd refreshed" "Green"
   }
 
-  # The version file goes LAST. It is the signal that says
-  # "a complete build is waiting" - writing it before the exe
-  # has landed would send every till after a file that is not
-  # there yet.
-  Set-Content -Path $remoteVersionFile -Value $version -Encoding ascii
-  Say "[OK] FumasV5-version.txt" "Green"
+  # The build exe is only re-copied when it actually changed - it is 33 MB
+  # and the version is a hash of its contents, so an unchanged build would
+  # copy the same bytes for nothing.
+  $remoteVersionFile = Join-Path $unc "FumasV5-version.txt"
+  $current = if (Test-Path $remoteVersionFile) { (Get-Content $remoteVersionFile -First 1).Trim() } else { "" }
 
-  Write-Host ""
-  Write-Host "=== Published: $version ===" -ForegroundColor Cyan
-  Write-Host ""
-  Say "Every till picks this up within 10 minutes and applies it"
-  Say "the next time the POS is opened. To push it out now:"
+  if ($current -eq $version) {
+    Say "Build $version already published - exe left as is." "Yellow"
+    Write-Host ""
+    Write-Host "=== Agent logic refreshed; build unchanged ($version) ===" -ForegroundColor Cyan
+    Write-Host ""
+  }
+  else {
+    if ($current) { Say ("Replacing published build {0}" -f $current) }
+
+    # Copy to .part first. A till polling mid-copy must never see a
+    # half-written exe sitting under the final name.
+    $part  = Join-Path $unc "FumasV5-updated.exe.part"
+    $final = Join-Path $unc "FumasV5-updated.exe"
+
+    Say ""
+    Say "Copying the build across ..."
+    Copy-Item $src.FullName $part -Force
+
+    $copied = (Get-Item $part).Length
+    if ($copied -ne $src.Length) {
+      Remove-Item $part -Force -ErrorAction SilentlyContinue
+      Say ("[STOP] Copy is incomplete ({0} of {1} bytes)." -f $copied, $src.Length) "Red"
+      exit 1
+    }
+    Move-Item $part $final -Force
+    Say "[OK] FumasV5-updated.exe" "Green"
+
+    # The version file goes LAST. It is the signal that says
+    # "a complete build is waiting" - writing it before the exe
+    # has landed would send every till after a file that is not
+    # there yet.
+    Set-Content -Path $remoteVersionFile -Value $version -Encoding ascii
+    Say "[OK] FumasV5-version.txt" "Green"
+
+    Write-Host ""
+    Write-Host "=== Published: $version ===" -ForegroundColor Cyan
+    Write-Host ""
+  }
+
+  Say "Every till picks this up within 10 minutes and applies it when the"
+  Say "POS is next closed. To push it out now:"
   Say ""
   Say "    .\run-on-all.ps1 -Command 'schtasks /run /tn MwalimuLanUpdate'" "White"
   Write-Host ""

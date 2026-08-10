@@ -77,7 +77,7 @@ if errorlevel 1 (
   net user %SHAREUSER% %SHAREPASS% >nul
   echo  [OK] Account %SHAREUSER% already existed - password reset
 )
-wmic useraccount where "name='%SHAREUSER%'" set PasswordExpires=false >nul 2>&1
+powershell -NoProfile -Command "Set-LocalUser -Name '%SHAREUSER%' -PasswordNeverExpires $true" >nul 2>&1
 
 :: The publisher account the LAPTOP writes builds with. This is the same
 :: mwalimuadmin used on the tills, so the whole shop needs only one admin
@@ -97,7 +97,7 @@ if errorlevel 1 (
   net user %PUBUSER% %PUBPASS% >nul
   echo  [OK] Account %PUBUSER% already existed - password reset
 )
-wmic useraccount where "name='%PUBUSER%'" set PasswordExpires=false >nul 2>&1
+powershell -NoProfile -Command "Set-LocalUser -Name '%PUBUSER%' -PasswordNeverExpires $true" >nul 2>&1
 net localgroup Administrators %PUBUSER% /add >nul 2>&1
 
 :: Share it. Recreate rather than assume the old definition is still what
