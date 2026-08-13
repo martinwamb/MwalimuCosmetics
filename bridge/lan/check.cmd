@@ -33,6 +33,22 @@ set "LOGDIR=C:\MwalimuSync"
 set "LOG=%LOGDIR%\lan-update.log"
 set "CACHE=%LOGDIR%\fumas-dir.txt"
 
+:: Where to report status back to. This script runs from
+:: \\<hub>\updates\agent\, so the hub server name is sitting in
+:: its own path - pull it out rather than hardcode it, and the
+:: check-in share is another share on that same server. The read
+:: account is already required to reach this script, so carrying
+:: it here exposes nothing new; it is given write on the check-in
+:: share only, never on the builds.
+set "HUBSRV="
+set "SR=%~dp0"
+if "%SR:~0,2%"=="\\" (
+  set "T=%SR:~2%"
+  for /f "tokens=1 delims=\" %%a in ("%T%") do set "HUBSRV=%%a"
+)
+set "CHKUSER=mwalimuupd"
+set "CHKPASS=MwalimuUpd2026"
+
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" 2>nul
 
 :: --- What does the share offer? -----------------------------
@@ -105,6 +121,7 @@ if not defined SEARCHED (
 
 if not defined FUMAS_DIR (
   call :say "[SKIP] FumasV5.exe not found on this PC."
+  call :checkin NOFUMAS "-"
   exit /b 0
 )
 
@@ -119,6 +136,7 @@ if exist "%FUMAS_DIR%\FumasV5-version.txt" (
 if "!HAVE!"=="!WANT!" (
   :: Applied and current. Tidy any stale staged copy and stop.
   if exist "%FUMAS_DIR%\FumasV5_new.exe" del /f /q "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
+  call :checkin CURRENT "!HAVE!"
   exit /b 0
 )
 
@@ -162,6 +180,7 @@ set "RUNNING="
 tasklist /fi "imagename eq FumasV5.exe" 2>nul | find /i "FumasV5.exe" >nul && set "RUNNING=1"
 if defined RUNNING (
   call :say "Build !WANT! staged in %FUMAS_DIR%; POS is open, will apply once it is closed."
+  call :checkin STAGED "!WANT!"
   exit /b 0
 )
 
@@ -184,6 +203,7 @@ del /f /q "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
 :: Only now is it true that this PC is running this version.
 > "%FUMAS_DIR%\FumasV5-version.txt" echo !WANT!
 call :say "[OK] Applied build !WANT! on this PC (%FUMAS_DIR%)."
+call :checkin APPLIED "!WANT!"
 exit /b 0
 
 :nothing
@@ -193,3 +213,14 @@ exit /b 0
 echo [%DATE% %TIME%] %COMPUTERNAME%: %~1 >> "%LOG%"
 echo %~1
 exit /b 0
+
+:checkin
+:: Report state back to the hub. %~1 = state, %~2 = version.
+:: Strictly best-effort: a hub that is down, or a check-in share
+:: not created yet, must never disturb the update itself - hence
+:: the existence guard before the write, so nothing is printed.
+if not defined HUBSRV goto :eof
+net use "\\%HUBSRV%\checkins" /user:%CHKUSER% %CHKPASS% >nul 2>&1
+if not exist "\\%HUBSRV%\checkins\" goto :eof
+> "\\%HUBSRV%\checkins\%COMPUTERNAME%.txt" echo %COMPUTERNAME% ^| %DATE% %TIME% ^| %~1 ^| %~2 ^| !FUMAS_DIR!
+goto :eof

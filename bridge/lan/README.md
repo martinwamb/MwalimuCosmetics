@@ -64,7 +64,22 @@ Publish a new build to the whole shop:
 .\publish-update.ps1 -Source "C:\path\to\FumasV5-updated.exe"
 ```
 
-See what every PC is actually running:
+See what every PC is actually running — **the reliable way** on this shop's
+network, where the tills' "Guest only" security model blocks the laptop from
+reaching into them:
+
+```powershell
+.\fleet-status.ps1
+```
+
+Each till writes its name, installed build and a timestamp to a small
+`checkins` share on the hub every 10 minutes (an outbound write the tills
+*can* do), and this reads them all into one table. One-time enable: run
+`setup-checkin.bat` on the hub once. Tills report in on their next cycle.
+
+`run-on-all.ps1 -Status` reads the same facts by reaching *into* each PC over
+WinRM — which only works once full remote control is enabled (see below), so
+prefer `fleet-status.ps1` unless you have done that:
 
 ```powershell
 .\run-on-all.ps1 -Status
@@ -83,6 +98,27 @@ Run anything, anywhere:
 .\run-on-all.ps1 -Script .\fix-something.ps1
 .\run-on-all.ps1 -Command "..." -Targets 10.10.10.12
 ```
+
+## Remote control (optional) and the Guest-only wall
+
+The tills are set to Windows' "Guest only" network security model
+(`HKLM\SYSTEM\CurrentControlSet\Control\Lsa\ForceGuest = 1`), which maps any
+inbound network login with a local account to Guest — so the laptop cannot
+reach *into* them over `C$` or WinRM, and `run-on-all.ps1` / `-Status` will
+fail. This does **not** affect updates: each till reaches *out* to the hub as
+SYSTEM, which is allowed, and `fleet-status.ps1` reads status the same
+outbound way.
+
+To turn on true remote control (so `run-on-all.ps1` works), each till needs,
+run locally once — it cannot be bootstrapped remotely, since the block is the
+very thing in the way:
+
+```
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v ForceGuest /t REG_DWORD /d 0 /f
+```
+
+`setup-pc.bat` already sets `LocalAccountTokenFilterPolicy` and enables
+PSRemoting; this one registry value is the remaining piece.
 
 ## The machines
 

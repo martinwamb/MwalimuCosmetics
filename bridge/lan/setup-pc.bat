@@ -113,6 +113,13 @@ net localgroup Administrators %ADMUSER% /add >nul 2>&1
 :: from the laptop before this script existed.
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f >nul 2>&1
 
+:: The shop's tills ship set to "Guest only" networking (ForceGuest=1),
+:: which maps EVERY inbound local-account login to Guest - so the laptop
+:: is refused no matter the password, and no remote command can land. This
+:: switches them to the classic model, where mwalimuadmin authenticates as
+:: itself. It is the one thing that was quietly blocking remote control.
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v ForceGuest /t REG_DWORD /d 0 /f >nul 2>&1
+
 netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes >nul 2>&1
 netsh advfirewall firewall set rule group="Windows Management Instrumentation (WMI)" new enable=Yes >nul 2>&1
 
