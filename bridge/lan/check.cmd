@@ -33,21 +33,30 @@ set "LOGDIR=C:\MwalimuSync"
 set "LOG=%LOGDIR%\lan-update.log"
 set "CACHE=%LOGDIR%\fumas-dir.txt"
 
-:: Where to report status back to. This script runs from
-:: \\<hub>\updates\agent\, so the hub server name is sitting in
-:: its own path - pull it out rather than hardcode it, and the
-:: check-in share is another share on that same server. The read
-:: account is already required to reach this script, so carrying
-:: it here exposes nothing new; it is given write on the check-in
-:: share only, never on the builds.
-set "HUBSRV="
-set "SR=%~dp0"
-if "%SR:~0,2%"=="\\" (
-  set "T=%SR:~2%"
-  for /f "tokens=1 delims=\" %%a in ("%T%") do set "HUBSRV=%%a"
-)
+:: Where to report status back to. By default it is the same
+:: server this script runs from (\\<hub>\updates\agent\ -> pull the
+:: server out of the path rather than hardcode it). But a one-line
+:: agent\checkin-target.txt on the share can redirect it anywhere -
+:: "server|user|pass" - which is how check-ins can be pointed at the
+:: laptop while the hub itself has no check-in share. The account is
+:: already required to reach this script, so carrying it exposes
+:: nothing new; it gets write on the check-in share only, never the
+:: builds.
+set "CHKSRV="
 set "CHKUSER=mwalimuupd"
 set "CHKPASS=MwalimuUpd2026"
+if exist "%~dp0checkin-target.txt" (
+  for /f "usebackq tokens=1,2,3 delims=|" %%a in ("%~dp0checkin-target.txt") do (
+    if not defined CHKSRV set "CHKSRV=%%a" & set "CHKUSER=%%b" & set "CHKPASS=%%c"
+  )
+)
+if not defined CHKSRV (
+  set "SR=%~dp0"
+  if "!SR:~0,2!"=="\\" (
+    set "T=!SR:~2!"
+    for /f "tokens=1 delims=\" %%a in ("!T!") do set "CHKSRV=%%a"
+  )
+)
 
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" 2>nul
 
@@ -215,12 +224,12 @@ echo %~1
 exit /b 0
 
 :checkin
-:: Report state back to the hub. %~1 = state, %~2 = version.
-:: Strictly best-effort: a hub that is down, or a check-in share
-:: not created yet, must never disturb the update itself - hence
-:: the existence guard before the write, so nothing is printed.
-if not defined HUBSRV goto :eof
-net use "\\%HUBSRV%\checkins" /user:%CHKUSER% %CHKPASS% >nul 2>&1
-if not exist "\\%HUBSRV%\checkins\" goto :eof
-> "\\%HUBSRV%\checkins\%COMPUTERNAME%.txt" echo %COMPUTERNAME% ^| %DATE% %TIME% ^| %~1 ^| %~2 ^| !FUMAS_DIR!
+:: Report state to the check-in server. %~1 = state, %~2 = version.
+:: Strictly best-effort: a server that is down, or a check-in share
+:: not created yet, must never disturb the update itself - hence the
+:: existence guard before the write, so nothing is printed.
+if not defined CHKSRV goto :eof
+net use "\\%CHKSRV%\checkins" /user:%CHKUSER% %CHKPASS% >nul 2>&1
+if not exist "\\%CHKSRV%\checkins\" goto :eof
+> "\\%CHKSRV%\checkins\%COMPUTERNAME%.txt" echo %COMPUTERNAME% ^| %DATE% %TIME% ^| %~1 ^| %~2 ^| !FUMAS_DIR!
 goto :eof

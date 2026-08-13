@@ -19,6 +19,9 @@ param(
   [string]$Share    = "checkins",
   [string]$User     = "mwalimuupd",
   [string]$Password = "MwalimuUpd2026",
+  # Read the check-ins straight from a local folder instead of a share -
+  # used when the laptop itself is hosting the drop (C:\MwalimuCheckins).
+  [string]$Path     = "",
   # The build the shop should be on. Defaults to whatever is
   # currently published, so "up to date" always means "matches
   # what the laptop last published".
@@ -30,13 +33,18 @@ $ErrorActionPreference = "Stop"
 
 function Say($m, $c = "Gray") { Write-Host $m -ForegroundColor $c }
 
-$unc = "\\$Hub\$Share"
-cmd /c "net use `"$unc`" /delete /y >nul 2>nul"
-cmd /c "net use `"$unc`" /user:$User $Password >nul 2>nul"
-if (-not (Test-Path $unc)) {
-  Say "[STOP] Cannot reach $unc" "Red"
-  Say "Has setup-checkin.bat been run on ${Hub}? Until it has, no till can report in." "Yellow"
-  exit 1
+if ($Path) {
+  $unc = $Path
+  if (-not (Test-Path $unc)) { Say "[STOP] No such folder: $Path" "Red"; exit 1 }
+} else {
+  $unc = "\\$Hub\$Share"
+  cmd /c "net use `"$unc`" /delete /y >nul 2>nul"
+  cmd /c "net use `"$unc`" /user:$User $Password >nul 2>nul"
+  if (-not (Test-Path $unc)) {
+    Say "[STOP] Cannot reach $unc" "Red"
+    Say "Has setup-checkin.bat been run on ${Hub}? Until it has, no till can report in." "Yellow"
+    exit 1
+  }
 }
 
 try {
