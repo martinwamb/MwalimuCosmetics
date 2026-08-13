@@ -83,22 +83,32 @@ if exist "%CACHE%" (
   for /f "usebackq delims=" %%D in ("%CACHE%") do if not defined FUMAS_DIR if exist "%%~D\FumasV5.exe" set "FUMAS_DIR=%%~D"
 )
 
+:: Known shapes, on EVERY drive that exists - FumasV5 is not always
+:: on C: (one till keeps it on E:\futuresoft\Debugv5), so a C:-only
+:: list silently misses those machines.
 if not defined FUMAS_DIR (
-  for %%P in (
-    "C:\futuresoft\Debugv5"
-    "C:\mwalimu\Debugv5"
-    "C:\fumasv5\Debugv5"
-    "C:\Debugv5"
-    "C:\FumasV5"
-    "C:\Program Files (x86)\FumasV5"
-    "C:\Program Files\FumasV5"
-  ) do if not defined FUMAS_DIR if exist "%%~P\FumasV5.exe" set "FUMAS_DIR=%%~P"
+  for %%D in (C D E F G) do if not defined FUMAS_DIR if exist "%%D:\" (
+    for %%P in (
+      "futuresoft\Debugv5"
+      "mwalimu\Debugv5"
+      "fumas\Debugv5"
+      "fumasv5\Debugv5"
+      "Debugv5"
+      "FumasV5"
+    ) do if not defined FUMAS_DIR if exist "%%D:\%%~P\FumasV5.exe" set "FUMAS_DIR=%%D:\%%~P"
+  )
 )
 
-:: One level under the usual roots.
 if not defined FUMAS_DIR (
-  for /d %%R in ("C:\futuresoft\*" "C:\mwalimu\*") do (
-    if not defined FUMAS_DIR if exist "%%~R\FumasV5.exe" set "FUMAS_DIR=%%~R"
+  for %%P in ("C:\Program Files (x86)\FumasV5" "C:\Program Files\FumasV5") do if not defined FUMAS_DIR if exist "%%~P\FumasV5.exe" set "FUMAS_DIR=%%~P"
+)
+
+:: One level under the usual roots, on each drive.
+if not defined FUMAS_DIR (
+  for %%D in (C D E F G) do if not defined FUMAS_DIR if exist "%%D:\" (
+    for /d %%R in ("%%D:\futuresoft\*" "%%D:\mwalimu\*" "%%D:\fumas\*") do (
+      if not defined FUMAS_DIR if exist "%%~R\FumasV5.exe" set "FUMAS_DIR=%%~R"
+    )
   )
 )
 
@@ -113,11 +123,13 @@ if not defined FUMAS_DIR (
   )
 )
 
-:: Last resort, once per PC: sweep the whole drive. dir /s here is
-:: a fast metadata search, and gating it on SEARCHED means a PC
-:: that simply has no FumasV5 does not re-sweep every 10 minutes.
+:: Last resort, once per PC: sweep every drive. dir /s here is a fast
+:: metadata search, and gating it on SEARCHED means a PC that simply
+:: has no FumasV5 does not re-sweep every 10 minutes.
 if not defined FUMAS_DIR if not defined SEARCHED (
-  for /f "delims=" %%F in ('dir /b /s "C:\FumasV5.exe" 2^>nul') do if not defined FUMAS_DIR set "FUMAS_DIR=%%~dpF"
+  for %%D in (C D E F G) do if not defined FUMAS_DIR if exist "%%D:\" (
+    for /f "delims=" %%F in ('dir /b /s "%%D:\FumasV5.exe" 2^>nul') do if not defined FUMAS_DIR set "FUMAS_DIR=%%~dpF"
+  )
 )
 
 :: Normalise a trailing backslash left by %%~dp, then record the
