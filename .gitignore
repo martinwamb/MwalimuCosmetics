@@ -26,3 +26,9 @@ apps/desktop/release
 apps/desktop/*.log
 bridge/schema-probe-output/
 apps/front/tsconfig.tsbuildinfo
+
+# Audit output — real customers, real sales, real money. Findings belong in
+# commit messages; the rows themselves stay on the machine that produced them.
+bridge/drafts-output/
+bridge/orphans-output/
+bridge/diagnose-output/
