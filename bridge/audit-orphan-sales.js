@@ -33,6 +33,12 @@
  *
  *   node audit-orphan-sales.js [--rows 32000] [--pace 1200]
  *   node audit-orphan-sales.js --rebuild [--confirm]
+ *   node audit-orphan-sales.js --receipt gPOS1,GPOS2 --rebuild --confirm
+ *
+ * `--receipt` narrows everything after the scan to the named receipts. It is
+ * how you put one cashier's sale back without touching the other tills, and it
+ * also keeps the run cheap: the per-sale lookups below (time, till, items) are
+ * the bulk of the queries, and this skips them for everything unnamed.
  */
 
 const mysql = require("mysql");
@@ -55,6 +61,7 @@ const PACE_MS   = Number(argValue("--pace", 1200));
 const CHUNK     = 4000;
 const REBUILD   = hasFlag("--rebuild");
 const CONFIRMED = hasFlag("--confirm");
+const ONLY      = argValue("--receipt", "").split(",").map(s => s.trim()).filter(Boolean);
 
 /** No statement here should be slow; if one is, stop rather than lean on the server. */
 const MAX_STATEMENT_MS = 8000;
@@ -304,12 +311,33 @@ async function run() {
   await new Promise((res, rej) => conn.connect(e => e ? rej(e) : res()));
 
   const byInitial = await cashiersByInitial(conn);
-  const orphans = await findOrphans(conn);
+  const found = await findOrphans(conn);
+
+  // Narrowing happens here, before the per-sale lookups, so a targeted run
+  // costs a handful of queries rather than four per orphan in the window.
+  const orphans = ONLY.length
+    ? found.filter(o => ONLY.some(r => key(r) === key(o.receiptno)))
+    : found;
+
+  // A named receipt that the scan did not turn up is worth saying out loud: it
+  // means either the window was too small or it is not actually headerless.
+  if (ONLY.length) {
+    const missing = ONLY.filter(r => !found.some(o => key(o.receiptno) === key(r)));
+    log("");
+    log(`  scan found ${found.length}; --receipt narrows this run to ${orphans.length}`);
+    if (missing.length) {
+      log(`  not found in this window (widen --rows, or it already has a header): ${missing.join(", ")}`);
+    }
+  }
+
+  // Filtered runs write their own file so a targeted restore cannot overwrite
+  // the full census the unfiltered scan produced.
+  const outName = ONLY.length ? "orphan_sales_selected" : "orphan_sales";
 
   if (!orphans.length) {
     log("");
     log("  No sale lines without a header. Nothing was lost in this window.");
-    emit("orphan_sales", []);
+    emit(outName, []);
     conn.end();
     return;
   }
@@ -334,7 +362,7 @@ async function run() {
     }
   }
 
-  emit("orphan_sales", orphans.map(o => ({
+  emit(outName, orphans.map(o => ({
     receiptno: o.receiptno, staff: o.staff, sharedInitialWith: o.ambiguous,
     till: o.machine, lines: o.nlines, value: Math.round(o.total),
     vat: Math.round(o.vat), discount: Math.round(o.disc),
@@ -342,7 +370,7 @@ async function run() {
   })));
 
   log("");
-  log(`  written to ${path.join(OUT_DIR, "orphan_sales.json")}`);
+  log(`  written to ${path.join(OUT_DIR, `${outName}.json`)}`);
 
   if (REBUILD && CONFIRMED) {
     await rebuild(conn, orphans);

@@ -294,7 +294,12 @@ router.post("/backup", async (req, res) => {
     "pos_header", "pos_details", "pos_payment_details", "stran", "grn",
     "schema", "routines", "engines", "vars",
     "gl_residuals", "gl_residual_samples", "orphans", "diagnosis",
-    "summary", "drafts", "by_cashier",
+    // check-drafts.js ships four datasets, and this one is the point of the
+    // census: the drafts that were there last time, are gone now, and have no
+    // completed sale to account for them. Leaving it off the list meant the
+    // three harmless ones arrived and the only one carrying a finding was
+    // refused, silently, every night since the census was written.
+    "summary", "drafts", "by_cashier", "lost_since_last_census",
   ];
   if (!allowed.includes(table)) return res.status(400).json({ error: "table not allowed" });
 
