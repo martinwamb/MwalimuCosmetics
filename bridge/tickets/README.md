@@ -233,17 +233,79 @@ a value one of their Save buttons can clear.
 
 ## Telegram: one bot, two uses
 
-The bot `@mwalimucosmetics_bot` already has a **live webhook** serving the
-website's order notifications (`apps/back/src/routes/orders.ts`). A bot can have
-a webhook or long polling, never both, so `announcer.js` cannot call
-`getUpdates` without breaking that.
+The bot `@mwalimucosmetics_bot` has a **live webhook** serving the website's
+order notifications. A bot can have a webhook or long polling, never both, so
+the announcer cannot call `getUpdates` — doing so would have taken those
+notifications down, silently, the first time it started.
 
-Outbound is unaffected — `sendMessage` works alongside a webhook — so the
-"goods are ready" message needs nothing. Only the inbound QR scan does. Either:
+So scans are routed through the server instead:
 
-- **a second bot** for tickets, and the announcer long-polls it as written; or
-- **route it through the server**: extend the existing webhook to record
-  `/start E042`, and have the announcer fetch pending links.
+```
+customer scans ─▶ Telegram ─▶ api.mwalimucosmetics.com/orders/telegram/webhook
+                                            │
+                                            ▼
+                                      TicketLink row
+                                            │
+                    announcer  ◀────────────┘   GET  /tickets/links
+                        │                       POST /tickets/links/claim
+                        ▼
+                shop MySQL: tickets.tg_chat_id
+```
 
-Until one is in place, the QR is printed and scannable but nothing links the
-chat, and tickets are announced over the speakers only.
+One webhook, two features: the orders handler offers every `message` update to
+the ticket handler first (`apps/back/src/routes/tickets.ts`).
+
+**Sending is unaffected** — `sendMessage` works alongside a webhook — so the
+goods-are-ready message goes straight from the laptop to Telegram. There is a
+`POST /tickets/notify` on the server as a second route for the day the shop
+WiFi can reach the server but not Telegram.
+
+The acknowledgement is sent **by the server**, not the announcer. The customer
+is at a counter with a phone in their hand; a reply that waits on a laptop —
+or on a laptop that is switched off — is a reply they will assume never came.
+The announcer speaks up only to correct: a ticket not open today, one already
+followed on another phone, or one that was already ready when they scanned.
+
+Claiming is a second call rather than a delete-on-read, so a laptop that dies
+between fetching and applying re-reads the same links instead of losing a
+registration.
+
+The announcer needs the API and the sync secret, both of which default
+sensibly and can be overridden in `C:\MwalimuSync\ticket-config.json`:
+
+```json
+{ "botToken": "...", "voice": "",
+  "api": "https://api.mwalimucosmetics.com",
+  "syncSecret": "..." }
+```
+
+### `prisma db push` cannot create the table
+
+The deploy runs `prisma db push ... || true`. On this database it always fails,
+because it would drop the `mirror_*` tables — 956,000 rows written by raw SQL
+outside the schema — and the `|| true` swallows it. **No Prisma schema change
+has reached production since those tables were created.**
+
+`TicketLink` was therefore created by hand, from Prisma's own DDL
+(`prisma migrate diff --from-schema-datasource --to-schema-datamodel --script`),
+which is the safe way to get the exact statement without applying the drops.
+Any future model needs the same treatment until the mirror tables are either
+brought into the schema or moved to their own Postgres schema.
+
+## Deploying without CI
+
+`scripts/deploy-from-laptop.sh` runs the workflow's steps from here.
+
+```
+./scripts/deploy-from-laptop.sh                  # dry run
+./scripts/deploy-from-laptop.sh --apply          # clean tree
+./scripts/deploy-from-laptop.sh --apply --dirty  # uncommitted work, deliberately
+```
+
+Git Bash on Windows has no rsync and this laptop has no WSL, so tar carries the
+files over ssh and the server's own rsync does the comparing and deleting —
+same semantics as CI, protect filters included.
+
+The file list comes from `git ls-files -co --exclude-standard`, not the
+filesystem, and that matters: `mwalimu/` here is 195MB of FumasV5 install and is
+gitignored, as are `node_modules`, the QR pool and every `.env`.
