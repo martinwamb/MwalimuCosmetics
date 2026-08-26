@@ -157,6 +157,7 @@ if exist "%FUMAS_DIR%\FumasV5-version.txt" (
 if "!HAVE!"=="!WANT!" (
   :: Applied and current. Tidy any stale staged copy and stop.
   if exist "%FUMAS_DIR%\FumasV5_new.exe" del /f /q "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
+  if exist "%FUMAS_DIR%\FumasV5_new.version.txt" del /f /q "%FUMAS_DIR%\FumasV5_new.version.txt" >nul 2>&1
   call :checkin CURRENT "!HAVE!"
   exit /b 0
 )
@@ -167,11 +168,29 @@ if "!HAVE!"=="!WANT!" (
 set "SRCSIZE=0"
 for %%A in ("%SHAREROOT%\FumasV5-updated.exe") do set "SRCSIZE=%%~zA"
 
+:: Which version the staged file actually IS, recorded when it was
+:: staged. Size alone cannot answer this: two builds of the same
+:: source tree are routinely byte-for-byte the same length while
+:: differing in content, and that is not a rare case — it happened
+:: on the very first day this ran, when two builds published an hour
+:: apart were both 34,280,960 bytes. Every till kept the first one,
+:: skipped the copy, and reported the second as staged. Left alone
+:: they would have applied the older build, written the newer
+:: version number beside it and gone quiet, permanently one build
+:: behind with nothing on the machine to show it.
+set "STGVER="
+if exist "%FUMAS_DIR%\FumasV5_new.version.txt" (
+  for /f "usebackq delims=" %%V in ("%FUMAS_DIR%\FumasV5_new.version.txt") do if not defined STGVER set "STGVER=%%V"
+)
+
 set "NEEDSTAGE=1"
 if exist "%FUMAS_DIR%\FumasV5_new.exe" (
   set "STGSIZE=0"
   for %%A in ("%FUMAS_DIR%\FumasV5_new.exe") do set "STGSIZE=%%~zA"
-  if "!STGSIZE!"=="!SRCSIZE!" set "NEEDSTAGE="
+  :: Both must agree: the right version, and a complete copy of it.
+  :: A staged file with no version marker beside it is from before
+  :: this check existed, so it is re-fetched rather than trusted.
+  if "!STGSIZE!"=="!SRCSIZE!" if "!STGVER!"=="!WANT!" set "NEEDSTAGE="
 )
 
 if defined NEEDSTAGE (
@@ -194,6 +213,9 @@ if defined NEEDSTAGE (
     del /f /q "%FUMAS_DIR%\FumasV5_new.exe.part" >nul 2>&1
     exit /b 0
   )
+  :: Written only after the exe is safely in place, so a marker can
+  :: never claim a version the file beside it is not.
+  > "%FUMAS_DIR%\FumasV5_new.version.txt" echo !WANT!
 )
 
 :: --- Apply it, but never over a running POS -----------------
@@ -220,6 +242,7 @@ if not "!APPSIZE!"=="!SRCSIZE!" (
 )
 
 del /f /q "%FUMAS_DIR%\FumasV5_new.exe" >nul 2>&1
+del /f /q "%FUMAS_DIR%\FumasV5_new.version.txt" >nul 2>&1
 
 :: Only now is it true that this PC is running this version.
 > "%FUMAS_DIR%\FumasV5-version.txt" echo !WANT!

@@ -57,7 +57,22 @@ if ($src.Length -lt 20MB) {
   exit 1
 }
 
-$version = (Get-FileHash $src.FullName -Algorithm SHA256).Hash.Substring(0, 12).ToLower()
+# The version stamp, read with .NET rather than Get-FileHash.
+#
+# SupportsShouldProcess sets $WhatIfPreference for the whole script, and
+# under -WhatIf the provider layer beneath Get-FileHash declines to resolve
+# the path: it returns nothing and .Substring fails on null. Get-FileHash
+# has no -WhatIf of its own to turn that off. Dot-running the script in an
+# open session happened to work, so a dry run only ever failed when it was
+# launched as a child process - which is what publish.bat does.
+#
+# Same SHA-256 over the same bytes, so version stamps stay comparable with
+# every build published before this.
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$stream = [System.IO.File]::OpenRead($src.FullName)
+try   { $digest = $sha.ComputeHash($stream) }
+finally { $stream.Dispose(); $sha.Dispose() }
+$version = ([BitConverter]::ToString($digest) -replace '-', '').Substring(0, 12).ToLower()
 Say ("Version: {0}" -f $version) "White"
 
 # Connect to the hub share.

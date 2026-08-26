@@ -39,3 +39,8 @@ bridge/diagnose-output/
 bridge/tickets/qr/
 bridge/tickets/logs/
 bridge/tickets/telegram-offset.txt
+
+# Rights snapshots taken before a change, so one can be undone. Point-in-time
+# operational data about who could do what, not source — same reasoning as the
+# audit output above: it belongs on the machine that produced it.
+bridge/rights-backup/
