@@ -7,9 +7,18 @@
 ::  for when that is too slow: previewing a new build on one
 ::  machine, or checking a fix has landed.
 ::
-::  Run it from a command prompt on the till:
+::  The share needs a password, and Windows needs that password
+::  before it can even READ this file - so typing the \\10.10.10.4\updates
+::  path on its own fails with "user name or password is
+::  incorrect". Authenticate first, in one line:
 ::
-::      \\10.10.10.4\updates\agent\update-now.cmd
+::      net use \\10.10.10.4\updates /user:mwalimuupd MwalimuUpd2026 && \\10.10.10.4\updates\agent\update-now.cmd
+::
+::  After the first successful run there is a local copy at
+::  C:\MwalimuSync\update-now.cmd that carries the credentials,
+::  so from then on it is just:
+::
+::      C:\MwalimuSync\update-now.cmd
 ::
 ::  Close FumasV5 first. Windows will not overwrite a running
 ::  exe, so with the POS open this stages the build and stops -
@@ -106,6 +115,18 @@ if "!HAVE!"=="!WANT!" (
     echo       C:\MwalimuSync\lan-update.log
   )
 )
+
+:: Leave a local copy that carries the credentials, so nobody has
+:: to type them twice. Same idea as the bootstrap setup-pc.bat
+:: writes for the scheduled task: the logic stays on the share
+:: where it can be corrected, and only the way in lives on the PC.
+if not exist "C:\MwalimuSync" mkdir "C:\MwalimuSync" >nul 2>&1
+set "BOOT=C:\MwalimuSync\update-now.cmd"
+> "%BOOT%" echo @echo off
+>>"%BOOT%" echo :: Update this PC now. Written by agent\update-now.cmd on the hub.
+>>"%BOOT%" echo net use "%ROOT%" /user:%SHAREUSER% %SHAREPASS% ^>nul 2^>^&1
+>>"%BOOT%" echo call "%ROOT%\agent\update-now.cmd"
+if exist "%BOOT%" echo   Next time just run: %BOOT%
 
 :done
 net use "%ROOT%" /delete >nul 2>&1

@@ -107,10 +107,25 @@ try {
   # the single place the logic lives.
   $agentDir = Join-Path $unc "agent"
   if (-not (Test-Path $agentDir)) { New-Item $agentDir -ItemType Directory -Force | Out-Null }
-  $checkSrc = Join-Path $PSScriptRoot "check.cmd"
-  if (Test-Path $checkSrc) {
-    Copy-Item $checkSrc (Join-Path $agentDir "check.cmd") -Force
-    Say "[OK] agent\check.cmd refreshed" "Green"
+  # Written with CRLF, never copied as-is.
+  #
+  # cmd.exe cannot parse a batch file with Unix line endings: it runs the
+  # comment lines as commands and the script dies on its own header. Git
+  # normalises to LF on commit, so a working copy that has just been checked
+  # out - or edited by anything that keeps LF - is a file that will brick the
+  # update agent on every till the moment it reaches this share. That is not
+  # hypothetical; it happened, and every till went quiet until the share was
+  # rewritten. A .gitattributes now pins *.cmd to CRLF, and this rewrites the
+  # endings anyway, because the cost of being wrong here is the whole fleet.
+  foreach ($agentFile in @("check.cmd", "update-now.cmd")) {
+    $srcPath = Join-Path $PSScriptRoot $agentFile
+    if (-not (Test-Path $srcPath)) { continue }
+    $text = [System.IO.File]::ReadAllText($srcPath)
+    $text = $text -replace "`r`n", "`n"
+    $text = $text -replace "`n", "`r`n"
+    [System.IO.File]::WriteAllText((Join-Path $agentDir $agentFile), $text,
+      (New-Object System.Text.ASCIIEncoding))
+    Say ("[OK] agent\{0} refreshed (CRLF)" -f $agentFile) "Green"
   }
 
   # The build exe is only re-copied when it actually changed - it is 33 MB

@@ -171,7 +171,7 @@ for %%A in ("%SHAREROOT%\FumasV5-updated.exe") do set "SRCSIZE=%%~zA"
 :: Which version the staged file actually IS, recorded when it was
 :: staged. Size alone cannot answer this: two builds of the same
 :: source tree are routinely byte-for-byte the same length while
-:: differing in content, and that is not a rare case — it happened
+:: differing in content, and that is not a rare case - it happened
 :: on the very first day this ran, when two builds published an hour
 :: apart were both 34,280,960 bytes. Every till kept the first one,
 :: skipped the copy, and reported the second as staged. Left alone

@@ -1,0 +1,9 @@
+# cmd.exe cannot parse a batch file with Unix line endings: it runs the
+# comment lines as commands. That is not a style preference, it is the
+# difference between the update agent working and every till going quiet,
+# which is exactly what happened once a git-normalised LF copy of check.cmd
+# reached the hub share.
+#
+# These files are checked out and committed with CRLF on every platform.
+*.cmd text eol=crlf
+*.bat text eol=crlf
