@@ -457,3 +457,25 @@ model PendingChange {
   appliedAt   DateTime?
   failReason  String?
 }
+
+// A customer scanning the QR on their collection ticket.
+//
+// The bot cannot message a phone number, only reply to somebody who has
+// messaged it first, so the slip carries a deep link that sends "/start E042"
+// on their behalf. That update arrives here, at the webhook, because the bot
+// already has one serving the website's orders and a bot can have a webhook or
+// long polling but never both.
+//
+// The shop's own database is on the far side of the shop LAN and this server
+// cannot reach it, so the link is parked here and the laptop announcer collects
+// it. claimedAt is what stops it being collected twice.
+model TicketLink {
+  id         String    @id @default(cuid())
+  ticketCode String    // "E-042", as printed on the slip
+  chatId     String    // Telegram chat ids outrun 32-bit, so a string
+  firstName  String?
+  createdAt  DateTime  @default(now())
+  claimedAt  DateTime?
+
+  @@index([claimedAt, createdAt])
+}

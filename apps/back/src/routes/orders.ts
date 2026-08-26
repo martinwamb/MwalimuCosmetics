@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { sendAppMail } from "../lib/mailer.js";
 import { prisma } from "../lib/prisma.js";
+import { handleTicketStart } from "./tickets.js";
 import { buildTagMap } from "../lib/taxonomy.js";
 import { requireAuth, requireRoles } from "../lib/authz.js";
 
@@ -246,6 +247,16 @@ router.post("/telegram/webhook", async (req, res) => {
     }
 
     const update = req.body;
+
+    // One bot, one webhook, two features. A collection ticket being scanned
+    // arrives as a plain message rather than a callback, so it is offered this
+    // update first; if it was a ticket link there is nothing else to do with
+    // it. See routes/tickets.ts for why the scan cannot be handled at the shop.
+    if (update?.message) {
+      const handled = await handleTicketStart(update);
+      if (handled) return res.json({ ok: true });
+    }
+
     const callback = update?.callback_query;
     if (!callback?.data) {
       return res.json({ ok: true });

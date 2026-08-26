@@ -34,18 +34,34 @@
  * E042" on the customer's behalf the moment they scan it, and that is what
  * ties their chat to their ticket.
  *
+ * ── Why scans arrive via the server ───────────────────────────────────
+ *
+ * @mwalimucosmetics_bot already has a live webhook serving the website's order
+ * notifications, and a bot can have a webhook or long polling but never both.
+ * Calling getUpdates here would have taken those notifications down.
+ *
+ * So the scan goes to the webhook the bot already has, is parked in a
+ * TicketLink row, and this process collects it over the API — the same
+ * api.mwalimucosmetics.com the sync agent already talks to, with the same
+ * x-sync-secret. Sending is unaffected by any of that: sendMessage works
+ * alongside a webhook, so the goods-are-ready message goes straight from here
+ * to Telegram, and falls back to the server only when the shop WiFi can reach
+ * the server but not Telegram.
+ *
  * Usage:
  *   node announcer.js                 run forever
  *   node announcer.js --once          one pass, then exit (for testing)
  *   node announcer.js --say E-042     say a number and exit (test the speakers)
  *   node announcer.js --no-telegram   speakers only
  *
- * Config: C:\MwalimuSync\ticket-config.json  { "botToken": "...", "voice": "" }
- * or the TELEGRAM_BOT_TOKEN environment variable. The token is never committed.
+ * Config: C:\MwalimuSync\ticket-config.json
+ *   { "botToken": "...", "voice": "", "api": "https://api.mwalimucosmetics.com",
+ *     "syncSecret": "..." }
+ * or TELEGRAM_BOT_TOKEN / MWALIMU_API / MWALIMU_SYNC_SECRET in the environment.
+ * Neither the token nor the secret is ever committed.
  */
 
 const fs = require("fs");
-const path = require("path");
 const https = require("https");
 const { spawn } = require("child_process");
 const mysql = require("mysql");
@@ -57,8 +73,11 @@ const SAY_INDEX = process.argv.indexOf("--say");
 const SAY_ONLY = SAY_INDEX >= 0 ? process.argv[SAY_INDEX + 1] : null;
 
 const CONFIG_PATH = "C:\\MwalimuSync\\ticket-config.json";
-const OFFSET_PATH = path.join(__dirname, "telegram-offset.txt");
 const POLL_MS = 3000;
+// Scans are collected less often than tickets are announced. A customer who
+// has just scanned is not waiting on this — the server already replied to
+// them — so five seconds costs nothing and keeps the API quiet.
+const LINK_POLL_MS = 5000;
 
 function loadConfig() {
   let cfg = {};
@@ -68,11 +87,16 @@ function loadConfig() {
     // Absent is normal on a machine that only needs the speakers.
   }
   if (!cfg.botToken && process.env.TELEGRAM_BOT_TOKEN) cfg.botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!cfg.api) cfg.api = process.env.MWALIMU_API || "https://api.mwalimucosmetics.com";
+  // The same secret the sync agent already uses, so nothing new has to be
+  // distributed to this machine.
+  if (!cfg.syncSecret) cfg.syncSecret = process.env.MWALIMU_SYNC_SECRET || "mwalimu-sync-secret";
   return cfg;
 }
 
 const config = loadConfig();
 const TOKEN = NO_TELEGRAM ? "" : (config.botToken || "");
+const API = String(config.api || "").replace(/\/+$/, "");
 
 // ── Speaking ──────────────────────────────────────────────────────────
 
@@ -161,13 +185,40 @@ function telegram(method, payload, timeoutMs) {
   });
 }
 
-function readOffset() {
-  try { return parseInt(fs.readFileSync(OFFSET_PATH, "utf8").trim(), 10) || 0; }
-  catch (e) { return 0; }
-}
-
-function writeOffset(n) {
-  try { fs.writeFileSync(OFFSET_PATH, String(n)); } catch (e) { /* best effort */ }
+// The shop's own API, where customer scans are parked by the webhook.
+function api(method, path, body) {
+  return new Promise((resolve, reject) => {
+    if (!API) return resolve(null);
+    const url = new URL(API + path);
+    const payload = body === undefined ? null : JSON.stringify(body);
+    const headers = { "x-sync-secret": config.syncSecret };
+    if (payload) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = Buffer.byteLength(payload);
+    }
+    const req = https.request({
+      host: url.hostname,
+      port: url.port || 443,
+      path: url.pathname + url.search,
+      method: method,
+      headers: headers,
+      timeout: 15000
+    }, res => {
+      let data = "";
+      res.on("data", c => { data += c; });
+      res.on("end", () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(method + " " + path + ": HTTP " + res.statusCode + " " + data.slice(0, 160)));
+        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error(method + " " + path + ": unreadable reply")); }
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error(method + " " + path + ": timed out")));
+    req.on("error", reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
 }
 
 // ── Database ──────────────────────────────────────────────────────────
@@ -248,37 +299,42 @@ async function notify() {
 }
 
 // Customers scanning the QR on their slip.
+//
+// The scans arrive at the website's Telegram webhook — see the header for why
+// they cannot arrive here — and wait in a TicketLink row until this collects
+// them. They are claimed only after being applied, so a laptop that dies
+// halfway re-reads the same links next time instead of losing a registration.
 async function link() {
-  if (!TOKEN) return 0;
-  let updates;
+  if (!API) return 0;
+
+  let payload;
   try {
-    updates = await telegram("getUpdates",
-      { offset: readOffset(), timeout: 25, allowed_updates: ["message"] }, 35000);
+    payload = await api("GET", "/tickets/links?limit=50");
   } catch (e) {
-    console.log(stamp() + "  getUpdates: " + e.message);
+    console.log(stamp() + "  links: " + e.message);
     return 0;
   }
-  if (!updates || !updates.length) return 0;
 
-  for (const u of updates) {
-    writeOffset(u.update_id + 1);
-    const msg = u.message;
-    if (!msg || !msg.text || !msg.chat) continue;
+  const links = (payload && payload.data) || [];
+  if (!links.length) return 0;
 
-    const m = /^\/start\s+([EBC])(\d{1,4})$/i.exec(msg.text.trim());
-    if (!m) {
-      if (/^\/start\b/i.test(msg.text.trim())) {
-        await reply(msg.chat.id,
-          "Hello. Scan the QR code on your collection ticket and I will message you " +
-          "the moment your goods are ready.");
-      }
-      continue;
+  const done = [];
+  for (const l of links) {
+    try {
+      await linkChat(l.ticketCode, l.chatId, l.firstName || "");
+      done.push(l.id);
+    } catch (e) {
+      // A link that cannot be applied right now — a locked table, a dropped
+      // connection — is left unclaimed so the next pass tries it again.
+      console.log(stamp() + "  could not apply " + l.ticketCode + ": " + e.message);
     }
-
-    const code = m[1].toUpperCase() + "-" + m[2].padStart(3, "0");
-    await linkChat(code, msg.chat.id, msg.chat.first_name || "");
   }
-  return updates.length;
+
+  if (done.length) {
+    try { await api("POST", "/tickets/links/claim", { ids: done }); }
+    catch (e) { console.log(stamp() + "  claim: " + e.message); }
+  }
+  return done.length;
 }
 
 async function linkChat(code, chatId, who) {
@@ -289,6 +345,10 @@ async function linkChat(code, chatId, who) {
     "select ticket_code, state, eta_lo, eta_hi, tg_chat_id from tickets " +
     "where ticket_day = curdate() and ticket_code = ? and state in ('OPEN','READY')", [code]);
 
+  // The server already told them the ticket was registered, within a second of
+  // them scanning. Everything below is a correction or an addition to that, so
+  // the common case sends nothing at all and the customer gets one message
+  // rather than two.
   if (!rows.length) {
     await reply(chatId,
       "Ticket " + code + " is not open today. If you have just been given this ticket, " +
@@ -306,16 +366,14 @@ async function linkChat(code, chatId, who) {
   await q("update tickets set tg_chat_id = ?, tg_linked_at = now() " +
     "where ticket_day = curdate() and ticket_code = ?", [chatId, code]);
 
-  const wait = t.eta_hi >= 60
-    ? Math.round(t.eta_lo / 60) + "-" + Math.round(t.eta_hi / 60) + " hours"
-    : t.eta_lo + "-" + t.eta_hi + " minutes";
-
-  await reply(chatId,
-    (who ? "Thank you " + who + ".\n\n" : "") +
-    "Ticket " + code + " registered.\n" +
-    (t.state === "READY"
-      ? "Your goods are ready now — please come to the counter."
-      : "Expected wait: about " + wait + ".\nI will message you the moment your goods are ready."));
+  // Somebody who scanned after their goods were already ready would otherwise
+  // wait for a message that is never coming: the notify pass only picks up
+  // tickets that were linked before they were marked ready.
+  if (t.state === "READY") {
+    await reply(chatId, "Your goods are ready now — please come to the counter.");
+    await q("update tickets set notified_at = now() " +
+      "where ticket_day = curdate() and ticket_code = ? and notified_at is null", [code]);
+  }
 
   console.log(stamp() + "  linked " + code + " to chat " + chatId);
 }
@@ -349,6 +407,7 @@ async function main() {
   console.log("Database: " + cfg.database);
   console.log("Telegram: " + (TOKEN ? "on" : "OFF — speakers only" +
     (NO_TELEGRAM ? " (--no-telegram)" : ", no botToken in " + CONFIG_PATH)));
+  console.log("Scans   : " + (API ? "collected from " + API + "/tickets/links" : "OFF — no api configured"));
   console.log("");
 
   if (TOKEN) {
@@ -362,7 +421,7 @@ async function main() {
 
   if (ONCE) {
     await cycle();
-    if (TOKEN) await link();
+    if (API) await link();
     console.log("One pass done.");
     if (conn) conn.end();
     return;
@@ -370,10 +429,10 @@ async function main() {
 
   console.log("Watching for tickets marked ready. Ctrl-C to stop.\n");
 
-  // Two independent timers rather than one. The Telegram poll deliberately
-  // blocks for up to 25 seconds waiting for somebody to scan a code; if the
-  // announcements shared that loop, a customer could stand in front of a
-  // finished basket for half a minute waiting for their number to be called.
+  // Two timers rather than one. Collecting scans talks to a server over the
+  // shop's WiFi and can stall for as long as its timeout; announcements talk
+  // only to MySQL over the cable. Sharing a loop would mean a customer standing
+  // in front of a finished basket while the laptop waits on the internet.
   const beat = async () => {
     try { await cycle(); }
     catch (e) { console.log(stamp() + "  cycle: " + e.message); conn = null; }
@@ -382,7 +441,7 @@ async function main() {
   const poll = async () => {
     try { await ensureConnected(); await link(); }
     catch (e) { console.log(stamp() + "  poll: " + e.message); conn = null; }
-    setTimeout(poll, TOKEN ? 500 : 30000);
+    setTimeout(poll, LINK_POLL_MS);
   };
 
   beat();
