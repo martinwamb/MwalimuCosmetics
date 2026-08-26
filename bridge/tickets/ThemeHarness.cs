@@ -124,6 +124,14 @@ internal static class ThemeHarness
 			"an ordinary button was recoloured", ordinary.BackColor.ToString());
 		Check(deliberate.FlatStyle == FlatStyle.Flat,
 			"a coloured button still became flat", deliberate.FlatStyle.ToString());
+		// The regression that shipped: borderless buttons on a pale vendor form
+		// are indistinguishable from labels. Every button keeps an edge.
+		Check(ordinary.FlatAppearance.BorderSize >= 1,
+			"an ordinary button still has a border", ordinary.FlatAppearance.BorderSize.ToString());
+		Check(deliberate.FlatAppearance.BorderSize >= 1,
+			"a coloured button still has a border", deliberate.FlatAppearance.BorderSize.ToString());
+		Check(ordinary.BackColor != Color.Empty && ordinary.ForeColor != Color.White,
+			"an ordinary button is light with dark text, not a dark slab", ordinary.BackColor.ToString());
 		Check(grid.BorderStyle == BorderStyle.None,
 			"the grid lost its 3D border", grid.BorderStyle.ToString());
 		Check(!grid.EnableHeadersVisualStyles,

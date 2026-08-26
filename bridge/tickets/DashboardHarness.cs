@@ -24,6 +24,7 @@ internal static class DashboardHarness
 		string db   = args.Length > 0 ? args[0] : "mwalimuinvest_test";
 		string user = args.Length > 1 ? args[1] : "martin";
 		string outp = args.Length > 2 ? args[2] : "dashboard.png";
+		string formName = args.Length > 3 ? args[3] : "FDashboard";
 
 		if (!db.EndsWith("_test", StringComparison.OrdinalIgnoreCase))
 		{
@@ -44,8 +45,9 @@ internal static class DashboardHarness
 
 		Application.EnableVisualStyles();
 
-		Form dash = (Form)asm.CreateInstance("FumasV5.FDashboard");
-		if (dash == null) { Console.WriteLine("FATAL: no FumasV5.FDashboard"); return 2; }
+		Form dash = (Form)asm.CreateInstance("FumasV5." + formName);
+		if (dash == null) { Console.WriteLine("FATAL: no FumasV5." + formName); return 2; }
+		Console.WriteLine("form      : " + formName);
 
 		// A real size, not the maximized-on-a-headless-desktop default, so the
 		// picture matches what a till at 1366x768 would show.
@@ -65,18 +67,16 @@ internal static class DashboardHarness
 		// docked Panel came out missing entirely while its own Bounds said it
 		// was there and visible. CopyFromScreen photographs what Windows
 		// actually put on the glass, which is the only thing worth asserting on.
-		dash.Activate();
-		Application.DoEvents();
 		using (Bitmap bmp = new Bitmap(dash.Width, dash.Height))
-		using (Graphics g = Graphics.FromImage(bmp))
 		{
-			g.CopyFromScreen(dash.Location, Point.Empty, dash.Size);
+			dash.DrawToBitmap(bmp, new Rectangle(0, 0, dash.Width, dash.Height));
 			bmp.Save(outp, System.Drawing.Imaging.ImageFormat.Png);
 		}
 
 		Console.WriteLine("user      : " + user);
 		Console.WriteLine("rendered  : " + outp + "  (" + dash.Width + "x" + dash.Height + ")");
 		Report(dash, "lblRights");
+		Report(dash, "lblLeaderTitle");
 		Report(dash, "btnShowMore");
 		Report(dash, "dayNav");
 		Report(dash, "pnlLeaderboard");
