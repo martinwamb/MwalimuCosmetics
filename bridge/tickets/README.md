@@ -189,3 +189,61 @@ finish a sale in front of a queue is not.
 tomorrow morning would otherwise attach to a different customer, so the
 announcer only links a scan to a ticket that is still open today and says so
 plainly when it cannot.
+
+---
+
+# Product of the day, and the alerts
+
+Set up alongside the tickets, sharing `mw_settings`:
+
+```
+node ..\create-competition-tables.js --apply
+node ..\seed-ticket-rights.js --apply     # also registers the Admin Panel
+node ..\create-sale-limits.js --apply
+node ..\seed-sale-limit-rights.js --apply
+```
+
+One product is chosen each trading day — Mon/Wed/Fri a fast mover, Tue/Thu/Sat
+something in stock that has barely sold in two months. A point per piece sold,
+counted from the sale lines rather than stored, so a voided sale corrects
+itself. The standing is on the dashboard for everyone; it carries no shillings,
+so nothing there needs the money right.
+
+**Who gets the points.** Only 1 receipt in 4,342 names a salesperson here, so
+points fall through to the till login — which is the person who served the
+customer, so the board is right. It cannot separate two people sharing one
+till. Filling in the salesperson field at the POS is what would.
+
+**Three toasts, one timer.** `GrnNotifier` (goods received) was already driven
+from `Fmain.Timer1`, a five-minute timer that shipped enabled with an empty
+handler. `ScoreNotifier` and `StockNotifier` join it: same timer, same
+never-throws contract, each with its own watermark file under
+`%LOCALAPPDATA%\FumasV5\` so one cannot disturb another. Each seeds itself
+quietly on first run rather than greeting a new PC with a backlog.
+
+Stock adjustments are watched on `adjust.aid`. An adjustment is the one stock
+movement with no supplier, no invoice and no delivery behind it — until now the
+only way to know one had happened was to go looking.
+
+**The Admin Panel** (`FAdminPanel`, under Administrative Tools) holds the
+thresholds, the weekday pattern, a by-hand choice of today's product, and the
+sale limits. Everything reads and writes `mw_settings`, never `nauto` — the
+vendor's settings screens rewrite that row wholesale, so a value added there is
+a value one of their Save buttons can clear.
+
+## Telegram: one bot, two uses
+
+The bot `@mwalimucosmetics_bot` already has a **live webhook** serving the
+website's order notifications (`apps/back/src/routes/orders.ts`). A bot can have
+a webhook or long polling, never both, so `announcer.js` cannot call
+`getUpdates` without breaking that.
+
+Outbound is unaffected — `sendMessage` works alongside a webhook — so the
+"goods are ready" message needs nothing. Only the inbound QR scan does. Either:
+
+- **a second bot** for tickets, and the announcer long-polls it as written; or
+- **route it through the server**: extend the existing webhook to record
+  `/start E042`, and have the announcer fetch pending links.
+
+Until one is in place, the QR is printed and scannable but nothing links the
+chat, and tickets are announced over the speakers only.
