@@ -86,6 +86,30 @@ async function resolveSection() {
   return FALLBACK_SECTION;
 }
 
+// Settings screens live under Administrative Tools. This shop spells its
+// section "SetUp & Configuratio" — truncated and all — so the spelling is read
+// back rather than guessed, exactly as seed-sale-limit-rights.js does.
+const ADMIN_MODULE = "Administrative Tools";
+const ADMIN_PREFERENCES = [/config/i, /set.?up/i, /setting/i];
+
+async function resolveAdminSection() {
+  const rows = await q(
+    "select section, count(*) forms from sys_forms where module = ? group by section order by forms desc",
+    [ADMIN_MODULE]);
+  let section = "Settings";
+  if (rows.length) {
+    for (const pattern of ADMIN_PREFERENCES) {
+      const m = rows.find(r => pattern.test(String(r.section)));
+      if (m) { section = m.section; break; }
+    }
+  }
+  const r = await q("select `rank` from sys_forms where module = ? and section = ? limit 1",
+    [ADMIN_MODULE, section]);
+  const rank = (r.length && r[0].rank !== null) ? r[0].rank : 1;
+  console.log('Admin panel goes to "' + ADMIN_MODULE + ' / ' + section + '"');
+  return { section: section, rank: rank };
+}
+
 async function resolveRank(section) {
   const rows = await q(
     "select `rank` from sys_forms where module = ? and section = ? limit 1", [MODULE, section]);
@@ -98,18 +122,53 @@ async function main() {
   const section = await resolveSection();
   const rank = await resolveRank(section);
 
-  const existing = await q("select `NO` from sys_forms where f_name = 'FTickets'");
-  if (existing.length) {
-    console.log("sys_forms: FTickets already present (NO=" + existing[0].NO + ") — left alone");
-  } else {
-    console.log("sys_forms: INSERT FTickets -> " + MODULE + " / " + section +
-      " (listed=YES, rank=" + rank + ")");
+  // FTickets belongs beside the POS, in Accounts / Transactions. The admin
+  // panel does not: it is a settings screen and goes where the shop already
+  // keeps those, under Administrative Tools, next to Sale Limits.
+  const admin = await resolveAdminSection();
+
+  const FORMS = [
+    { f_name: "FTickets", f_caption: "Collection Tickets",
+      module: MODULE, section: section, listed: "YES", rank: rank },
+    { f_name: "FAdminPanel", f_caption: "Admin Panel",
+      module: ADMIN_MODULE, section: admin.section, listed: "YES", rank: admin.rank }
+  ];
+
+  for (const f of FORMS) {
+    const existing = await q("select `NO` from sys_forms where f_name = ?", [f.f_name]);
+    if (existing.length) {
+      console.log("sys_forms: " + f.f_name + " already present (NO=" + existing[0].NO + ") — left alone");
+      continue;
+    }
+    console.log("sys_forms: INSERT " + f.f_name + " -> " + f.module + " / " + f.section +
+      " (listed=" + f.listed + ", rank=" + f.rank + ")");
     if (APPLY) {
       await q("insert into sys_forms (f_name, f_caption, module, section, listed, `rank`) " +
         "values (?,?,?,?,?,?)",
-        ["FTickets", "Collection Tickets", MODULE, section, "YES", rank]);
+        [f.f_name, f.f_caption, f.module, f.section, f.listed, f.rank]);
     }
   }
+
+  // The admin panel goes to the people who already manage users — the same
+  // rule seed-sale-limit-rights.js uses, and for the same reason: they can
+  // already grant themselves any right they like, so nobody gains access they
+  // did not effectively have.
+  const managers = (await q(
+    "select distinct code from users_rights where form_name = 'fusers' and r_vw = 1 order by code"))
+    .map(r => r.code);
+  const haveAdmin = new Set(
+    (await q("select distinct code from users_rights where form_name = 'FAdminPanel'")).map(r => r.code));
+  const needAdmin = managers.filter(c => !haveAdmin.has(c));
+
+  console.log("\nFAdminPanel: " + managers.length + " user-managers, " +
+    haveAdmin.size + " already granted, " + needAdmin.length + " to grant");
+  for (const code of needAdmin) {
+    if (APPLY) {
+      await q("insert into users_rights (code, form_name, r_vw, r_ad, r_ed, r_dl, r_ap) " +
+        "values (?,?,1,1,1,0,0)", [code, "FAdminPanel"]);
+    }
+  }
+  if (needAdmin.length) console.log("  " + needAdmin.join(", "));
 
   const tillUsers = (await q(
     "select distinct code from users_rights where form_name = ? and r_vw = 1 order by code",
@@ -140,11 +199,13 @@ async function main() {
 
   console.log("\n-- sys_forms now --");
   console.table(await q(
-    "select f_name, f_caption, module, section, listed, `rank` from sys_forms where f_name = 'FTickets'"));
+    "select f_name, f_caption, module, section, listed, `rank` from sys_forms " +
+    "where f_name in ('FTickets','FAdminPanel')"));
   console.log("-- users_rights now --");
   console.table(await q(
     "select form_name, count(*) users, sum(r_vw) with_view, sum(r_ed) can_mark_ready, " +
-    "sum(r_dl) can_cancel from users_rights where form_name = 'FTickets' group by form_name"));
+    "sum(r_dl) can_cancel from users_rights where form_name in ('FTickets','FAdminPanel') " +
+    "group by form_name"));
 }
 
 main()
