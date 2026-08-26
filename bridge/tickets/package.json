@@ -1,0 +1,9 @@
+{
+  "name": "mwalimu-tickets",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Laptop-side ticket tooling: QR pool generator and the announcer service.",
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}

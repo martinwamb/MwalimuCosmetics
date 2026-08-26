@@ -32,3 +32,10 @@ apps/front/tsconfig.tsbuildinfo
 bridge/drafts-output/
 bridge/orphans-output/
 bridge/diagnose-output/
+
+# Ticket QR pool — 900 generated PNGs, ~2.4MB, rebuilt in five seconds by
+# bridge/tickets/make-qr.js. They are deployment artefacts, not source, and
+# they have to be regenerated anyway if the bot is ever renamed.
+bridge/tickets/qr/
+bridge/tickets/logs/
+bridge/tickets/telegram-offset.txt
