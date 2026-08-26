@@ -132,7 +132,14 @@ const SETTINGS = [
   ["ticket.eta.B", "20-30", "Standard wait shown on the slip, minutes."],
   ["ticket.eta.C", "60-120", "Large wait shown on the slip, minutes."],
   ["ticket.bot", "", "Telegram bot username, no @. Blank prints no QR invitation."],
-  ["ticket.qr.max_seq", "300", "How many QR images exist per band. Past this the link prints as text."]
+  ["ticket.qr.max_seq", "300", "How many QR images exist per band. Past this the link prints as text."],
+
+  // Not ticketing, but this script owns mw_settings, and a second script that
+  // only added two rows to a table it did not create would be worse.
+  //
+  // A per-machine override, theme.enabled.<COMPUTERNAME>, is checked first and
+  // is not seeded: it exists only when somebody sets it for one awkward till.
+  ["theme.enabled", "1", "Restyle every screen as it opens. 0 restores the old look."]
 ];
 
 const cfg = getMysqlConfig();
