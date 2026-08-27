@@ -133,6 +133,21 @@ if errorlevel 1 (
   echo  [OK] Remote PowerShell enabled
 )
 
+:: --- 5. Do the first check NOW, not in ten minutes ----------
+:: A PC gets set up precisely because something on it is wrong or
+:: missing, so waiting a cycle to find out is the wrong default. This
+:: also puts the receipt layouts in place immediately, which is the
+:: whole reason the last unmanaged till printed reprints that did not
+:: say they were reprints.
+::
+:: Deliberately the bootstrap, not check.cmd directly: it is the exact
+:: path the scheduled task will use, so a failure shows up here rather
+:: than ten minutes after everyone has walked away.
+echo.
+echo   Running the first update check now...
+echo.
+call "%BOOT%"
+
 echo.
 echo  ==========================================================
 echo   %COMPUTERNAME% is set up.
