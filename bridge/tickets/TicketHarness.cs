@@ -44,6 +44,23 @@ internal static class TicketHarness
 			"Server=10.10.10.4;Database=" + db + ";User ID=root;port=3306;Password=allowme;" +
 			"charset=utf8; Convert Zero Datetime=True;Connect Timeout=120000;");
 		SetStatic("usercode", "HARNESS");
+		// The slip prints the shop's own name now, taken from mglobal.g_company,
+		// which the licence check fills at login. This harness never logs in, so
+		// it is set here from the same column the licence check reads.
+		try
+		{
+			using (MySql.Data.MySqlClient.MySqlConnection cc =
+				new MySql.Data.MySqlClient.MySqlConnection(
+					(string)tMglobal.GetField("mMySQLConnectionString", Any).GetValue(null)))
+			{
+				cc.Open();
+				object v = new MySql.Data.MySqlClient.MySqlCommand(
+					"select society_name from comp limit 1", cc).ExecuteScalar();
+				SetStatic("g_company", v == null ? "" : Convert.ToString(v));
+				Console.WriteLine("shop name : " + Convert.ToString(v));
+			}
+		}
+		catch (Exception ex) { Console.WriteLine("shop name : unavailable (" + ex.Message + ")"); }
 		SetStatic("username", "HARNESS");
 
 		Console.WriteLine("Database: " + db);
