@@ -164,22 +164,21 @@ if not defined FUMAS_DIR (
 set "RPTSRC=%SHAREROOT%\reports"
 if exist "%RPTSRC%\" (
   if not exist "%FUMAS_DIR%\Reports\" mkdir "%FUMAS_DIR%\Reports" >nul 2>&1
-  for %%R in ("%RPTSRC%\*.rpt") do (
-    set "WANTSZ=%%~zR"
-    set "HAVESZ="
-    if exist "%FUMAS_DIR%\Reports\%%~nxR" for %%L in ("%FUMAS_DIR%\Reports\%%~nxR") do set "HAVESZ=%%~zL"
-    if not "!HAVESZ!"=="!WANTSZ!" (
-      copy /y "%%~fR" "%FUMAS_DIR%\Reports\%%~nxR" >nul 2>&1
-      if not errorlevel 1 call :say "Report %%~nxR refreshed."
-    )
-  )
+  for %%R in ("%RPTSRC%\*.rpt") do call :syncrpt "%%~fR" "%%~nxR"
 )
 
 :: What this till actually holds, reported on every check-in. Four PCs
 :: here have no remote access at all, so this line is the only way to
 :: know what is on them.
 set "RPTSTATE=REPRINT-MISSING"
-if exist "%FUMAS_DIR%\Reports\rptPosiflex_reprint.rpt" set "RPTSTATE=reprint-ok"
+if exist "%FUMAS_DIR%\Reports\rptPosiflex_reprint.rpt" (
+  :: Not merely "a file is there" - the first eight characters of its
+  :: hash, so a till holding a DIFFERENT reprint layout shows up in the
+  :: fleet listing instead of reporting itself healthy. Every till should
+  :: print the same eight characters; one that does not is the odd one.
+  call :hash "%FUMAS_DIR%\Reports\rptPosiflex_reprint.rpt" RH
+  if defined RH (set "RPTSTATE=reprint-!RH:~0,8!") else (set "RPTSTATE=reprint-ok")
+)
 
 :: --- Already up to date? ------------------------------------
 :: HAVE is the version actually APPLIED (written only after a
@@ -292,6 +291,68 @@ exit /b 0
 echo [%DATE% %TIME%] %COMPUTERNAME%: %~1 >> "%LOG%"
 echo %~1
 exit /b 0
+
+:syncrpt
+:: Put one report layout on this till if what is here is not what the
+:: share holds. %~1 = source path, %~2 = file name.
+::
+:: Compares CONTENT, not size. Size was the first attempt and it is not
+:: good enough: the exe block below already records two different builds
+:: arriving byte-for-byte the same length, and a report layout edited in
+:: place is far likelier to keep its size than an exe is. A till holding a
+:: stale layout of the right length would never have been corrected, and
+:: would have gone on reporting itself perfectly fine.
+set "DEST=%FUMAS_DIR%\Reports\%~2"
+if not exist "!DEST!" goto :syncrpt_copy
+call :hash "%~1" SRCH
+call :hash "!DEST!" DSTH
+if not defined SRCH goto :syncrpt_size
+if not defined DSTH goto :syncrpt_size
+if /i "!SRCH!"=="!DSTH!" goto :eof
+goto :syncrpt_copy
+
+:syncrpt_size
+:: certutil missing or refused. Fall back to the old size test rather
+:: than skipping the file: weaker, but it still catches a layout that is
+:: absent or truncated, which is the case that started all this.
+set "WANTSZ=0"
+for %%A in ("%~1") do set "WANTSZ=%%~zA"
+set "HAVESZ=0"
+for %%A in ("!DEST!") do set "HAVESZ=%%~zA"
+if "!WANTSZ!"=="!HAVESZ!" goto :eof
+
+:syncrpt_copy
+copy /y "%~1" "!DEST!" >nul 2>&1
+if not errorlevel 1 call :say "Report %~2 refreshed."
+goto :eof
+
+:hash
+:: MD5 of %~1 into the variable named by %~2, left empty if it cannot be
+:: had. certutil ships with every Windows since 7, so this needs nothing
+:: installed. It prints a header line, the hash, then a trailing line;
+:: only the first line after the header is taken. Older builds group the
+:: hash in byte pairs, hence the space strip.
+set "%~2="
+set "_H="
+for /f "usebackq skip=1 delims=" %%H in (`certutil -hashfile "%~1" MD5 2^>nul`) do (
+  if not defined _H set "_H=%%H"
+)
+if not defined _H goto :eof
+set "_H=!_H: =!"
+:: certutil writes its FAILURES to stdout as well, so skip=1 will happily
+:: hand back "CertUtil:Thesystemcannotfindthefilespecified." as though it
+:: were a hash. Two of those compare equal - which would make a broken or
+:: absent certutil look like "the files already match" and quietly stop
+:: refreshing layouts for good, the exact silent drift this routine exists
+:: to end. So the answer must look like an MD5 before it is believed:
+:: exactly 32 characters, hex only. Anything else returns empty and lets
+:: the caller fall back to comparing size.
+if "!_H:~31,1!"=="" goto :eof
+if not "!_H:~32,1!"=="" goto :eof
+echo(!_H!| findstr /i /r /c:"^[0-9a-f][0-9a-f]*$" >nul 2>&1
+if errorlevel 1 goto :eof
+set "%~2=!_H!"
+goto :eof
 
 :checkin
 :: Report state to the check-in server. %~1 = state, %~2 = version.
