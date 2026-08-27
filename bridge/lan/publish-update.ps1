@@ -28,6 +28,10 @@ param(
   # writes to the share, so it must be the account setup-hub.bat granted
   # CHANGE to. Connecting as the read-only mwalimuupd cannot write and the
   # copy is denied.
+  # Where the receipt layouts come from. MSBuild output has no Reports
+  # folder beside it, so this points at the shop install known to carry
+  # the layout that actually prints the reprint line.
+  [string]$Reports  = "C:\Users\Admin\Documents\Mwalimu Cosmetics\mwalimu\Debugv5\Reports",
   [string]$User     = "mwalimuadmin",
   [string]$Password = "MwalimuAdmin2026"
 )
@@ -126,6 +130,44 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $agentDir $agentFile), $text,
       (New-Object System.Text.ASCIIEncoding))
     Say ("[OK] agent\{0} refreshed (CRLF)" -f $agentFile) "Green"
+  }
+
+  # The receipt layouts travel with the build.
+  #
+  # Until now this script shipped one exe and nothing else, so a till whose
+  # Reports folder had drifted kept whatever it happened to have. Modreports
+  # checks File.Exists for each .rpt and silently falls back to the built-in
+  # layout when one is missing - so a reprinted receipt came out identical to
+  # an original, on the one till that had lost rptPosiflex_reprint.rpt, with
+  # nothing anywhere reporting it.
+  #
+  # Only the receipt family is published. The other thirty-odd reports are not
+  # implicated and a smaller blast radius is worth more than completeness here.
+  # Beside the build if there is one, otherwise the known-good install set.
+  # MSBuild output lands in bin\Release, which has no Reports folder, so the
+  # fallback is the normal case rather than the exception.
+  $rptSrc = Join-Path (Split-Path $src.FullName -Parent) "Reports"
+  if (-not (Test-Path $rptSrc)) { $rptSrc = $Reports }
+  $rptDst = Join-Path $unc "reports"
+  if (Test-Path $rptSrc) {
+    if (-not (Test-Path $rptDst)) { New-Item $rptDst -ItemType Directory -Force | Out-Null }
+    $n = 0
+    # Named one by one, not globbed. The install carries a dozen dated
+    # variants - rptPosiflex09112018.rpt, "rptposiflex1 (2).rpt" - that no
+    # code path ever loads, and shipping those to eleven tills would be
+    # eleven chances to overwrite something with a stale copy.
+    foreach ($want in @("rptPosiflex.rpt", "rptPosiflex2.rpt",
+                        "rptPosiflex_reprint.rpt", "rptPosiflex_delivery.rpt")) {
+      $f = Get-ChildItem $rptSrc -Filter $want -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($f) { Copy-Item $f.FullName (Join-Path $rptDst $want) -Force; $n++ }
+      else    { Say ("[!] {0} not found in {1}" -f $want, $rptSrc) "Yellow" }
+    }
+    if ($n -gt 0) { Say ("[OK] {0} receipt layout(s) published" -f $n) "Green" }
+    else { Say "[!] No rptPosiflex*.rpt beside the build - layouts not published" "Yellow" }
+  }
+  else {
+    Say ("[!] No Reports folder beside the build at {0}" -f $rptSrc) "Yellow"
+    Say "    Tills will keep whatever layouts they already have." "Yellow"
   }
 
   # The build exe is only re-copied when it actually changed - it is 33 MB

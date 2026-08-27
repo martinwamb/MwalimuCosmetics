@@ -29,7 +29,12 @@ internal static class ReprintHarness
 		string receipt = args.Length > 0 ? args[0] : "JPOS276318";
 		string outDir = args.Length > 1 ? args[1] : ".";
 
-		asm = Assembly.LoadFrom("FumasV5.exe");
+		// Loaded by its own folder, not the working directory, so this harness
+		// can be run from anywhere — which is the whole point of the test it
+		// now performs: reports must be found however the program was started.
+		asm = Assembly.LoadFrom(System.IO.Path.Combine(
+			AppDomain.CurrentDomain.BaseDirectory, "FumasV5.exe"));
+		Console.WriteLine("working dir: " + Environment.CurrentDirectory);
 		Type mglobal = asm.GetType("FumasV5.mglobal");
 
 		string cs = (string)mglobal.GetField("mMySQLConnectionString", Any).GetValue(null);

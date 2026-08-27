@@ -146,6 +146,41 @@ if not defined FUMAS_DIR (
   exit /b 0
 )
 
+:: --- Keep the receipt layouts in step ------------------------
+:: The updater has always shipped one exe and nothing else, so a
+:: Reports folder could quietly drift. A till missing a layout does
+:: not fail - Modreports checks File.Exists and falls back to the
+:: built-in one - which is exactly why a reprinted receipt came out
+:: identical to an original on the one till that had lost
+:: rptPosiflex_reprint.rpt. Nothing anywhere said so.
+::
+:: Only the receipt family travels. The other thirty-odd reports are
+:: left alone: they are not implicated, and a smaller blast radius is
+:: worth more here than completeness.
+::
+:: This runs BEFORE the up-to-date check below, because a till can be
+:: on the current build and still be missing a layout - which is the
+:: case that started all this.
+set "RPTSRC=%SHAREROOT%\reports"
+if exist "%RPTSRC%\" (
+  if not exist "%FUMAS_DIR%\Reports\" mkdir "%FUMAS_DIR%\Reports" >nul 2>&1
+  for %%R in ("%RPTSRC%\*.rpt") do (
+    set "WANTSZ=%%~zR"
+    set "HAVESZ="
+    if exist "%FUMAS_DIR%\Reports\%%~nxR" for %%L in ("%FUMAS_DIR%\Reports\%%~nxR") do set "HAVESZ=%%~zL"
+    if not "!HAVESZ!"=="!WANTSZ!" (
+      copy /y "%%~fR" "%FUMAS_DIR%\Reports\%%~nxR" >nul 2>&1
+      if not errorlevel 1 call :say "Report %%~nxR refreshed."
+    )
+  )
+)
+
+:: What this till actually holds, reported on every check-in. Four PCs
+:: here have no remote access at all, so this line is the only way to
+:: know what is on them.
+set "RPTSTATE=REPRINT-MISSING"
+if exist "%FUMAS_DIR%\Reports\rptPosiflex_reprint.rpt" set "RPTSTATE=reprint-ok"
+
 :: --- Already up to date? ------------------------------------
 :: HAVE is the version actually APPLIED (written only after a
 :: successful swap below), so a build that is staged but not yet
@@ -266,5 +301,5 @@ exit /b 0
 if not defined CHKSRV goto :eof
 net use "\\%CHKSRV%\checkins" /user:%CHKUSER% %CHKPASS% >nul 2>&1
 if not exist "\\%CHKSRV%\checkins\" goto :eof
-> "\\%CHKSRV%\checkins\%COMPUTERNAME%.txt" echo %COMPUTERNAME% ^| %DATE% %TIME% ^| %~1 ^| %~2 ^| !FUMAS_DIR!
+> "\\%CHKSRV%\checkins\%COMPUTERNAME%.txt" echo %COMPUTERNAME% ^| %DATE% %TIME% ^| %~1 ^| %~2 ^| !FUMAS_DIR! ^| !RPTSTATE!
 goto :eof
