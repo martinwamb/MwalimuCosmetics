@@ -130,9 +130,22 @@ const SETTINGS = [
   ["ticket.express.max_items", "5", "Express band item ceiling."],
   ["ticket.express.count_mode", "LINES", "LINES = distinct products, UNITS = pieces."],
   ["ticket.standard.max_amount", "10000", "Standard band upper value. Above this is the large band."],
-  ["ticket.eta.E", "5-10", "Express wait shown on the slip, minutes."],
-  ["ticket.eta.B", "20-30", "Standard wait shown on the slip, minutes."],
-  ["ticket.eta.C", "60-120", "Large wait shown on the slip, minutes."],
+  // These three are now the FALLBACK, used until a band has enough completed
+  // tickets to measure with. The printed wait normally comes from how fast the
+  // band's team is actually finishing today, times the queue in front of you.
+  ["ticket.eta.E", "5-10", "Express fallback wait, minutes, until there is history."],
+  ["ticket.eta.B", "20-30", "Standard fallback wait, minutes, until there is history."],
+  ["ticket.eta.C", "60-120", "Large fallback wait, minutes, until there is history."],
+
+  ["ticket.eta.measured", "1",
+    "Estimate the wait from measured throughput. 0 goes back to the fixed ranges above."],
+  ["ticket.eta.days", "14",
+    "How many trading days of completed tickets to measure pace from."],
+  ["ticket.eta.min_samples", "20",
+    "Fewer usable gaps than this in a band and the fixed range is printed instead."],
+  ["ticket.eta.max_gap", "45",
+    "Minutes. A longer gap between completions is lunch or a quiet spell, not " +
+    "the team's pace, and is discarded."],
   ["ticket.bot", "", "Telegram bot username, no @. Blank prints no QR invitation."],
 
   // Where the download-your-receipt QR points. The ticket's receipt_token is

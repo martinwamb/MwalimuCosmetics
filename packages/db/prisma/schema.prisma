@@ -479,3 +479,61 @@ model TicketLink {
 
   @@index([claimedAt, createdAt])
 }
+
+// A collection ticket, mirrored from the shop so the web can see the queue.
+//
+// ── Why this is not part of the nightly mirror ────────────────────────
+//
+// mirror_* tables are a bulk copy of history, run once at 21:00. That is the
+// right shape for sales analysis and completely the wrong shape for this: a
+// board showing which tickets are still waiting is worthless if it is a day
+// behind, and a customer scanning the QR on their slip expects their receipt
+// to be there in the next minute, not tomorrow.
+//
+// So the shop pusher — which already runs every 30 seconds — sends the day's
+// tickets on its normal cycle, and this is a real model rather than a generic
+// mirror row so the board can index and filter it properly.
+//
+// ── Why the lines are Json ────────────────────────────────────────────
+//
+// The public receipt page needs the sale's lines the same day it was rung up,
+// and pos_details reaches Postgres only in the nightly mirror. Rather than a
+// second table and a second migration for data that is only ever read back
+// whole, alongside its ticket, and never queried across rows, the lines ride
+// along as they were pushed.
+model Ticket {
+  id           String    @id @default(cuid())
+
+  ticketDay    DateTime  @db.Date       // the TRADING day, not the wall clock
+  ticketCode   String                   // "E-042", as printed on the slip
+  band         String    @db.VarChar(1) // E express, B standard, C large
+  seq          Int
+
+  receiptno    String    @unique
+  arname       String?
+  amount       Decimal   @db.Decimal(20, 2)
+  lineCount    Int
+  etaLo        Int
+  etaHi        Int
+
+  state        String                   // OPEN | READY | COLLECTED
+  issuedAt     DateTime                 // `created` on the shop side
+  till         String?
+  staff        String?
+  readyAt      DateTime?
+  readyBy      String?
+  collectedAt  DateTime?
+  collectedBy  String?
+
+  // Unguessable, and the ONLY way the public receipt page is addressed.
+  // Receipt numbers run in sequence, so anyone holding one slip could read the
+  // receipt of the customer served before them if the number were the key.
+  receiptToken String?   @unique
+
+  items        Json?     // the sale's lines, for the download page
+
+  syncedAt     DateTime  @updatedAt
+
+  @@unique([ticketDay, ticketCode])
+  @@index([ticketDay, state])
+}

@@ -1262,6 +1262,34 @@ async function applyPendingChanges(conn, token) {
           arConn.end();
         }
 
+      } else if (change.type === "ticket_collected") {
+        // A collection ticket closed from the web board.
+        //
+        // The server cannot reach this database, so the press over there became
+        // a PendingChange and this is where it actually lands.
+        //
+        // Guarded on state so a press that arrives twice — a double click, or a
+        // retry after a timeout — cannot overwrite the time and the name of
+        // whoever really handed the goods over. Either OPEN or READY may be
+        // closed: a customer collecting is the end of the story from both.
+        const { ticketDay, ticketCode, by } = change.payload || {};
+        if (!ticketDay || !ticketCode) {
+          throw new Error("ticket_collected needs ticketDay and ticketCode");
+        }
+
+        const upd = await query(conn,
+          `UPDATE tickets
+              SET state = 'COLLECTED', collected_at = NOW(), collected_by = ?
+            WHERE ticket_day = ? AND ticket_code = ? AND state IN ('OPEN','READY')`,
+          [String(by || "WEB").slice(0, 50), ticketDay, ticketCode]);
+
+        // Nothing updated is NOT a failure. It means the counter got there
+        // first, which is the ordinary race between two people looking at the
+        // same queue — not something to retry or to shout about.
+        if (upd && upd.affectedRows === 0) {
+          log(`  Ticket ${ticketCode} was already closed at the counter.`);
+        }
+
       } else {
         // Unrecognized change type — fail loudly rather than silently marking
         // it "applied" while doing nothing (that used to happen here, since
@@ -1277,6 +1305,98 @@ async function applyPendingChanges(conn, token) {
       log(`  Failed change ${change.id}: ${e.message}`);
     }
   }
+}
+
+// ── Collection tickets, for the web board and the receipt page ──
+//
+// Deliberately NOT part of the nightly mirror. That is a bulk copy of history
+// and exactly the wrong shape here: a board showing who is still waiting is
+// worthless a day late, and a customer scanning the QR on their slip expects
+// their receipt to be there within the minute.
+//
+// Only the current trading day, and only when the tickets table exists — the
+// shop ran for years without one, and a PC that has not had
+// create-ticket-tables.js applied must not start failing its whole sync cycle
+// over a feature it does not have.
+//
+// The lines ride along with the ticket because pos_details reaches Postgres
+// only in the 21:00 mirror, and the download page has to work the same day.
+async function pushTickets(conn) {
+  try {
+    const exists = await query(conn, "SHOW TABLES LIKE 'tickets'");
+    if (!exists.length) return;
+
+    const tickets = await query(conn,
+      `SELECT ticket_day, ticket_code, band, seq, receiptno, arname, amount,
+              line_count, eta_lo, eta_hi, state, created, till, staff,
+              ready_at, ready_by, collected_at, collected_by, receipt_token
+         FROM tickets
+        WHERE ticket_day = CURDATE()
+        ORDER BY band, seq`);
+
+    if (!tickets.length) return;
+
+    // One query for every line of every ticket today, rather than one per
+    // ticket. Four hundred tickets on a Saturday would otherwise be four
+    // hundred round trips on a 30-second cycle.
+    const receipts = tickets.map(t => t.receiptno);
+    const holes = receipts.map(() => "?").join(",");
+    const lines = await query(conn,
+      `SELECT receiptno, code, description, qty, price, total
+         FROM pos_details
+        WHERE receiptno IN (${holes})
+        ORDER BY receiptno`, receipts);
+
+    const byReceipt = {};
+    for (const l of lines) {
+      (byReceipt[l.receiptno] = byReceipt[l.receiptno] || []).push({
+        sku: l.code,
+        name: l.description,
+        qty: Number(l.qty),
+        price: Number(l.price),
+        total: Number(l.total)
+      });
+    }
+
+    const payload = tickets.map(t => ({
+      ticketDay: iso(t.ticket_day),
+      ticketCode: t.ticket_code,
+      band: t.band,
+      seq: Number(t.seq),
+      receiptno: t.receiptno,
+      arname: t.arname,
+      amount: Number(t.amount),
+      lineCount: Number(t.line_count),
+      etaLo: Number(t.eta_lo),
+      etaHi: Number(t.eta_hi),
+      state: t.state,
+      issuedAt: iso(t.created),
+      till: t.till,
+      staff: t.staff,
+      readyAt: iso(t.ready_at),
+      readyBy: t.ready_by,
+      collectedAt: iso(t.collected_at),
+      collectedBy: t.collected_by,
+      receiptToken: t.receipt_token,
+      items: byReceipt[t.receiptno] || []
+    }));
+
+    const r = await apiPost("/tickets/sync", { tickets: payload }, SECRET);
+    if (r && r.status === 200) log(`Pushed ${payload.length} ticket(s).`);
+    else log("Ticket push returned " + (r && r.status));
+  } catch (e) {
+    // Never fatal. The board being stale is a nuisance; a sync cycle that dies
+    // here would stop metrics, products and every write-back behind it.
+    log("Ticket push skipped: " + e.message);
+  }
+}
+
+// The driver hands back Date objects for DATE and DATETIME columns. Sending
+// them as-is is what shifted timestamps by the UTC+3 offset elsewhere in this
+// file, so they go over the wire as ISO strings.
+function iso(v) {
+  if (!v) return null;
+  return v instanceof Date ? v.toISOString() : String(v);
 }
 
 // ── 4. Write back web-created sales to MySQL ─────────────────
@@ -1750,6 +1870,7 @@ async function run() {
   if (token) {
     const conn2 = await openConn().catch(e => { log("MySQL reconnect failed: " + e.message); return null; });
     if (conn2) {
+      await pushTickets(conn2).catch(e => log("Ticket push error: " + e.message));
       await applyPendingChanges(conn2, token).catch(e => log("PendingChanges error: " + e.message));
       await writeBackSales(conn2, token).catch(e => log("Writeback error: " + e.message));
       conn2.end();

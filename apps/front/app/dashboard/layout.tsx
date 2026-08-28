@@ -9,6 +9,7 @@ const navItems = [
   { label: "Sales",      href: "/dashboard/sales",      icon: "↗", roles: ["ADMIN","ACCOUNTS","SALES"] },
   { label: "Analytics",  href: "/dashboard/analytics",  icon: "▦", roles: ["ADMIN","ACCOUNTS"] },
   { label: "Stock",      href: "/dashboard/stock",      icon: "⊞", roles: ["ADMIN","ACCOUNTS"] },
+  { label: "Tickets",    href: "/dashboard/tickets",    icon: "◎", roles: ["ADMIN","ACCOUNTS","SALES"] },
   { label: "History",   href: "/dashboard/history",    icon: "◷", roles: ["ADMIN","ACCOUNTS"] },
   { label: "Admin",      href: "/dashboard/admin",      icon: "⚙", roles: ["ADMIN"] },
 ];
