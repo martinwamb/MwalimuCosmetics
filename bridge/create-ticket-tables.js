@@ -92,8 +92,10 @@ CREATE TABLE IF NOT EXISTS tickets (
   tg_linked_at datetime          NULL,
   notified_at  datetime          NULL,
   announced_at datetime          NULL,
+  receipt_token varchar(32)      NULL,
   PRIMARY KEY (ticket_day, ticket_code),
   UNIQUE KEY uq_ticket_receipt (receiptno),
+  UNIQUE KEY uq_ticket_token (receipt_token),
   KEY ix_ticket_state (ticket_day, state)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1`,
 
@@ -132,7 +134,12 @@ const SETTINGS = [
   ["ticket.eta.B", "20-30", "Standard wait shown on the slip, minutes."],
   ["ticket.eta.C", "60-120", "Large wait shown on the slip, minutes."],
   ["ticket.bot", "", "Telegram bot username, no @. Blank prints no QR invitation."],
-  ["ticket.qr.max_seq", "300", "How many QR images exist per band. Past this the link prints as text."],
+
+  // Where the download-your-receipt QR points. The ticket's receipt_token is
+  // appended. Kept as a setting because the domain is the one part of this
+  // that could plausibly change without a rebuild.
+  ["ticket.receipt.url", "https://mwalimucosmetics.com/r/",
+    "Base for the receipt-download QR. The ticket's receipt_token is appended."],
 
   // Not ticketing, but this script owns mw_settings, and a second script that
   // only added two rows to a table it did not create would be worse.
@@ -142,7 +149,15 @@ const SETTINGS = [
   ["theme.enabled", "1", "Restyle every screen as it opens. 0 restores the old look."]
 ];
 
-const cfg = getMysqlConfig();
+// --db lets this run against mwalimuinvest_test without exporting a whole set
+// of credentials. MWALIMU_DB_NAME alone does not do it: the environment path
+// is all-or-nothing, so setting just the name silently falls back to the
+// legacy config and its hardcoded production database - which looks exactly
+// like it worked.
+const dbIndex = process.argv.indexOf("--db");
+const dbName = dbIndex !== -1 && process.argv[dbIndex + 1] ? process.argv[dbIndex + 1] : null;
+
+const cfg = getMysqlConfig(dbName ? { database: dbName } : undefined);
 console.log(describeConfigSource(cfg));
 console.log("Database: " + cfg.database);
 console.log(APPLY ? "MODE: APPLY (writing)\n" : "MODE: dry run (pass --apply to write)\n");
@@ -159,6 +174,56 @@ async function tableExists(name) {
   return rows.length > 0;
 }
 
+async function columnExists(table, column) {
+  const rows = await q(
+    "select column_name from information_schema.columns " +
+    "where table_schema = database() and table_name = ? and column_name = ?",
+    [table, column]);
+  return rows.length > 0;
+}
+
+async function indexExists(table, index) {
+  const rows = await q(
+    "select index_name from information_schema.statistics " +
+    "where table_schema = database() and table_name = ? and index_name = ?",
+    [table, index]);
+  return rows.length > 0;
+}
+
+async function ensureColumn(table, column, definition, why) {
+  if (!(await tableExists(table))) {
+    console.log("  " + table + "." + column + " — table does not exist yet; the DDL above covers it.");
+    return;
+  }
+  if (await columnExists(table, column)) {
+    console.log("  " + table + "." + column + " already present — left alone.");
+    return;
+  }
+  const sql = "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition;
+  console.log("  " + table + "." + column + " missing. " + why);
+  console.log("    " + sql);
+  if (APPLY) {
+    await q(sql);
+    console.log("    -> Added.");
+  }
+}
+
+async function ensureIndex(table, index, definition, why) {
+  if (!(await tableExists(table))) return;
+  if (await indexExists(table, index)) {
+    console.log("  " + table + "." + index + " already present — left alone.");
+    return;
+  }
+  const sql = "ALTER TABLE " + table + " ADD " + definition.replace(
+    /^UNIQUE/, "UNIQUE KEY " + index);
+  console.log("  " + table + "." + index + " missing. " + why);
+  console.log("    " + sql);
+  if (APPLY) {
+    await q(sql);
+    console.log("    -> Added.");
+  }
+}
+
 async function main() {
   for (const name of Object.keys(DDL)) {
     if (await tableExists(name)) {
@@ -172,6 +237,31 @@ async function main() {
       }
       console.log("");
     }
+  }
+
+  // ── Columns added after the table already existed ──────────────────
+  //
+  // CREATE TABLE IF NOT EXISTS does nothing at all to a table that is already
+  // there, so a column added to the DDL above would reach a fresh install and
+  // silently miss production - which is the only install that matters.
+  //
+  // Each entry is checked and added on its own. Deliberately not a single
+  // ALTER of everything: MySQL 5.1 rebuilds the whole table for an ALTER, and
+  // on a table this size that is a pause the shop would feel.
+  console.log("\n-- columns on existing tables --");
+  await ensureColumn("tickets", "receipt_token", "varchar(32) NULL",
+    "The unguessable half of the receipt-download link.");
+  await ensureIndex("tickets", "uq_ticket_token", "UNIQUE (receipt_token)",
+    "Receipt numbers run in sequence; the token is what stops one customer " +
+    "reading another's receipt, so it must be unique.");
+
+  // Obsolete, but left in place rather than deleted: the QR pool it counted is
+  // gone (QrCode.cs encodes in the exe now), and a stray row costs nothing
+  // while a DELETE against a settings table nobody is watching costs trust.
+  const dead = await q("select skey from mw_settings where skey = 'ticket.qr.max_seq'");
+  if (dead.length) {
+    console.log("  ticket.qr.max_seq is obsolete - the QR image pool it sized " +
+      "no longer exists. Harmless; left alone.");
   }
 
   // Seeds are only ever inserted, never updated: once the shop has changed a
