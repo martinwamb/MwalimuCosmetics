@@ -28,23 +28,36 @@ param(
   [Parameter(ParameterSetName = "Status")][switch]$Status,
   [Parameter(ParameterSetName = "Trust")][switch]$TrustHosts,
 
-  # The 11 Windows PCs found on the shop LAN, by layer-2 ARP sweep on
-  # 2026-08-10. Do not trust ping or NetBIOS to find these: most block
-  # ping, and the unnamed ones have NetBIOS off, so both methods report
-  # only a handful of the machines that are actually there.
-  #   .4   SERVER-PC        .56  (unnamed)
-  #   .6   (unnamed)        .71  MWALIMU-PC
-  #   .12  (unnamed)        .156 CASHER1-PC
-  #   .16  (unnamed)        .157 (unnamed)
-  #   .44  (unnamed)        .158 MWALIMU-OFFICE
-  #                         .180 SERVEROLD-PC
-  # Deliberately excluded: .86 is a network printer, .63 answers ARP but
-  # exposes no ports at all.
+  # The shop PCs, by address. Names verified 2026-08-29 by asking each machine
+  # its own COMPUTERNAME over WinRM, not inferred from an ARP sweep - the
+  # earlier list was a sweep from 2026-08-10 and had already gone stale twice.
+  #
+  #   .4   SERVER-PC        the hub. No agent and no POS - it is the file
+  #                         share, so it will always report [FAIL] here.
+  #   .6   powered off      one of DESKTOP-HP7C23J / DESKTOP-NOUIVGU
+  #   .12  DESKTOP-L68F10R
+  #   .16  DESKTOP-2TI5LOI
+  #   .44  DESKTOP-CG9G8HP
+  #   .56  powered off      the other of HP7C23J / NOUIVGU
+  #   .63  DESKTOP-5KG879C  MISSING until 2026-08-29. It checks in and updates
+  #                         itself, so nothing looked wrong - but no command
+  #                         sent from this script had ever reached it.
+  #   .71  MWALIMU-PC
+  #   .156 CASHER1-PC
+  #   .157 DESKTOP-4PTT33I
+  #   .158 MWALIMU-OFFICE
+  #   .180 SERVEROLD-PC
+  #
+  # DESKTOP-2HRTQOP is deliberately absent: it has never had setup-pc.bat run
+  # on it, so there is nothing here to talk to. bridge/lan/find-unmanaged.js
+  # is what finds machines in that state.
+  #
+  # Excluded: .86 is a network printer.
   [string[]]$Targets  = @("10.10.10.4",  "10.10.10.6",  "10.10.10.12",
                           "10.10.10.16", "10.10.10.44", "10.10.10.56",
-                          "10.10.10.71", "10.10.10.156","10.10.10.157",
-                          "10.10.10.158","10.10.10.180"),
-  [string]$User       = "mwalimuadmin",
+                          "10.10.10.63", "10.10.10.71", "10.10.10.156",
+                          "10.10.10.157","10.10.10.158","10.10.10.180"),
+[string]$User       = "mwalimuadmin",
   [string]$Password   = "MwalimuAdmin2026"
 )
 
