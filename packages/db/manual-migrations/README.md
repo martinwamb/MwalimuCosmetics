@@ -62,4 +62,4 @@ model needs a file here.
 | File | Model | Applied to production |
 |---|---|---|
 | (none — done ad hoc) | `TicketLink` | 2026-08-26 |
-| `2026-08-28_ticket.sql` | `Ticket` | not yet |
+| `2026-08-28_ticket.sql` | `Ticket` | 2026-08-29 |

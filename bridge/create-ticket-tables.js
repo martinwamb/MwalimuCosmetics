@@ -148,6 +148,13 @@ const SETTINGS = [
     "the team's pace, and is discarded."],
   ["ticket.bot", "", "Telegram bot username, no @. Blank prints no QR invitation."],
 
+  // Off: every sale gets a ticket. The cashier's "no slip needed" checkbox is
+  // not drawn at all while this is 0. A queue that is only partly numbered is
+  // worse than one that is not numbered — the customers without a slip do not
+  // know they are missing anything, and staff cannot tell who waits for what.
+  ["ticket.allow_skip", "0",
+    "1 shows the cashier a 'no collection ticket' box on the payment screen."],
+
   // Where the download-your-receipt QR points. The ticket's receipt_token is
   // appended. Kept as a setting because the domain is the one part of this
   // that could plausibly change without a rebuild.
