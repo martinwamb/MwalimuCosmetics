@@ -63,3 +63,4 @@ model needs a file here.
 |---|---|---|
 | (none — done ad hoc) | `TicketLink` | 2026-08-26 |
 | `2026-08-28_ticket.sql` | `Ticket` | 2026-08-29 |
+| `2026-08-29_displaymedia.sql` | `DisplayMedia` | 2026-08-29 |

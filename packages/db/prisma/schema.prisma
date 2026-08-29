@@ -537,3 +537,29 @@ model Ticket {
   @@unique([ticketDay, ticketCode])
   @@index([ticketDay, state])
 }
+
+// A photo on the shop's customer-facing screen.
+//
+// The screen hangs where customers wait and spends most of its time showing
+// these; the collection-ticket panel beside them is the utility, and a number
+// becoming ready briefly takes the whole screen.
+//
+// Only a URL and an order. Deliberately not a media library: these are a
+// handful of product photos somebody swaps every few weeks, and every field
+// beyond what the screen actually reads is one more thing to maintain.
+//
+// Images are resized in the BROWSER before upload — canvas to about 1600px of
+// JPEG — so a six-megabyte phone photo arrives as a few hundred kilobytes.
+// That keeps the server free of a native image library and makes uploading
+// over shop internet quick, which is the difference between this being used
+// and not.
+model DisplayMedia {
+  id        String   @id @default(cuid())
+  url       String
+  caption   String?
+  enabled   Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([enabled, sortOrder])
+}
