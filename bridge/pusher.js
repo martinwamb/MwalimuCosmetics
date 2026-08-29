@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260829-44";
+const AGENT_VERSION   = "20260829-46";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -52,6 +52,12 @@ const SELF_PATH       = "C:\\MwalimuSync\\pusher.js";
 // these before overwriting pusher.js, so a new version never starts against a
 // missing dependency.
 const SIDECAR_MODULES = ["db-config.js", "ar-payment.js"];
+
+// How often the live half of this agent runs — the collection queue going up
+// and web write-backs coming down. The loop itself polls every five seconds
+// for a refresh request, which costs one API call; this is what stops that
+// cadence reaching MySQL.
+const LIVE_EVERY_MS   = 20000;
 
 // Guarded for the same reason as db-config below: a self-updated pusher.js can
 // land on a PC before its sidecars do. A missing module must cost one feature,
@@ -1823,9 +1829,50 @@ async function run() {
 
   if (refreshCheck.status !== 200) return; // silent — no log (would flood on bad connection)
 
+  // ── Live work, on EVERY cycle ──────────────────────────────────
+  //
+  // Everything below the gate is on-demand: it waits for somebody to press
+  // refresh on the dashboard, so that a heavy product sync does not run
+  // against the shop's MySQL every few minutes. That is right for products.
+  //
+  // It is completely wrong for the collection queue. The shop screen customers
+  // watch and the web ticket board are LIVE views, and a queue that only moves
+  // when a person happens to click a button on a dashboard is not a queue
+  // anybody can trust. Equally, a ticket marked collected on the web has to
+  // reach the shop's database on its own; leaving it parked until the next
+  // manual refresh means staff press "handed over" and nothing happens.
+  //
+  // So both run unconditionally, and both are cheap: two small indexed queries
+  // and one API call, against the minutes of stran scanning the gate exists to
+  // avoid.
+  // Throttled, because this loop polls every FIVE seconds. That cadence is
+  // right for "has anybody asked for a refresh", which is one cheap API call
+  // and no database at all — but opening MySQL and pushing the queue twelve
+  // times a minute against a server eleven tills are selling through is not.
+  //
+  // Twenty seconds puts the shop screen under half a minute behind the
+  // counter, which is far inside the time it takes anybody to walk over and
+  // look at it.
+  const cpLive = loadCheckpoint();
+  if (Date.now() - (cpLive.lastLivePush || 0) >= LIVE_EVERY_MS) {
+    saveCheckpoint({ ...cpLive, lastLivePush: Date.now() });
+
+    const liveToken = await getSyncToken().catch(() => null);
+    const liveConn = await openConn().catch(() => null);
+    if (liveConn) {
+      await pushTickets(liveConn).catch(e => log("Ticket push error: " + e.message));
+      if (liveToken) {
+        await applyPendingChanges(liveConn, liveToken)
+          .catch(e => log("PendingChanges error: " + e.message));
+      }
+      liveConn.end();
+    }
+  }
+
   const { pending } = JSON.parse(refreshCheck.body);
   if (!pending) {
-    // No refresh requested — exit immediately, MySQL untouched
+    // No refresh requested — nothing heavy to do. The live work above has
+    // already happened.
     return;
   }
 
@@ -1884,14 +1931,20 @@ async function run() {
   if (token) {
     const conn2 = await openConn().catch(e => { log("MySQL reconnect failed: " + e.message); return null; });
     if (conn2) {
-      await pushTickets(conn2).catch(e => log("Ticket push error: " + e.message));
+      // Tickets are pushed unconditionally near the top of run(), so there is
+      // deliberately no pushTickets call here — it would be the same two
+      // queries twice in one cycle.
       await applyPendingChanges(conn2, token).catch(e => log("PendingChanges error: " + e.message));
       await writeBackSales(conn2, token).catch(e => log("Writeback error: " + e.message));
       conn2.end();
     }
   }
 
+  // Spread cp first: this used to rebuild the checkpoint from scratch, which
+  // silently discarded lastUpdateCheck and would now discard lastLivePush too,
+  // resetting both throttles on every heavy cycle.
   saveCheckpoint({
+    ...cp,
     txCount:         metricsPushed ? 0 : cp.txCount,
     date:            metricsPushed ? today : cp.date,
     lastProductSync: productSyncDue ? nowMs : (cp.lastProductSync || 0),
