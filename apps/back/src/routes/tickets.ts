@@ -267,15 +267,22 @@ router.post("/sync", requireSyncSecret, async (req, res) => {
  */
 router.get("/board", requireRoles(["ADMIN", "ACCOUNTS", "SALES"]), async (req, res) => {
   try {
-    const raw = req.query.day ? new Date(String(req.query.day)) : new Date();
-    if (Number.isNaN(raw.getTime())) {
-      res.status(400).json({ error: "Bad day" });
-      return;
+    // The shop's trading day, not the server's. This server runs UTC and
+    // Nairobi is UTC+3, so between midnight and 03:00 UTC the two disagree and
+    // the board would go blank while the shop was still open - looking exactly
+    // like a queue with nothing in it.
+    let day: Date;
+    if (req.query.day) {
+      const raw = new Date(String(req.query.day));
+      if (Number.isNaN(raw.getTime())) {
+        res.status(400).json({ error: "Bad day" });
+        return;
+      }
+      day = new Date(Date.UTC(raw.getUTCFullYear(), raw.getUTCMonth(), raw.getUTCDate()));
+    } else {
+      const shop = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      day = new Date(Date.UTC(shop.getUTCFullYear(), shop.getUTCMonth(), shop.getUTCDate()));
     }
-    // The column is a DATE. Anchored in UTC because that is how Prisma stores
-    // a @db.Date, and building it from local parts would land on the previous
-    // day for anyone east of Greenwich - which is everybody here.
-    const day = new Date(Date.UTC(raw.getFullYear(), raw.getMonth(), raw.getDate()));
 
     const tickets = await prisma.ticket.findMany({
       where: { ticketDay: day },

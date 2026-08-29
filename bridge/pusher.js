@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260829-43";
+const AGENT_VERSION   = "20260829-44";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -1326,8 +1326,21 @@ async function pushTickets(conn) {
     const exists = await query(conn, "SHOW TABLES LIKE 'tickets'");
     if (!exists.length) return;
 
+    // ticket_day is formatted BY MYSQL, as a string. It is a DATE, not an
+    // instant, and the driver hands DATE columns back as a JS Date at local
+    // midnight — which toISOString then turns into 21:00 the previous day,
+    // because Nairobi is UTC+3. Postgres stores that in a DATE column as
+    // yesterday, and the whole board silently shows an empty day.
+    //
+    // Measured, not theorised: the first push put 63 of today's tickets on
+    // 2026-08-28 while their issuedAt timestamps read 2026-08-29.
+    //
+    // The DATETIME columns below are genuine instants and are fine going
+    // through Date — the shop's clock and this laptop's are both EAT, so the
+    // moment survives the round trip.
     const tickets = await query(conn,
-      `SELECT ticket_day, ticket_code, band, seq, receiptno, arname, amount,
+      `SELECT date_format(ticket_day, '%Y-%m-%d') AS ticket_day,
+              ticket_code, band, seq, receiptno, arname, amount,
               line_count, eta_lo, eta_hi, state, created, till, staff,
               ready_at, ready_by, collected_at, collected_by, receipt_token
          FROM tickets
@@ -1359,7 +1372,8 @@ async function pushTickets(conn) {
     }
 
     const payload = tickets.map(t => ({
-      ticketDay: iso(t.ticket_day),
+      // Already "YYYY-MM-DD" from MySQL. Deliberately NOT through iso().
+      ticketDay: String(t.ticket_day),
       ticketCode: t.ticket_code,
       band: t.band,
       seq: Number(t.seq),

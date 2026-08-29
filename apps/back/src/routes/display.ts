@@ -28,6 +28,22 @@ export const router = Router();
 // without a deploy, meant to be overridden in the server's .env.
 const DISPLAY_KEY = process.env.DISPLAY_KEY ?? "mwalimu-display";
 
+/**
+ * The shop's trading day, not the server's.
+ *
+ * This server runs UTC; Nairobi is UTC+3. Between midnight and 03:00 UTC the
+ * two disagree, so a board built from the server's own date would go blank
+ * for three hours while the shop was still trading — and, worse, would look
+ * exactly like a shop with nothing in the queue.
+ *
+ * Anchored in UTC because that is how Prisma stores a @db.Date; building it
+ * from local parts would land a day early for anyone east of Greenwich.
+ */
+function kenyanToday(): Date {
+  const shop = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  return new Date(Date.UTC(shop.getUTCFullYear(), shop.getUTCMonth(), shop.getUTCDate()));
+}
+
 function requireDisplayKey(req: any, res: any, next: any) {
   const given = req.query.key ?? req.headers["x-display-key"];
   if (given !== DISPLAY_KEY) {
@@ -46,8 +62,7 @@ function requireDisplayKey(req: any, res: any, next: any) {
  */
 router.get("/state", requireDisplayKey, async (_req, res) => {
   try {
-    const now = new Date();
-    const day = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    const day = kenyanToday();
 
     const [ready, preparing, media] = await Promise.all([
       prisma.ticket.findMany({
@@ -73,7 +88,7 @@ router.get("/state", requireDisplayKey, async (_req, res) => {
         })),
         preparing,
         media,
-        serverTime: now
+        serverTime: new Date()
       }
     });
   } catch (err: any) {
