@@ -362,5 +362,19 @@ goto :eof
 if not defined CHKSRV goto :eof
 net use "\\%CHKSRV%\checkins" /user:%CHKUSER% %CHKPASS% >nul 2>&1
 if not exist "\\%CHKSRV%\checkins\" goto :eof
-> "\\%CHKSRV%\checkins\%COMPUTERNAME%.txt" echo %COMPUTERNAME% ^| %DATE% %TIME% ^| %~1 ^| %~2 ^| !FUMAS_DIR! ^| !RPTSTATE!
+:: The RUNNING build is reported as well as the published one, and that
+:: distinction is not pedantry. A till reports "STAGED <new version>", which
+:: reads like it HAS the new build - and it does, sitting on disk, unapplied,
+:: while the POS goes on running whatever it started with.
+::
+:: On 2026-08-31 that hid a till running a build from 19 August. Twelve days
+:: old, and older than the collection ticket system entirely, so the cashier on
+:: it issued no tickets at all - while the fleet listing showed her machine
+:: carrying the same version as everybody else's.
+::
+:: Appended as a new field so anything already reading this line by position
+:: keeps working.
+set "RUNNING=!HAVE!"
+if not defined RUNNING set "RUNNING=none"
+> "\\%CHKSRV%\checkins\%COMPUTERNAME%.txt" echo %COMPUTERNAME% ^| %DATE% %TIME% ^| %~1 ^| %~2 ^| !FUMAS_DIR! ^| !RPTSTATE! ^| running=!RUNNING!
 goto :eof
