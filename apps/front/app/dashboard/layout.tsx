@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
+const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
 const navItems = [
   { label: "Overview",   href: "/dashboard",            icon: "◈", roles: ["ADMIN","ACCOUNTS","SALES"] },
   { label: "POS",        href: "/dashboard/pos",        icon: "⊡", roles: ["ADMIN","SALES"] },
@@ -33,6 +35,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!token) { router.push("/sign-in"); return; }
     setRole(localStorage.getItem("mwalimu_role"));
     setEmail(localStorage.getItem("mwalimu_email"));
+
+    // Having a token is not the same as having a VALID one. They last seven
+    // days, so a week after signing in the sidebar, the role badge and the
+    // email all still render while every request behind them returns 401 —
+    // and each page then reports that in its own words as its own failure.
+    // "Could not load the photo list" is true, and completely misleading.
+    //
+    // A network error is deliberately NOT treated as an expired session: the
+    // shop's internet drops, and signing staff out every time it does would be
+    // its own kind of broken.
+    fetch(`${apiBase}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => {
+        if (r.status === 401) {
+          ["mwalimu_token", "mwalimu_role", "mwalimu_email"].forEach(k => {
+            try { localStorage.removeItem(k); } catch {}
+          });
+          router.push("/sign-in?expired=1");
+        }
+      })
+      .catch(() => {});
   }, [router]);
 
   function signOut() {

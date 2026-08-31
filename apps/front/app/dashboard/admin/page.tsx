@@ -68,8 +68,14 @@ export default function AdminPage() {
     if (!token) return;
     fetch(`${apiBase}/display/media`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-      .then(d => setMedia(d.data ?? []))
-      .catch(() => setNote("Could not load the photo list."));
+      .then(d => { setMedia(d.data ?? []); setNote(null); })
+      .catch(e => setNote(
+        // Say which of the two it is. A stale sign-in and a broken server look
+        // identical from here otherwise, and the first is the likely one — the
+        // dashboard shell signs you out on a 401, but this can land first.
+        e.message === "401"
+          ? "Your sign-in has expired. Sign out and back in."
+          : "Could not load the photo list."));
   }, [token]);
 
   useEffect(() => { load(); }, [load]);

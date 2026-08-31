@@ -8,6 +8,7 @@ import { OAuth2Client } from "google-auth-library";
 import { sendAppMail } from "../lib/mailer.js";
 import { prisma } from "../lib/prisma.js";
 import { seedAdmin } from "../lib/admin.js";
+import { requireAuth } from "../lib/authz.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret";
 const PASSWORD_RESET_URL = process.env.PASSWORD_RESET_URL ?? "https://mwalimucosmetics.com/reset-password";
@@ -403,6 +404,23 @@ router.get("/oauth/facebook/callback", async (req, res) => {
     console.error("[auth] Facebook OAuth failed", err?.message ?? err);
     res.redirect(`${redirect}?error=facebook_oauth_failed`);
   }
+});
+
+/**
+ * Is this token still any good?
+ *
+ * The dashboard keeps its JWT in localStorage and, until now, treated the mere
+ * PRESENCE of one as being signed in. Tokens last seven days, so a week after
+ * signing in the sidebar, the role badge and the email all still render
+ * perfectly while every request behind them returns 401 — and each page
+ * reports that in its own words, as its own failure. "Could not load the photo
+ * list" is a true statement and a completely misleading one.
+ *
+ * One cheap authenticated call the shell can make on load turns that into the
+ * thing it actually is: a session that has run out.
+ */
+router.get("/me", requireAuth, (req: any, res) => {
+  res.json({ data: { email: req.user?.email ?? null, role: req.user?.role ?? null } });
 });
 
 router.post("/logout", (_req, res) => {
