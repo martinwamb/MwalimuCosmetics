@@ -21,7 +21,7 @@ const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
 
-const AGENT_VERSION   = "20260829-46";
+const AGENT_VERSION   = "20260831-47";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -58,6 +58,12 @@ const SIDECAR_MODULES = ["db-config.js", "ar-payment.js"];
 // for a refresh request, which costs one API call; this is what stops that
 // cadence reaching MySQL.
 const LIVE_EVERY_MS   = 20000;
+
+// The catch-up sweep. Rare, because it re-sends several hundred rows; frequent
+// enough that a slip printed during an outage becomes scannable the same day
+// rather than never.
+const CATCH_UP_EVERY_MS = 15 * 60 * 1000;
+const CATCH_UP_DAYS     = 3;
 
 // Guarded for the same reason as db-config below: a self-updated pusher.js can
 // land on a PC before its sidecars do. A missing module must cost one feature,
@@ -1327,7 +1333,20 @@ async function applyPendingChanges(conn, token) {
 //
 // The lines ride along with the ticket because pos_details reaches Postgres
 // only in the 21:00 mirror, and the download page has to work the same day.
-async function pushTickets(conn) {
+// `backDays` of 0 is the normal cycle: today only, every twenty seconds.
+//
+// Anything larger is the catch-up pass, and it exists because "today only" has
+// a hole in it that is invisible until a customer finds it. If this laptop is
+// off, asleep, or without internet when a slip is printed, that ticket is
+// never sent — and the next cycle is only interested in today, so it is never
+// sent LATER either. The QR on that customer's receipt is dead permanently.
+//
+// Measured: on 2026-08-29 the shop issued 247 tickets and the server received
+// 214. The last push was at 14:44 and the laptop went away afterwards, so two
+// slips printed that evening — the first two ever to carry a receipt token —
+// pointed at a receipt the server had never heard of. Scanning one gave
+// "Receipt not found", which is indistinguishable from a broken feature.
+async function pushTickets(conn, backDays) {
   try {
     const exists = await query(conn, "SHOW TABLES LIKE 'tickets'");
     if (!exists.length) return;
@@ -1350,8 +1369,8 @@ async function pushTickets(conn) {
               line_count, eta_lo, eta_hi, state, created, till, staff,
               ready_at, ready_by, collected_at, collected_by, receipt_token
          FROM tickets
-        WHERE ticket_day = CURDATE()
-        ORDER BY band, seq`);
+        WHERE ticket_day >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+        ORDER BY ticket_day, band, seq`, [Number(backDays) || 0]);
 
     if (!tickets.length) return;
 
@@ -1401,9 +1420,24 @@ async function pushTickets(conn) {
       items: byReceipt[t.receiptno] || []
     }));
 
-    const r = await apiPost("/tickets/sync", { tickets: payload }, SECRET);
-    if (r && r.status === 200) log(`Pushed ${payload.length} ticket(s).`);
-    else log("Ticket push returned " + (r && r.status));
+    // Chunked. The endpoint upserts row by row, so a catch-up pass of several
+    // hundred tickets in one request would hold it open past its timeout and
+    // fail as a whole - losing the ordinary tickets along with the backfill.
+    const BATCH = 150;
+    let sent = 0;
+    for (let i = 0; i < payload.length; i += BATCH) {
+      const slice = payload.slice(i, i + BATCH);
+      const r = await apiPost("/tickets/sync", { tickets: slice }, SECRET);
+      if (!r || r.status !== 200) {
+        log("Ticket push returned " + (r && r.status) + " after " + sent);
+        return;
+      }
+      sent += slice.length;
+    }
+    // Silent on the ordinary cycle. At three pushes a minute a line each time
+    // would bury everything else in the log; the catch-up pass is rare enough
+    // to be worth seeing.
+    if (backDays) log(`Pushed ${sent} ticket(s) (catch-up, ${backDays} days).`);
   } catch (e) {
     // Never fatal. The board being stale is a nuisance; a sync cycle that dies
     // here would stop metrics, products and every write-back behind it.
@@ -1857,10 +1891,18 @@ async function run() {
   if (Date.now() - (cpLive.lastLivePush || 0) >= LIVE_EVERY_MS) {
     saveCheckpoint({ ...cpLive, lastLivePush: Date.now() });
 
+    // Every so often, sweep up anything that was printed while this laptop was
+    // off, asleep, or off the internet. Without this those tickets are never
+    // sent at all - the ordinary cycle only looks at today, so a gap closes
+    // over and the QR on those customers' receipts stays dead.
+    const catchUpDue = Date.now() - (cpLive.lastTicketCatchUp || 0) >= CATCH_UP_EVERY_MS;
+
     const liveToken = await getSyncToken().catch(() => null);
     const liveConn = await openConn().catch(() => null);
     if (liveConn) {
-      await pushTickets(liveConn).catch(e => log("Ticket push error: " + e.message));
+      await pushTickets(liveConn, catchUpDue ? CATCH_UP_DAYS : 0)
+        .catch(e => log("Ticket push error: " + e.message));
+      if (catchUpDue) saveCheckpoint({ ...loadCheckpoint(), lastTicketCatchUp: Date.now() });
       if (liveToken) {
         await applyPendingChanges(liveConn, liveToken)
           .catch(e => log("PendingChanges error: " + e.message));
