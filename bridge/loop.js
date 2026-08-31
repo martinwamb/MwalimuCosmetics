@@ -39,8 +39,15 @@ const LOG = HOME + "sync.log";
 const INTERVAL = 20 * 1000;
 
 // node.exe is not always where it was last time somebody looked.
+//
+// The portable copy comes first. None of the shop PCs have Node installed and
+// none of them should need an installer run on them by hand, so the bridge
+// carries its own node.exe beside itself. A machine that also happens to have
+// a system-wide install still works; this just stops the bridge depending on
+// one being there.
 function findNode() {
   const candidates = [
+    HOME + "node\\node.exe",
     "C:\\Program Files\\nodejs\\node.exe",
     "C:\\Program Files (x86)\\nodejs\\node.exe",
     process.execPath
@@ -97,6 +104,42 @@ function runSync() {
     trimLog();
   });
 }
+
+// ── One loop, and only one ────────────────────────────────────────────
+//
+// The scheduled task that starts this also re-runs it every few minutes, so
+// that a loop which has died — or a machine where nobody has logged in since a
+// crash — comes back on its own rather than waiting for somebody to notice the
+// shop has gone quiet.
+//
+// That only works if a second copy refuses to start. Two loops means two
+// agents against the shop's MySQL, and the POS feels it.
+//
+// The pid file is checked, not trusted: a machine that lost power leaves one
+// behind pointing at a pid that no longer exists, and treating that as "already
+// running" would mean the bridge never starts again.
+const LOCK = HOME + "loop.pid";
+
+function alreadyRunning() {
+  try {
+    if (!fs.existsSync(LOCK)) return false;
+    const pid = parseInt(fs.readFileSync(LOCK, "utf8").trim(), 10);
+    if (!pid || pid === process.pid) return false;
+    // Signal 0 tests for existence without touching the process.
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    // ESRCH: no such process — the file is stale and this instance takes over.
+    return false;
+  }
+}
+
+if (alreadyRunning()) {
+  process.exit(0);
+}
+
+try { fs.writeFileSync(LOCK, String(process.pid)); } catch (e) { /* not fatal */ }
+process.on("exit", () => { try { fs.unlinkSync(LOCK); } catch (e) {} });
 
 note("Sync loop started (" + (INTERVAL / 1000) + "s) using " + NODE);
 runSync();
