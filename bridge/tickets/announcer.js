@@ -53,6 +53,7 @@
  *   node announcer.js --once          one pass, then exit (for testing)
  *   node announcer.js --say E-042     say a number and exit (test the speakers)
  *   node announcer.js --no-telegram   speakers only
+ *   node announcer.js --no-speak     Telegram and linking only, no speaking
  *
  * Config: C:\MwalimuSync\ticket-config.json
  *   { "botToken": "...", "voice": "", "api": "https://api.mwalimucosmetics.com",
@@ -69,6 +70,12 @@ const { getMysqlConfig, toDriverOptions, describeConfigSource } = require("./../
 
 const ONCE = process.argv.includes("--once");
 const NO_TELEGRAM = process.argv.includes("--no-telegram");
+
+// Speaking moved to the browser on the screen laptop, which is the machine
+// actually wired to the shop's amplifier. This process still does the two
+// things only it can do — claiming scans and messaging customers — and stays
+// silent so a number is not called twice from two rooms.
+const NO_SPEAK = process.argv.includes("--no-speak");
 const SAY_INDEX = process.argv.indexOf("--say");
 const SAY_ONLY = SAY_INDEX >= 0 ? process.argv[SAY_INDEX + 1] : null;
 
@@ -257,8 +264,8 @@ async function announce() {
     "order by ready_at asc limit 5");
 
   for (const r of rows) {
-    console.log(stamp() + "  calling " + r.ticket_code);
-    await say(r.ticket_code);
+    console.log(stamp() + (NO_SPEAK ? "  ready " : "  calling ") + r.ticket_code);
+    if (!NO_SPEAK) await say(r.ticket_code);
     // Stamped after speaking, not before: if this process is killed
     // mid-sentence the number is called again on restart, which is far better
     // than a customer never being called at all.
@@ -407,6 +414,7 @@ async function main() {
   console.log("Database: " + cfg.database);
   console.log("Telegram: " + (TOKEN ? "on" : "OFF — speakers only" +
     (NO_TELEGRAM ? " (--no-telegram)" : ", no botToken in " + CONFIG_PATH)));
+  console.log("Speaking: " + (NO_SPEAK ? "OFF (--no-speak) — the shop screen calls numbers" : "on"));
   console.log("Scans   : " + (API ? "collected from " + API + "/tickets/links" : "OFF — no api configured"));
   console.log("");
 

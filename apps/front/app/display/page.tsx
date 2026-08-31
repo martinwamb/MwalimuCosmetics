@@ -35,6 +35,33 @@ const POLL_MS = 8000;
 const SLIDE_MS = 9000;
 const ANNOUNCE_MS = 9000;
 
+/**
+ * "E-042" becomes "E, zero four two".
+ *
+ * Lifted deliberately from bridge/tickets/announcer.js, which has always said
+ * numbers this way, and the reasoning is worth keeping with the code: digits
+ * are said ONE AT A TIME because "forty-two" and "forty-eight" are nearly the
+ * same word across a busy shop with a fan running, and "four two" and "four
+ * eight" are not. The band letter comes first because that is what is printed
+ * largest on the slip.
+ *
+ * The shop has been hearing this phrasing for weeks. A screen that called
+ * numbers differently would be a second, competing convention.
+ */
+const DIGITS: Record<string, string> = {
+  "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
+  "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine"
+};
+
+function speakable(code: string) {
+  const [band, seq = ""] = String(code).split("-");
+  return band + ", " + seq.split("").map(d => DIGITS[d] ?? d).join(" ");
+}
+
+function phraseFor(code: string) {
+  return "Ticket " + speakable(code) + ", your goods are ready for collection.";
+}
+
 // useSearchParams opts the tree out of prerendering, and Next will not build
 // the page unless that bail-out sits behind a Suspense boundary. The fallback
 // is the same dark ground the screen uses, so a TV showing this mid-load looks
@@ -59,6 +86,16 @@ function DisplayScreen() {
   const [online, setOnline] = useState(true);
   const [denied, setDenied] = useState(false);
   const [announcing, setAnnouncing] = useState<string | null>(null);
+
+  // Sound is off until somebody touches the screen once.
+  //
+  // Not a preference — a browser rule. Audio and speech are blocked until a
+  // page has had a real user gesture, so a display that simply started talking
+  // on load would be silent and give no clue why. The prompt is the only
+  // interaction this screen ever needs, and it is asked for plainly.
+  const muted = params?.get("mute") === "1";
+  const [soundReady, setSoundReady] = useState(false);
+  const audioRef = useRef<AudioContext | null>(null);
 
   // Codes already seen as ready. Used to spot NEW ones — and seeded on the
   // first successful poll rather than left empty, or opening the page would
@@ -127,6 +164,92 @@ function DisplayScreen() {
     const t = setTimeout(() => setAnnouncing(null), ANNOUNCE_MS);
     return () => clearTimeout(t);
   }, [announcing]);
+
+  // ── Calling the number out loud ───────────────────────────────────
+  //
+  // This screen is plugged into the shop's speakers, so it is what calls
+  // numbers now. The announcer on the other machine runs with --no-speak and
+  // keeps doing the parts only it can: claiming QR scans and messaging
+  // customers on Telegram. One caller, in the room the customers are in.
+
+  const enableSound = useCallback(() => {
+    try {
+      const Ctor = window.AudioContext ?? (window as any).webkitAudioContext;
+      if (Ctor) {
+        if (!audioRef.current) audioRef.current = new Ctor();
+        audioRef.current?.resume();
+      }
+      // Speech needs the gesture too. An empty utterance is the usual way to
+      // spend it without saying anything.
+      if (typeof speechSynthesis !== "undefined") {
+        speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+      }
+      setSoundReady(true);
+    } catch {
+      // A screen that cannot make a sound still shows the numbers, which is
+      // most of its job.
+      setSoundReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (soundReady || muted) return;
+    const go = () => enableSound();
+    window.addEventListener("pointerdown", go, { once: true });
+    window.addEventListener("keydown", go, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", go);
+      window.removeEventListener("keydown", go);
+    };
+  }, [soundReady, muted, enableSound]);
+
+  useEffect(() => {
+    if (!announcing || !soundReady || muted) return;
+
+    let cancelled = false;
+
+    // Two beeps before the words. People do not look up at the start of a
+    // sentence, so without a chime the ticket number is the part that gets
+    // missed — the same reason the speaker announcer plays one.
+    const chime = () => {
+      const ctx = audioRef.current;
+      if (!ctx) return;
+      const at = ctx.currentTime;
+      [[880, 0, 0.18], [1170, 0.2, 0.22]].forEach(([hz, delay, dur]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = hz;
+        // Ramped rather than switched, because an abrupt stop on a square
+        // edge is an audible click through a shop amplifier.
+        gain.gain.setValueAtTime(0.0001, at + delay);
+        gain.gain.exponentialRampToValueAtTime(0.25, at + delay + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + delay + dur);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(at + delay);
+        osc.stop(at + delay + dur + 0.02);
+      });
+    };
+
+    const say = (text: string) => {
+      if (typeof speechSynthesis === "undefined") return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.9;      // the announcer runs its synthesiser one notch slow
+      u.volume = 1;
+      speechSynthesis.speak(u);
+    };
+
+    try {
+      chime();
+      const phrase = phraseFor(announcing);
+      // Said twice, because somebody who looked up on the chime has already
+      // missed half of the first one.
+      const t1 = setTimeout(() => { if (!cancelled) say(phrase); }, 500);
+      const t2 = setTimeout(() => { if (!cancelled) say(phrase); }, 4200);
+      return () => { cancelled = true; clearTimeout(t1); clearTimeout(t2); };
+    } catch {
+      return () => { cancelled = true; };
+    }
+  }, [announcing, soundReady, muted]);
 
   if (!key) return <Fill>Add ?key= to the address to start this screen.</Fill>;
   if (denied) return <Fill>That display key is not recognised.</Fill>;
@@ -235,6 +358,24 @@ function DisplayScreen() {
             {announcing}
           </div>
         </div>
+      )}
+
+      {/* Asked once, plainly, and then never again.
+          A screen that is meant to call numbers and is silent looks broken, and
+          the reason — a browser rule about audio needing a gesture — is not
+          something anyone should have to guess at from across a shop. */}
+      {!soundReady && !muted && (
+        <button type="button" onClick={enableSound}
+          style={{
+            position: "absolute", left: "50%", bottom: "3vh", transform: "translateX(-50%)",
+            zIndex: 30, cursor: "pointer", fontFamily: "inherit",
+            padding: "1.2vh 2vw", borderRadius: 999,
+            border: "1px solid rgba(255,255,255,0.35)",
+            background: "rgba(0,0,0,0.55)", color: "#fff",
+            fontSize: "1.4vw", letterSpacing: "0.04em"
+          }}>
+          Tap once to let this screen call the numbers
+        </button>
       )}
 
       {/* Small enough to ignore, visible enough to explain a stale screen. */}

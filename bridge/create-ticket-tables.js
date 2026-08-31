@@ -155,6 +155,16 @@ const SETTINGS = [
   ["ticket.allow_skip", "0",
     "1 shows the cashier a 'no collection ticket' box on the payment screen."],
 
+  // Not ticketing, but this script owns mw_settings and a second script that
+  // added two rows to a table it did not create would be worse.
+  ["update.notify", "1",
+    "Toast on a till when a build is waiting, asking for a restart. 0 silences it."],
+  ["session.restore", "1",
+    "Reopen the windows a cashier had open when the POS is restarted."],
+  ["session.restore.forms", "FPOS",
+    "Comma-separated form names eligible for restore. Deliberately short: most " +
+    "of the 621 forms here were never written to be opened cold."],
+
   // Where the download-your-receipt QR points. The ticket's receipt_token is
   // appended. Kept as a setting because the domain is the one part of this
   // that could plausibly change without a rebuild.
