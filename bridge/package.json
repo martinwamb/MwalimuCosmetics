@@ -7,6 +7,7 @@
     "start": "node pusher.js"
   },
   "dependencies": {
-    "mysql": "^2.18.1"
+    "mysql": "^2.18.1",
+    "pdfkit": "^0.20.2"
   }
 }
