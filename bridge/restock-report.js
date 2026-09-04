@@ -432,8 +432,21 @@ function render(file, title, rows, season, generatedAt, note, flat) {
   // leaves the text uncompressed inside the file, where grep can read it.
   const doc = new PDFDocument({ size: "A4", margin: M, bufferPages: true,
     compress: !process.env.RESTOCK_UNCOMPRESSED });
-  const done = new Promise(res => doc.on("end", res));
-  doc.pipe(fs.createWriteStream(file));
+  // Waited on the FILE, not the document.
+  //
+  // PDFDocument is a readable stream, and its "end" fires when pdfkit has
+  // finished producing bytes — not when the write stream has flushed them to
+  // disk. Waiting on the wrong one meant the next line could read a file that
+  // was still being written: the sheet printed fine, because it is rendered
+  // first and had a moment to settle, while the full list was read for Telegram
+  // the instant it was made and arrived truncated. It still ended in %%EOF by
+  // the time anyone looked at the disk, which is what made it puzzling.
+  const out = fs.createWriteStream(file);
+  const done = new Promise((res, rej) => {
+    out.on("finish", res);
+    out.on("error", rej);
+  });
+  doc.pipe(out);
 
   doc.fillColor(INK).font("Helvetica-Bold").fontSize(15).text(title, M, M);
   doc.font("Helvetica").fontSize(8.5).fillColor(FADE).text(generatedAt, M, doc.y + 4);
@@ -481,6 +494,18 @@ function render(file, title, rows, season, generatedAt, note, flat) {
 
 // ── Getting it out ────────────────────────────────────────────────────
 
+// A PDF that stops early still looks like a file: right name, right-ish size,
+// and Telegram accepts it without complaint. Only the person opening it finds
+// out, hours later. Every PDF is therefore checked for its end marker before
+// it goes anywhere, so a bad one is a loud failure in the log instead.
+function looksComplete(file) {
+  try {
+    const b = fs.readFileSync(file);
+    return b.length > 1000 && b.slice(0, 5).toString() === "%PDF-" &&
+      b.slice(-1024).toString("latin1").indexOf("%%EOF") >= 0;
+  } catch (e) { return false; }
+}
+
 // The Epson is plugged into another machine, and it has to stay there.
 //
 // This PC is the only one with node, the database and the internet, so it does
@@ -503,6 +528,10 @@ function handOff(file) {
       "C$ /user:mwalimuadmin MwalimuAdmin2026"], { stdio: "ignore" });
   } catch (e) { /* already connected, or on the printer PC itself */ }
 
+  if (!looksComplete(file)) {
+    console.log("  HANDOFF SKIPPED: " + file + " is not a complete PDF");
+    return false;
+  }
   try {
     fs.mkdirSync(drop, { recursive: true });
     fs.copyFileSync(file, path.join(drop, path.basename(file)));
@@ -526,6 +555,10 @@ function sendTelegram(file, caption) {
     return Promise.resolve(false);
   }
 
+  if (!looksComplete(file)) {
+    console.log("  telegram NOT SENT: " + file + " is not a complete PDF");
+    return Promise.resolve(false);
+  }
   const body = fs.readFileSync(file);
   const b = "----mwalimu" + Date.now();
   const head = (name, extra) =>
@@ -549,7 +582,19 @@ function sendTelegram(file, caption) {
       res.on("data", d => out += d);
       res.on("end", () => {
         const ok = res.statusCode === 200;
+        // Telegram reports back the size it stored. Comparing it against the file
+        // on disk is the only way to know the whole thing arrived without calling
+        // getUpdates, which must never happen on this bot.
+        let stored = null;
+        try { stored = JSON.parse(out).result.document.file_size; } catch (e) {}
+        const sent = body.length;
         console.log("  telegram: " + (ok ? "sent" : "FAILED " + res.statusCode + " " + out.slice(0, 200)));
+        if (ok) {
+          console.log("            " + sent + " bytes sent, " +
+            (stored === null ? "size not reported back" :
+             stored === sent ? stored + " bytes stored — match" :
+             stored + " bytes stored — MISMATCH, the file did not arrive whole"));
+        }
         resolve(ok);
       });
     });
