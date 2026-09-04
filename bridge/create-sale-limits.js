@@ -60,8 +60,8 @@
  * what is left of it visible.
  *
  * Dry run by default. Pass --apply to write.
- * Pass --index too for the two indexes FSellerActivity needs. They rebuild
- * tables of over a million rows. Out of trading hours only.
+ * Pass --index too for the pos_header index FSellerActivity needs. It
+ * rewrites a 103MB table and locks it. Out of trading hours only.
  */
 
 const mysql = require("mysql");
@@ -136,25 +136,27 @@ async function ensureSetting(key, value) {
   }
 }
 
-// The two indexes FSellerActivity needs, and neither of them is cheap to add.
+// The one index FSellerActivity needs.
 //
-//   pos_idx_arcode   answers "had this phone number ever bought here before
-//                    today?". pos_idx leads on receiptno, so without this the
-//                    question costs about 111,000 row reads FOR EVERY ROW of
-//                    output — measured, not guessed.
+// It answers "had this phone number ever bought here before today?". pos_idx
+// leads on receiptno, so without it that question costs about 111,000 row reads
+// FOR EVERY ROW of output — measured on the live database, not guessed.
 //
-//   sa_idx_adate     the day's refusals and overrides. systemaudit has nothing
-//                    but its primary key, so reading one day out of it is a
-//                    scan of 1.7M rows: 5.2 seconds, measured, while ten tills
-//                    are trying to sell.
+// This MySQL has the built-in InnoDB and no plugin, so adding an index rewrites
+// the whole table and holds it while it does: pos_header is 103MB, which is a
+// couple of minutes with the shop unable to record a sale. Hence its own flag,
+// and hence out of trading hours. FSellerActivity checks for it and leaves the
+// "new buyers" column out until it exists, so nothing else waits on this.
 //
-// Both rebuild a table of more than a million rows and hold it while they do,
-// so they are behind their own flag and belong out of trading hours. The screen
-// checks for them and simply leaves those columns out until they exist, so the
-// rest of the feature does not wait on this.
+// There was very nearly a second one here, on systemaudit(adate), for the day's
+// refusals and overrides — 1.7M rows and no index but the primary key, so one
+// day by date is a 5.2 second scan. It turned out not to be needed. That table
+// is append-only and its adate is written by the server rather than by a till,
+// so syid and adate rise together: checked over the last 5,000 rows, not one
+// goes backwards. The screen bisects the primary key instead, which answers the
+// same question in 34ms and rewrites nothing.
 const INDEXES = [
   ["pos_header", "pos_idx_arcode", "(arcode, trandate)"],
-  ["systemaudit", "sa_idx_adate", "(adate)"],
 ];
 
 async function ensureIndexes() {
