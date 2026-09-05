@@ -11,15 +11,23 @@ const navItems = [
   { label: "Sales",      href: "/dashboard/sales",      icon: "↗", roles: ["ADMIN","ACCOUNTS","SALES"] },
   { label: "Analytics",  href: "/dashboard/analytics",  icon: "▦", roles: ["ADMIN","ACCOUNTS"] },
   { label: "Stock",      href: "/dashboard/stock",      icon: "⊞", roles: ["ADMIN","ACCOUNTS"] },
-  { label: "Tickets",    href: "/dashboard/tickets",    icon: "◎", roles: ["ADMIN","ACCOUNTS","SALES"] },
+  { label: "Tickets",    href: "/dashboard/tickets",    icon: "◎", roles: ["ADMIN","ACCOUNTS","SALES","FRONTDESK"] },
   { label: "History",   href: "/dashboard/history",    icon: "◷", roles: ["ADMIN","ACCOUNTS"] },
-  { label: "Admin",      href: "/dashboard/admin",      icon: "⚙", roles: ["ADMIN"] },
+  // ACCOUNTS is not a new permission here: /display/media and /uploads have
+  // always allowed it, and only this menu pretended otherwise.
+  { label: "Shop Screen", href: "/dashboard/screen",   icon: "▶", roles: ["ADMIN","ACCOUNTS","FRONTDESK"] },
+  { label: "Staff",      href: "/dashboard/admin",     icon: "⚙", roles: ["ADMIN"] },
 ];
+
+// This menu is a convenience, not a permission. Every one of these pages is
+// guarded again at the API, which is the only place it counts - hiding a link
+// stops nobody who can type a URL.
 
 function friendlyRole(r: string | null) {
   if (r === "ADMIN") return "Admin";
   if (r === "ACCOUNTS") return "Accounts";
   if (r === "SALES") return "Sales";
+  if (r === "FRONTDESK") return "Tickets & Screen";
   return r ?? "Staff";
 }
 

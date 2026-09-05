@@ -20,7 +20,7 @@ function ensureDir() {
 
 export const router = Router();
 
-router.post("/", requireRoles(["ADMIN", "ACCOUNTS"]), (req, res) => {
+router.post("/", requireRoles(["ADMIN", "ACCOUNTS", "FRONTDESK"]), (req, res) => {
   const parsed = uploadSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });

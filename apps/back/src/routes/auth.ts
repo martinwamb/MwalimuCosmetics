@@ -20,6 +20,15 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET ?? "";
 
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 
+// The roles a staff account may hold. One list, because when this lived in
+// three places the staff list filtered on a set that did not include the newest
+// role and it simply did not appear on its own management page.
+const STAFF_ROLES = ["ACCOUNTS", "SALES", "ADMIN", "FRONTDESK"] as const;
+
+// An hour is long enough to walk to a computer and short enough that a link
+// left in an inbox stops being a way in.
+const RESET_TTL_MINUTES = 60;
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6)
@@ -28,7 +37,8 @@ const loginSchema = z.object({
 const staffCreateSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
-  role: z.enum(["ACCOUNTS", "SALES", "ADMIN"]) // Staff roles are admin-managed only
+  role: z.enum(STAFF_ROLES),
+  name: z.string().trim().min(1).optional()
 });
 
 const registerSchema = z.object({
@@ -40,6 +50,18 @@ const registerSchema = z.object({
 
 const identifySchema = z.object({
   email: z.string().email()
+});
+
+const staffPatchSchema = z.object({
+  role: z.enum(STAFF_ROLES).optional(),
+  disabled: z.boolean().optional()
+}).refine(v => v.role !== undefined || v.disabled !== undefined, {
+  message: "Nothing to change"
+});
+
+const resetSchema = z.object({
+  token: z.string().min(20),
+  password: z.string().min(6)
 });
 
 const forgotSchema = z.object({
@@ -103,6 +125,10 @@ async function authenticate(email: string, password: string) {
   if (!user) return null;
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return null;
+  // The whole point of the disabled flag. Without this line it would only hide a
+  // row on the staff page while the account carried on working, which is worse
+  // than not having the feature: somebody would believe they had closed a door.
+  if (user.disabled) return null;
   return user;
 }
 
@@ -158,11 +184,14 @@ router.post("/staff", requireAdmin, async (req, res) => {
     data: {
       email: parsed.data.email,
       passwordHash,
-      role: parsed.data.role
+      role: parsed.data.role,
+      name: parsed.data.name ?? null
     }
   });
 
-  return res.status(201).json({ data: { id: created.id, email: created.email, role: created.role } });
+  return res.status(201).json({
+    data: { id: created.id, email: created.email, name: created.name, role: created.role }
+  });
 });
 
 router.post("/register", async (req, res) => {
@@ -214,43 +243,145 @@ router.post("/identify", async (req, res) => {
   });
 });
 
+// A reset token, and the hash of it that gets stored.
+//
+// randomBytes, not Math.random: this is a temporary password, and Math.random is
+// seeded from the clock. The hash is what goes in the table, so a database that
+// leaks does not hand over working reset links - the token itself only ever
+// exists in the email.
+function newResetToken() {
+  const token = crypto.randomBytes(32).toString("base64url");
+  return { token, tokenHash: crypto.createHash("sha256").update(token).digest("hex") };
+}
+
 router.post("/forgot", async (req, res) => {
   const parsed = forgotSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  // We do not send email yet; we acknowledge the request to avoid leaking user existence.
+  // The same answer whether or not the account exists, so this cannot be used to
+  // find out who banks here. That was right in the original and is kept.
+  const quiet = { message: "If that account exists, reset instructions have been sent." };
+
   const user = await prisma.user.findUnique({
     where: { email: parsed.data.email },
-    select: { id: true }
+    select: { id: true, disabled: true }
+  });
+  if (!user || user.disabled) return res.status(200).json(quiet);
+
+  // Asking again replaces whatever was outstanding, so a forwarded old email
+  // stops working the moment a new one is asked for.
+  await prisma.passwordReset.deleteMany({ where: { userId: user.id, usedAt: null } });
+
+  const { token, tokenHash } = newResetToken();
+  await prisma.passwordReset.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60_000)
+    }
   });
 
-  if (!user) {
-    return res.status(200).json({ message: "If that account exists, reset instructions have been queued." });
-  }
-
-  const resetLink = `${PASSWORD_RESET_URL}?email=${encodeURIComponent(parsed.data.email)}`;
+  const resetLink = `${PASSWORD_RESET_URL}?token=${encodeURIComponent(token)}`;
   try {
     await sendAppMail({
       to: parsed.data.email,
       subject: "Reset your Mwalimu Cosmetics password",
-      text: `We received a password reset request for this account. If this was you, use this link: ${resetLink}\n\nIf you did not request this, you can ignore this email.`,
-      html: `<p>We received a password reset request for this account.</p><p>If this was you, use this link:</p><p><a href="${resetLink}">${resetLink}</a></p><p>If you did not request this, you can ignore this email.</p>`
+      text: `Use this link to set a new password: ${resetLink}\n\n`
+        + `It works once and expires in ${RESET_TTL_MINUTES} minutes.\n\n`
+        + `If you did not ask for this, you can ignore this email - nothing has changed.`,
+      html: `<p>Use this link to set a new password:</p>`
+        + `<p><a href="${resetLink}">${resetLink}</a></p>`
+        + `<p>It works once and expires in ${RESET_TTL_MINUTES} minutes.</p>`
+        + `<p>If you did not ask for this, you can ignore this email - nothing has changed.</p>`
     });
   } catch (err: any) {
     console.error("[auth] Failed to send reset email", err?.message ?? err);
   }
 
-  return res.status(200).json({ message: "Password reset link has been queued." });
+  return res.status(200).json(quiet);
+});
+
+// Spend a reset token and set the new password.
+router.post("/reset", async (req, res) => {
+  const parsed = resetSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const tokenHash = crypto.createHash("sha256").update(parsed.data.token).digest("hex");
+  const record = await prisma.passwordReset.findUnique({
+    where: { tokenHash },
+    include: { user: { select: { id: true, disabled: true } } }
+  });
+
+  // One message for every kind of bad token - unknown, spent, expired. Telling
+  // somebody which of those it was is telling them something about an account
+  // that is not theirs.
+  const refuse = () =>
+    res.status(400).json({ error: "That reset link is no longer valid. Please ask for a new one." });
+
+  if (!record || record.usedAt || record.expiresAt < new Date()) return refuse();
+  if (!record.user || record.user.disabled) return refuse();
+
+  const passwordHash = await bcrypt.hash(parsed.data.password, 12);
+
+  // Marked used in the same breath as the password changing, so two people
+  // following the same link cannot both succeed.
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+    prisma.passwordReset.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    prisma.passwordReset.deleteMany({ where: { userId: record.userId, usedAt: null } })
+  ]);
+
+  return res.status(200).json({ message: "Password changed. You can sign in with it now." });
 });
 
 router.get("/staff", requireAdmin, async (_req, res) => {
   const list = await prisma.user.findMany({
-    where: { role: { in: ["ACCOUNTS", "SALES", "ADMIN"] } },
-    select: { id: true, email: true, role: true, createdAt: true }
+    where: { role: { in: [...STAFF_ROLES] } },
+    select: { id: true, email: true, name: true, role: true, disabled: true, createdAt: true },
+    orderBy: [{ disabled: "asc" }, { email: "asc" }]
   });
   res.json({ data: list });
+});
+
+// Change somebody's role, or take their login away.
+//
+// An admin may not do either to themselves. There is one admin account in this
+// shop most days, and a click that demotes it locks everybody out of the
+// dashboard with no way back except the database.
+router.patch("/staff/:id", requireAdmin, async (req: any, res) => {
+  const parsed = staffPatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+  if (!target) return res.status(404).json({ error: "No such user" });
+  if (!STAFF_ROLES.includes(target.role as any)) {
+    return res.status(400).json({ error: "That account is not a staff account" });
+  }
+  if (target.id === req.user.sub) {
+    return res.status(400).json({ error: "You cannot change your own role or disable yourself" });
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: target.id },
+    data: {
+      ...(parsed.data.role !== undefined ? { role: parsed.data.role } : {}),
+      ...(parsed.data.disabled !== undefined ? { disabled: parsed.data.disabled } : {})
+    },
+    select: { id: true, email: true, name: true, role: true, disabled: true }
+  });
+
+  // A login just taken away should not keep a way back in.
+  if (parsed.data.disabled === true) {
+    await prisma.passwordReset.deleteMany({ where: { userId: target.id, usedAt: null } });
+  }
+
+  return res.json({ data: updated });
 });
 
 router.get("/oauth/google/start", async (req, res) => {

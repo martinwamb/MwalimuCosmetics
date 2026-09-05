@@ -4,249 +4,173 @@ import { useCallback, useEffect, useState } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-// What the shop screen is fed. Big enough for a 1080p TV with room to spare,
-// small enough that a photo taken on a phone stops being a six-megabyte upload
-// over shop internet.
-const MAX_EDGE = 1600;
-const JPEG_QUALITY = 0.82;
+type Staff = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  disabled: boolean;
+  createdAt: string;
+};
 
-type Media = { id: string; url: string; caption: string | null; enabled: boolean; sortOrder: number };
+// What each role actually opens, in the words of the job rather than the words
+// of the code. Somebody handing out a login should not have to read the route
+// guards to find out what they are handing out.
+const ROLES: { value: string; label: string; blurb: string }[] = [
+  { value: "FRONTDESK", label: "Tickets & Screen", blurb: "The collection board and the photos on the shop screen. No figures." },
+  { value: "SALES",     label: "Sales",            blurb: "The till, sales and the ticket board." },
+  { value: "ACCOUNTS",  label: "Accounts",         blurb: "Everything except staff: analytics, stock, history, the day's takings." },
+  { value: "ADMIN",     label: "Admin",            blurb: "All of the above, and this page." },
+];
 
-/**
- * Shrink a photo in the browser before it is uploaded.
- *
- * The alternative is resizing on the server, which means a native image
- * library in the deploy and the full original crossing the shop's internet
- * first. Doing it here costs nothing on either side: the canvas is already in
- * every browser, and the existing /uploads endpoint takes exactly the base64
- * data URL that canvas.toDataURL produces, so no new upload plumbing is needed.
- *
- * A phone photo of about 6MB comes out around 300KB.
- */
-function shrink(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read that file"));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("That file is not an image"));
-      img.onload = () => {
-        const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) { reject(new Error("Canvas unavailable")); return; }
-
-        // White underneath, because a PNG with transparency becomes black on
-        // a JPEG otherwise and product cut-outs are exactly the case here.
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-
-        resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
-      };
-      img.src = String(reader.result);
-    };
-    reader.readAsDataURL(file);
-  });
+function roleLabel(role: string) {
+  return ROLES.find(r => r.value === role)?.label ?? role;
 }
 
-export default function AdminPage() {
-  const [token, setToken] = useState("");
-  const [media, setMedia] = useState<Media[]>([]);
-  const [busy, setBusy] = useState(false);
+export default function StaffPage() {
+  const [staff, setStaff] = useState<Staff[]>([]);
   const [note, setNote] = useState<string | null>(null);
-  const [displayKey, setDisplayKey] = useState("mwalimu-display");
+  const [busy, setBusy] = useState(false);
+  const [me, setMe] = useState<string | null>(null);
 
-  useEffect(() => { setToken(localStorage.getItem("mwalimu_token") ?? ""); }, []);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("FRONTDESK");
+  const [password, setPassword] = useState("");
 
-  const load = useCallback(() => {
-    if (!token) return;
-    fetch(`${apiBase}/display/media`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-      .then(d => { setMedia(d.data ?? []); setNote(null); })
-      .catch(e => setNote(
-        // Say which of the two it is. A stale sign-in and a broken server look
-        // identical from here otherwise, and the first is the likely one — the
-        // dashboard shell signs you out on a 401, but this can land first.
-        e.message === "401"
-          ? "Your sign-in has expired. Sign out and back in."
-          : "Could not load the photo list."));
+  const token = typeof window !== "undefined" ? localStorage.getItem("mwalimu_token") : null;
+  const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+  const load = useCallback(async () => {
+    const res = await fetch(`${apiBase}/auth/staff`, { headers: auth });
+    if (!res.ok) { setNote("Could not load the staff list."); return; }
+    const body = await res.json();
+    setStaff(body.data ?? []);
   }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setMe(typeof window !== "undefined" ? localStorage.getItem("mwalimu_email") : null);
+    load();
+  }, [load]);
 
-  async function addFiles(files: FileList | null) {
-    if (!files || !files.length) return;
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
     setBusy(true);
     setNote(null);
-    let added = 0;
-
-    for (const file of Array.from(files)) {
-      try {
-        const dataUrl = await shrink(file);
-
-        const up = await fetch(`${apiBase}/uploads`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ filename: file.name, data: dataUrl })
-        });
-        if (!up.ok) throw new Error("upload " + up.status);
-        const { url } = await up.json();
-
-        const rec = await fetch(`${apiBase}/display/media`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ url })
-        });
-        if (!rec.ok) throw new Error("save " + rec.status);
-        added++;
-      } catch (e: any) {
-        setNote(`${file.name} did not upload (${e.message}).`);
+    try {
+      const res = await fetch(`${apiBase}/auth/staff`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ email: email.trim(), name: name.trim() || undefined, role, password })
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setNote(typeof body.error === "string" ? body.error : "That did not work. Check the address and password.");
+        return;
       }
+      setNote(`${email.trim()} can now sign in as ${roleLabel(role)}.`);
+      setEmail(""); setName(""); setPassword("");
+      await load();
+    } finally {
+      setBusy(false);
     }
-
-    setBusy(false);
-    if (added) setNote(`${added} photo${added === 1 ? "" : "s"} added.`);
-    load();
   }
 
-  async function patch(id: string, body: any) {
-    await fetch(`${apiBase}/display/media/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body)
-    }).catch(() => {});
-    load();
+  async function patch(id: string, change: { role?: string; disabled?: boolean }) {
+    setNote(null);
+    const res = await fetch(`${apiBase}/auth/staff/${id}`, {
+      method: "PATCH", headers: auth, body: JSON.stringify(change)
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setNote(typeof body.error === "string" ? body.error : "That change was refused.");
+      return;
+    }
+    await load();
   }
-
-  async function remove(id: string) {
-    await fetch(`${apiBase}/display/media/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` }
-    }).catch(() => {});
-    load();
-  }
-
-  // Swapping sortOrder with the neighbour is enough for a handful of photos,
-  // and needs no drag-and-drop library on a page somebody opens twice a month.
-  async function move(i: number, delta: number) {
-    const j = i + delta;
-    if (j < 0 || j >= media.length) return;
-    const a = media[i], b = media[j];
-    await patch(a.id, { sortOrder: b.sortOrder });
-    await patch(b.id, { sortOrder: a.sortOrder });
-  }
-
-  const displayUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/display?key=${encodeURIComponent(displayKey)}`
-    : "";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <div>
-        <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Shop Screen</h2>
+        <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Staff</h2>
         <p className="muted" style={{ margin: 0 }}>
-          The display customers watch while they wait — collection numbers, and these photos.
+          Who has a login, and what it lets them do.
         </p>
       </div>
 
-      {/* How to put it on the TV */}
+      {note && (
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "0.75rem 1rem",
+          background: "#fff", fontSize: "0.9rem" }}>{note}</div>
+      )}
+
       <section style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "1rem", background: "#fff" }}>
-        <strong style={{ fontSize: "0.95rem" }}>Putting it on the screen</strong>
-        <ol className="muted" style={{ fontSize: "0.88rem", margin: "0.5rem 0 0.75rem", paddingLeft: "1.1rem" }}>
-          <li>Connect the laptop to the TV with HDMI.</li>
-          <li>Open the address below in the browser.</li>
-          <li>Press F11 for fullscreen. Leave it — it looks after itself.</li>
-        </ol>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <input value={displayKey} onChange={e => setDisplayKey(e.target.value)}
-            className="filter-input" style={{ width: "12rem" }} aria-label="Display key" />
-          <code style={{ fontSize: "0.82rem", background: "#f3f4f6", padding: "0.4rem 0.6rem",
-            borderRadius: 6, wordBreak: "break-all" }}>{displayUrl}</code>
-          <button type="button" onClick={() => navigator.clipboard?.writeText(displayUrl)}
-            className="filter-input" style={{ cursor: "pointer", background: "none" }}>Copy</button>
-        </div>
-        <p className="muted" style={{ fontSize: "0.78rem", margin: "0.5rem 0 0" }}>
-          The key must match DISPLAY_KEY on the server. It exists so the screen never
-          needs anyone to stay signed in, and it shows ticket numbers only — no
-          customer names and no amounts.
+        <strong style={{ fontSize: "0.95rem" }}>Add a login</strong>
+        <form onSubmit={add} style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+          <input className="filter-input" style={{ width: "16rem" }} type="email" required
+            placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} />
+          <input className="filter-input" style={{ width: "10rem" }}
+            placeholder="Name (optional)" value={name} onChange={e => setName(e.target.value)} />
+          <select className="filter-input" value={role} onChange={e => setRole(e.target.value)}>
+            {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+          <input className="filter-input" style={{ width: "12rem" }} type="text" required minLength={6}
+            placeholder="First password" value={password} onChange={e => setPassword(e.target.value)} />
+          <button type="submit" className="filter-input" disabled={busy}
+            style={{ cursor: busy ? "wait" : "pointer", background: "none" }}>
+            {busy ? "Adding..." : "Add"}
+          </button>
+        </form>
+        <p className="muted" style={{ fontSize: "0.8rem", margin: "0.6rem 0 0" }}>
+          {ROLES.find(r => r.value === role)?.blurb}
+        </p>
+        <p className="muted" style={{ fontSize: "0.78rem", margin: "0.4rem 0 0" }}>
+          Tell them the first password in person, then have them change it with
+          Forgot password on the sign-in page.
         </p>
       </section>
 
-      {/* Photos */}
-      <section style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-          <strong style={{ fontSize: "0.95rem" }}>Photos ({media.length})</strong>
-          <label className="filter-input" style={{ cursor: busy ? "wait" : "pointer", background: "none" }}>
-            {busy ? "Uploading…" : "Add photos"}
-            <input type="file" accept="image/*" multiple hidden disabled={busy}
-              onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
-          </label>
-        </div>
-
-        {note && <div className="muted" style={{ fontSize: "0.85rem" }}>{note}</div>}
-
-        <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
-          Photos are shrunk on this computer before they are sent, so a picture straight
-          off a phone uploads in a second. Landscape works best — the screen fills the
-          space and crops the edges.
-        </p>
-
-        {media.length === 0 && (
-          <p className="muted" style={{ fontSize: "0.88rem" }}>
-            No photos yet. The screen shows the collection numbers on their own until you add some.
-          </p>
-        )}
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: "0.75rem" }}>
-          {media.map((m, i) => (
-            <figure key={m.id} style={{
-              margin: 0, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden",
-              background: "#fff", opacity: m.enabled ? 1 : 0.45
+      <section style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        <strong style={{ fontSize: "0.95rem" }}>Logins ({staff.length})</strong>
+        {staff.length === 0 && <p className="muted" style={{ fontSize: "0.85rem" }}>Nobody yet.</p>}
+        {staff.map(s => {
+          const isMe = me != null && s.email === me;
+          return (
+            <div key={s.id} style={{
+              border: "1px solid #e5e7eb", borderRadius: 8, padding: "0.75rem 1rem", background: "#fff",
+              display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap",
+              opacity: s.disabled ? 0.55 : 1
             }}>
-              <img src={m.url} alt="" style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} />
-              <figcaption style={{ padding: "0.5rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                <input
-                  defaultValue={m.caption ?? ""}
-                  placeholder="Caption (optional)"
-                  className="filter-input"
-                  style={{ fontSize: "0.8rem" }}
-                  onBlur={e => { if (e.target.value !== (m.caption ?? "")) patch(m.id, { caption: e.target.value }); }}
-                />
-                <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
-                  <Mini onClick={() => move(i, -1)} disabled={i === 0}>←</Mini>
-                  <Mini onClick={() => move(i, 1)} disabled={i === media.length - 1}>→</Mini>
-                  <Mini onClick={() => patch(m.id, { enabled: !m.enabled })}>
-                    {m.enabled ? "Hide" : "Show"}
-                  </Mini>
-                  <Mini onClick={() => remove(m.id)} danger>Remove</Mini>
+              <div style={{ flex: "1 1 14rem", minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
+                  {s.name || s.email}
+                  {isMe && <span className="muted" style={{ fontWeight: 400 }}> — you</span>}
+                  {s.disabled && <span style={{ fontWeight: 400, color: "#b91c1c" }}> — switched off</span>}
                 </div>
-              </figcaption>
-            </figure>
-          ))}
-        </div>
+                {s.name && <div className="muted" style={{ fontSize: "0.8rem" }}>{s.email}</div>}
+              </div>
+
+              <select className="filter-input" value={s.role} disabled={isMe}
+                onChange={e => patch(s.id, { role: e.target.value })}
+                title={isMe ? "You cannot change your own role" : undefined}>
+                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+
+              <button type="button" className="filter-input" disabled={isMe}
+                onClick={() => patch(s.id, { disabled: !s.disabled })}
+                title={isMe ? "You cannot switch yourself off" : undefined}
+                style={{ cursor: isMe ? "not-allowed" : "pointer", background: "none",
+                  color: s.disabled ? "#065f46" : "#b91c1c", width: "7.5rem" }}>
+                {s.disabled ? "Switch on" : "Switch off"}
+              </button>
+            </div>
+          );
+        })}
+        <p className="muted" style={{ fontSize: "0.78rem", margin: "0.25rem 0 0" }}>
+          Switching a login off keeps that person&rsquo;s sales, clockings and history &mdash; it
+          only stops them signing in, and takes effect at once. You cannot change your own
+          role or switch yourself off, so the shop cannot lock itself out.
+        </p>
       </section>
     </div>
-  );
-}
-
-function Mini({ children, onClick, disabled, danger }: {
-  children: React.ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean;
-}) {
-  return (
-    <button type="button" onClick={onClick} disabled={disabled}
-      style={{
-        padding: "0.25rem 0.5rem", borderRadius: 5, fontSize: "0.76rem", fontFamily: "inherit",
-        border: "1px solid " + (danger ? "#fca5a5" : "#d1d5db"),
-        background: "none", color: danger ? "#b91c1c" : "#374151",
-        cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.4 : 1
-      }}>
-      {children}
-    </button>
   );
 }

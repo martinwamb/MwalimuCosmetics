@@ -265,7 +265,7 @@ router.post("/sync", requireSyncSecret, async (req, res) => {
  * SALES sits alongside ADMIN and ACCOUNTS because the people who would mark a
  * ticket collected are the ones on the counter, not the ones in the office.
  */
-router.get("/board", requireRoles(["ADMIN", "ACCOUNTS", "SALES"]), async (req, res) => {
+router.get("/board", requireRoles(["ADMIN", "ACCOUNTS", "SALES", "FRONTDESK"]), async (req, res) => {
   try {
     // The shop's trading day, not the server's. This server runs UTC and
     // Nairobi is UTC+3, so between midnight and 03:00 UTC the two disagree and
@@ -317,7 +317,7 @@ router.get("/board", requireRoles(["ADMIN", "ACCOUNTS", "SALES"]), async (req, r
  * whatever MySQL actually says, so a failed write-back shows the ticket waiting
  * again rather than quietly claiming a customer has their goods.
  */
-router.post("/collect", requireRoles(["ADMIN", "ACCOUNTS", "SALES"]), async (req: any, res) => {
+router.post("/collect", requireRoles(["ADMIN", "ACCOUNTS", "SALES", "FRONTDESK"]), async (req: any, res) => {
   try {
     const ticketDay = req.body?.ticketDay;
     const ticketCode = req.body?.ticketCode;

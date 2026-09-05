@@ -105,7 +105,7 @@ router.get("/state", requireDisplayKey, async (_req, res) => {
  * server at all — no native library, nothing to rebuild when Node moves.
  */
 
-router.get("/media", requireRoles(["ADMIN", "ACCOUNTS"]), async (_req, res) => {
+router.get("/media", requireRoles(["ADMIN", "ACCOUNTS", "FRONTDESK"]), async (_req, res) => {
   try {
     const media = await prisma.displayMedia.findMany({
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
@@ -117,7 +117,7 @@ router.get("/media", requireRoles(["ADMIN", "ACCOUNTS"]), async (_req, res) => {
   }
 });
 
-router.post("/media", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
+router.post("/media", requireRoles(["ADMIN", "ACCOUNTS", "FRONTDESK"]), async (req, res) => {
   try {
     const url = String(req.body?.url ?? "").trim();
     if (!url) {
@@ -143,7 +143,7 @@ router.post("/media", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
   }
 });
 
-router.patch("/media/:id", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
+router.patch("/media/:id", requireRoles(["ADMIN", "ACCOUNTS", "FRONTDESK"]), async (req, res) => {
   try {
     const data: any = {};
     if (typeof req.body?.enabled === "boolean") data.enabled = req.body.enabled;
@@ -166,7 +166,7 @@ router.patch("/media/:id", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res)
   }
 });
 
-router.delete("/media/:id", requireRoles(["ADMIN", "ACCOUNTS"]), async (req, res) => {
+router.delete("/media/:id", requireRoles(["ADMIN", "ACCOUNTS", "FRONTDESK"]), async (req, res) => {
   try {
     // The row goes; the uploaded file stays. Removing it would break any other
     // page that happens to reference the same upload, and a few stray images

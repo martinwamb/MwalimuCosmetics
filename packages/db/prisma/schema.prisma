@@ -8,49 +8,74 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  role          Role
-  passwordHash  String
-  biometricRef  String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  salesOrders   SalesOrder[] @relation("SalesUser")
-  clockings     Clocking[]
-  mailMessages  MailMessage[]
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String?
+  role           Role
+  passwordHash   String
+  biometricRef   String?
+  // Taking a login away without deleting the person: their sales, clockings and
+  // mail all point at this row, so removing it would take the history with it.
+  // authenticate() is what makes this mean anything - a flag nothing checks is
+  // just a tidier way of leaving the door open.
+  disabled       Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  salesOrders    SalesOrder[]    @relation("SalesUser")
+  clockings      Clocking[]
+  mailMessages   MailMessage[]
+  passwordResets PasswordReset[]
+}
+
+// One password reset request.
+//
+// The token is stored HASHED, never as itself. A reset token is a temporary
+// password, and a database that leaks should not hand over working ones - the
+// same reasoning the receipt tokens are built on. Single use, and short-lived,
+// so a link left sitting in an inbox stops being a way in.
+model PasswordReset {
+  id        String    @id @default(cuid())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Product {
-  id          String   @id @default(cuid())
-  name        String
-  brand       String?
-  sku         String   @unique
-  slug        String?  @unique
-  shortDescription String? @db.VarChar(160)
-  description String?
-  featured    Boolean  @default(false)
-  imageUrl    String?
-  galleryImages String[] @db.Text
-  category    Category? @relation(fields: [categoryId], references: [id])
-  categoryId  String?
-  price          Decimal  @db.Decimal(12, 2)
-  wholesalePrice Decimal? @db.Decimal(12, 2)
-  specialPrice   Decimal? @db.Decimal(12, 2)
-  compareAtPrice Decimal? @db.Decimal(12, 2)
-  currency    String   @default("KES")
-  cost        Decimal  @db.Decimal(12, 2)
-  stockQty    Int      @default(0)
-  status      ProductStatus @default(ACTIVE)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  items       SalesOrderItem[]
-  purchaseItems PurchaseItem[]
-  priceWatch  PriceWatch[]
-  recommendations AiRecommendation[] @relation("ProductRecommendations")
+  id                 String              @id @default(cuid())
+  name               String
+  brand              String?
+  sku                String              @unique
+  slug               String?             @unique
+  shortDescription   String?             @db.VarChar(160)
+  description        String?
+  featured           Boolean             @default(false)
+  imageUrl           String?
+  galleryImages      String[]            @db.Text
+  category           Category?           @relation(fields: [categoryId], references: [id])
+  categoryId         String?
+  price              Decimal             @db.Decimal(12, 2)
+  wholesalePrice     Decimal?            @db.Decimal(12, 2)
+  specialPrice       Decimal?            @db.Decimal(12, 2)
+  compareAtPrice     Decimal?            @db.Decimal(12, 2)
+  currency           String              @default("KES")
+  cost               Decimal             @db.Decimal(12, 2)
+  stockQty           Int                 @default(0)
+  status             ProductStatus       @default(ACTIVE)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  items              SalesOrderItem[]
+  purchaseItems      PurchaseItem[]
+  priceWatch         PriceWatch[]
+  recommendations    AiRecommendation[]  @relation("ProductRecommendations")
   inventoryMovements InventoryMovement[]
-  variants    ProductVariant[]
-  productTags ProductTag[]
+  variants           ProductVariant[]
+  productTags        ProductTag[]
 }
 
 model ProductVariant {
@@ -83,12 +108,12 @@ model TagGroup {
 }
 
 model Tag {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   value     String
   label     String
-  isSystem  Boolean  @default(false)
-  sortOrder Int      @default(0)
-  group     TagGroup @relation(fields: [groupId], references: [id])
+  isSystem  Boolean      @default(false)
+  sortOrder Int          @default(0)
+  group     TagGroup     @relation(fields: [groupId], references: [id])
   groupId   String
   products  ProductTag[]
 
@@ -96,9 +121,9 @@ model Tag {
 }
 
 model ProductTag {
-  product   Product @relation(fields: [productId], references: [id])
+  product   Product  @relation(fields: [productId], references: [id])
   productId String
-  tag       Tag     @relation(fields: [tagId], references: [id])
+  tag       Tag      @relation(fields: [tagId], references: [id])
   tagId     String
   createdAt DateTime @default(now())
 
@@ -106,89 +131,89 @@ model ProductTag {
 }
 
 model Customer {
-  id        String     @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  address   String?
-  marketingOptIn Boolean @default(false)
-  loyalty   Int        @default(0)
-  orders    SalesOrder[]
-  createdAt DateTime   @default(now())
+  id             String       @id @default(cuid())
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  marketingOptIn Boolean      @default(false)
+  loyalty        Int          @default(0)
+  orders         SalesOrder[]
+  createdAt      DateTime     @default(now())
 }
 
 model SalesOrder {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   channel        OrderChannel
-  status         OrderStatus     @default(PENDING)
-  customer       Customer?       @relation(fields: [customerId], references: [id])
+  status         OrderStatus      @default(PENDING)
+  customer       Customer?        @relation(fields: [customerId], references: [id])
   customerId     String?
-  createdBy      User?           @relation("SalesUser", fields: [createdById], references: [id])
+  createdBy      User?            @relation("SalesUser", fields: [createdById], references: [id])
   createdById    String?
-  paymentStatus  PaymentStatus   @default(UNPAID)
+  paymentStatus  PaymentStatus    @default(UNPAID)
   paymentMethod  PaymentMethod?
-  subtotal       Decimal         @db.Decimal(12, 2)
-  tax            Decimal         @db.Decimal(12, 2) @default(0)
-  discount       Decimal         @db.Decimal(12, 2) @default(0)
-  total          Decimal         @db.Decimal(12, 2)
-  amountPaid     Decimal         @db.Decimal(12, 2) @default(0)
-  changeDue      Decimal         @db.Decimal(12, 2) @default(0)
+  subtotal       Decimal          @db.Decimal(12, 2)
+  tax            Decimal          @default(0) @db.Decimal(12, 2)
+  discount       Decimal          @default(0) @db.Decimal(12, 2)
+  total          Decimal          @db.Decimal(12, 2)
+  amountPaid     Decimal          @default(0) @db.Decimal(12, 2)
+  changeDue      Decimal          @default(0) @db.Decimal(12, 2)
   paymentDetails Json?
   notes          String?
-  mysqlSynced    Boolean         @default(false)
+  mysqlSynced    Boolean          @default(false)
   mysqlReceiptNo String?
-  createdAt      DateTime        @default(now())
+  createdAt      DateTime         @default(now())
   items          SalesOrderItem[]
   payments       Payment[]
 }
 
 model SalesOrderItem {
-  id        String   @id @default(cuid())
+  id        String     @id @default(cuid())
   order     SalesOrder @relation(fields: [orderId], references: [id])
   orderId   String
-  product   Product @relation(fields: [productId], references: [id])
+  product   Product    @relation(fields: [productId], references: [id])
   productId String
   qty       Int
-  unitPrice Decimal  @db.Decimal(12, 2)
-  discount  Decimal  @db.Decimal(12, 2) @default(0)
-  tax       Decimal  @db.Decimal(12, 2) @default(0)
+  unitPrice Decimal    @db.Decimal(12, 2)
+  discount  Decimal    @default(0) @db.Decimal(12, 2)
+  tax       Decimal    @default(0) @db.Decimal(12, 2)
 }
 
 model Payment {
-  id          String        @id @default(cuid())
-  order       SalesOrder    @relation(fields: [orderId], references: [id])
-  orderId     String
-  amount      Decimal       @db.Decimal(12, 2)
-  method      PaymentMethod
-  reference   String?
-  txnTime     DateTime      @default(now())
-  reconciled  Boolean       @default(false)
-  gatewayMeta Json?
+  id                  String               @id @default(cuid())
+  order               SalesOrder           @relation(fields: [orderId], references: [id])
+  orderId             String
+  amount              Decimal              @db.Decimal(12, 2)
+  method              PaymentMethod
+  reference           String?
+  txnTime             DateTime             @default(now())
+  reconciled          Boolean              @default(false)
+  gatewayMeta         Json?
   bankReconciliations BankReconciliation[]
 }
 
 model Purchase {
-  id          String     @id @default(cuid())
-  supplier    Supplier   @relation(fields: [supplierId], references: [id])
-  supplierId  String
-  totalCost   Decimal    @db.Decimal(12, 2)
-  notes       String?
-  createdAt   DateTime   @default(now())
-  items       PurchaseItem[]
+  id         String         @id @default(cuid())
+  supplier   Supplier       @relation(fields: [supplierId], references: [id])
+  supplierId String
+  totalCost  Decimal        @db.Decimal(12, 2)
+  notes      String?
+  createdAt  DateTime       @default(now())
+  items      PurchaseItem[]
 }
 
 model PurchaseItem {
-  id         String    @id @default(cuid())
-  purchase   Purchase  @relation(fields: [purchaseId], references: [id])
+  id         String   @id @default(cuid())
+  purchase   Purchase @relation(fields: [purchaseId], references: [id])
   purchaseId String
-  product    Product   @relation(fields: [productId], references: [id])
+  product    Product  @relation(fields: [productId], references: [id])
   productId  String
   qty        Int
-  cost       Decimal   @db.Decimal(12, 2)
+  cost       Decimal  @db.Decimal(12, 2)
 }
 
 model Supplier {
-  id        String    @id @default(cuid())
+  id        String     @id @default(cuid())
   name      String
   email     String?
   phone     String?
@@ -196,64 +221,64 @@ model Supplier {
 }
 
 model InventoryMovement {
-  id         String   @id @default(cuid())
-  product    Product  @relation(fields: [productId], references: [id])
-  productId  String
-  delta      Int
-  reason     String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  product   Product  @relation(fields: [productId], references: [id])
+  productId String
+  delta     Int
+  reason    String
+  createdAt DateTime @default(now())
 }
 
 model BankAccount {
-  id        String    @id @default(cuid())
-  name      String
-  balance   Decimal   @db.Decimal(14, 2)
+  id         String          @id @default(cuid())
+  name       String
+  balance    Decimal         @db.Decimal(14, 2)
   statements BankStatement[]
 }
 
 model BankStatement {
-  id            String    @id @default(cuid())
-  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
-  bankAccountId String
-  description   String
-  amount        Decimal   @db.Decimal(12, 2)
-  txnDate       DateTime
+  id              String               @id @default(cuid())
+  bankAccount     BankAccount          @relation(fields: [bankAccountId], references: [id])
+  bankAccountId   String
+  description     String
+  amount          Decimal              @db.Decimal(12, 2)
+  txnDate         DateTime
   reconciliations BankReconciliation[]
 }
 
 model BankReconciliation {
-  id             String       @id @default(cuid())
-  statementLine  BankStatement @relation(fields: [statementId], references: [id])
-  statementId    String
-  payment        Payment?     @relation(fields: [paymentId], references: [id])
-  paymentId      String?
-  status         ReconciliationStatus @default(UNMATCHED)
-  notes          String?
-  createdAt      DateTime @default(now())
+  id            String               @id @default(cuid())
+  statementLine BankStatement        @relation(fields: [statementId], references: [id])
+  statementId   String
+  payment       Payment?             @relation(fields: [paymentId], references: [id])
+  paymentId     String?
+  status        ReconciliationStatus @default(UNMATCHED)
+  notes         String?
+  createdAt     DateTime             @default(now())
 }
 
 model PriceWatch {
-  id         String    @id @default(cuid())
-  product    Product   @relation(fields: [productId], references: [id])
-  productId  String
+  id          String   @id @default(cuid())
+  product     Product  @relation(fields: [productId], references: [id])
+  productId   String
   marketPrice Decimal  @db.Decimal(12, 2)
-  source     String
-  checkedAt  DateTime  @default(now())
+  source      String
+  checkedAt   DateTime @default(now())
 }
 
 model AiRecommendation {
-  id         String    @id @default(cuid())
-  type       RecommendationType
-  payload    Json
-  status     RecommendationStatus @default(PENDING)
-  createdAt  DateTime  @default(now())
-  product    Product?  @relation("ProductRecommendations", fields: [productId], references: [id])
-  productId  String?
+  id        String               @id @default(cuid())
+  type      RecommendationType
+  payload   Json
+  status    RecommendationStatus @default(PENDING)
+  createdAt DateTime             @default(now())
+  product   Product?             @relation("ProductRecommendations", fields: [productId], references: [id])
+  productId String?
 }
 
 model Clocking {
-  id        String   @id @default(cuid())
-  user      User     @relation(fields: [userId], references: [id])
+  id        String    @id @default(cuid())
+  user      User      @relation(fields: [userId], references: [id])
   userId    String
   timeIn    DateTime
   timeOut   DateTime?
@@ -278,6 +303,10 @@ enum Role {
   SALES
   ACCOUNTS
   ADMIN
+  // The ticket board and the shop screen, and nothing else. ACCOUNTS was the
+  // smallest role that covered both jobs and it also opens every figure the
+  // shop has, which is not what somebody calling ticket numbers needs.
+  FRONTDESK
 }
 
 enum ProductStatus {
@@ -356,33 +385,33 @@ model HomepageBanner {
 }
 
 model HomepageSection {
-  id        String              @id @default(cuid())
-  type      HomepageSectionType
-  title     String
-  subtitle  String?
-  enabled   Boolean             @default(true)
-  sortOrder Int                 @default(0)
-  queryType HomepageRuleType?
+  id         String                @id @default(cuid())
+  type       HomepageSectionType
+  title      String
+  subtitle   String?
+  enabled    Boolean               @default(true)
+  sortOrder  Int                   @default(0)
+  queryType  HomepageRuleType?
   queryValue String?
-  maxItems  Int                 @default(8)
-  sortBy    HomepageSort        @default(NEWEST)
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-  items     HomepageSectionItem[]
+  maxItems   Int                   @default(8)
+  sortBy     HomepageSort          @default(NEWEST)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  items      HomepageSectionItem[]
 }
 
 model HomepageSectionItem {
-  id         String            @id @default(cuid())
-  section    HomepageSection   @relation(fields: [sectionId], references: [id])
+  id         String           @id @default(cuid())
+  section    HomepageSection  @relation(fields: [sectionId], references: [id])
   sectionId  String
   label      String
   imageUrl   String?
-  linkType   HomepageLinkType  @default(URL)
+  linkType   HomepageLinkType @default(URL)
   linkTarget String?
   badge      String?
-  sortOrder  Int               @default(0)
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  sortOrder  Int              @default(0)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
 }
 
 enum HomepageSectionType {
@@ -426,20 +455,20 @@ enum TagSelection {
 model MetricsSnapshot {
   id                String   @id @default(cuid())
   capturedAt        DateTime @default(now())
-  forDate           String   // "2026-04-28"
+  forDate           String // "2026-04-28"
   transactions      Int
   totalSales        Float
   tax               Float    @default(0)
   cashSales         Float
   mpesaSales        Float
   otherSales        Float
-  draftTransactions Int      @default(0)  // posted=0 (unconfirmed, money not yet received)
+  draftTransactions Int      @default(0) // posted=0 (unconfirmed, money not yet received)
   draftSales        Float    @default(0)
-  purchases         Float    @default(0)  // GRN total for the day (cost of stock received)
-  profit            Float    @default(0)  // gross profit: revenue minus COGS from grn_d
-  paymentBreakdown  Json     // [{name, transactions, total}]
-  topProducts       Json     // [{code, name, qtySold, revenue}]
-  byStaff           Json     // [{staff, transactions, total, returns}]
+  purchases         Float    @default(0) // GRN total for the day (cost of stock received)
+  profit            Float    @default(0) // gross profit: revenue minus COGS from grn_d
+  paymentBreakdown  Json // [{name, transactions, total}]
+  topProducts       Json // [{code, name, qtySold, revenue}]
+  byStaff           Json // [{staff, transactions, total, returns}]
 }
 
 model SyncRequest {
@@ -449,13 +478,13 @@ model SyncRequest {
 }
 
 model PendingChange {
-  id          String    @id @default(cuid())
-  type        String    // "stock_adjustment" | "price_update" | "sale_void"
-  payload     Json      // type-specific data
-  status      String    @default("pending") // pending | applied | failed
-  createdAt   DateTime  @default(now())
-  appliedAt   DateTime?
-  failReason  String?
+  id         String    @id @default(cuid())
+  type       String // "stock_adjustment" | "price_update" | "sale_void"
+  payload    Json // type-specific data
+  status     String    @default("pending") // pending | applied | failed
+  createdAt  DateTime  @default(now())
+  appliedAt  DateTime?
+  failReason String?
 }
 
 // A customer scanning the QR on their collection ticket.
@@ -471,8 +500,8 @@ model PendingChange {
 // it. claimedAt is what stops it being collected twice.
 model TicketLink {
   id         String    @id @default(cuid())
-  ticketCode String    // "E-042", as printed on the slip
-  chatId     String    // Telegram chat ids outrun 32-bit, so a string
+  ticketCode String // "E-042", as printed on the slip
+  chatId     String // Telegram chat ids outrun 32-bit, so a string
   firstName  String?
   createdAt  DateTime  @default(now())
   claimedAt  DateTime?
@@ -502,37 +531,37 @@ model TicketLink {
 // whole, alongside its ticket, and never queried across rows, the lines ride
 // along as they were pushed.
 model Ticket {
-  id           String    @id @default(cuid())
+  id String @id @default(cuid())
 
-  ticketDay    DateTime  @db.Date       // the TRADING day, not the wall clock
-  ticketCode   String                   // "E-042", as printed on the slip
-  band         String    @db.VarChar(1) // E express, B standard, C large
-  seq          Int
+  ticketDay  DateTime @db.Date // the TRADING day, not the wall clock
+  ticketCode String // "E-042", as printed on the slip
+  band       String   @db.VarChar(1) // E express, B standard, C large
+  seq        Int
 
-  receiptno    String    @unique
-  arname       String?
-  amount       Decimal   @db.Decimal(20, 2)
-  lineCount    Int
-  etaLo        Int
-  etaHi        Int
+  receiptno String  @unique
+  arname    String?
+  amount    Decimal @db.Decimal(20, 2)
+  lineCount Int
+  etaLo     Int
+  etaHi     Int
 
-  state        String                   // OPEN | READY | COLLECTED
-  issuedAt     DateTime                 // `created` on the shop side
-  till         String?
-  staff        String?
-  readyAt      DateTime?
-  readyBy      String?
-  collectedAt  DateTime?
-  collectedBy  String?
+  state       String // OPEN | READY | COLLECTED
+  issuedAt    DateTime // `created` on the shop side
+  till        String?
+  staff       String?
+  readyAt     DateTime?
+  readyBy     String?
+  collectedAt DateTime?
+  collectedBy String?
 
   // Unguessable, and the ONLY way the public receipt page is addressed.
   // Receipt numbers run in sequence, so anyone holding one slip could read the
   // receipt of the customer served before them if the number were the key.
-  receiptToken String?   @unique
+  receiptToken String? @unique
 
-  items        Json?     // the sale's lines, for the download page
+  items Json? // the sale's lines, for the download page
 
-  syncedAt     DateTime  @updatedAt
+  syncedAt DateTime @updatedAt
 
   @@unique([ticketDay, ticketCode])
   @@index([ticketDay, state])
