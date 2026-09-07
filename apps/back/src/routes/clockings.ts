@@ -3,6 +3,7 @@ import { z } from "zod";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRoles } from "../lib/authz.js";
 import { clockingsDir } from "../lib/uploads.js";
@@ -113,6 +114,64 @@ router.get("/roster", requireAuth, async (req: any, res) => {
   } catch (err: any) {
     console.error("[clockings] roster failed", err?.message ?? err);
     return res.status(500).json({ error: "Unable to read the roster" });
+  }
+});
+
+/**
+ * Registering somebody new, from the tablet.
+ *
+ * A new assistant starts on a morning when no admin is about, and they need to
+ * be on the board that day. So the front desk can add a name - and only a name.
+ *
+ * What it deliberately cannot do is grant anything. The account is created with
+ * the least-privileged role there is (FRONTDESK: the ticket board, the shop
+ * screen and this page, nothing else) and a random password nobody ever sees,
+ * not even the person who typed the name. So it is a row on this board and a
+ * placeholder for an admin, not a way in. Setting the real role, the real email
+ * and a real password is the Staff page's job, which is ADMIN only.
+ *
+ * The generated email is a placeholder on a domain that does not receive mail,
+ * so a password reset cannot be sent to it either. An admin corrects it later.
+ */
+const registerSchema = z.object({
+  name: z.string().trim().min(2).max(60),
+  email: z.string().trim().email().max(120).optional()
+});
+
+function placeholderEmail(name: string) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "").slice(0, 30);
+  return `${slug || "staff"}.${crypto.randomUUID().slice(0, 6)}@staff.invalid`;
+}
+
+router.post("/staff", requireRoles(KIOSK_ROLES), async (req: any, res) => {
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "A name of at least two characters is required" });
+  }
+
+  try {
+    const email = (parsed.data.email ?? placeholderEmail(parsed.data.name)).toLowerCase();
+
+    const clash = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (clash) {
+      return res.status(409).json({ error: "Somebody already uses that email" });
+    }
+
+    // Random, and thrown away. The account cannot be signed into until an admin
+    // sets a password, which is the point.
+    const passwordHash = await bcrypt.hash(crypto.randomUUID() + crypto.randomUUID(), 12);
+
+    const user = await prisma.user.create({
+      data: { name: parsed.data.name, email, role: "FRONTDESK", passwordHash },
+      select: { id: true, name: true, email: true }
+    });
+
+    return res.status(201).json({
+      data: { id: user.id, name: user.name ?? user.email, state: "OUT", since: null }
+    });
+  } catch (err: any) {
+    console.error("[clockings] register failed", err?.message ?? err);
+    return res.status(500).json({ error: "Unable to add that person" });
   }
 });
 

@@ -212,6 +212,29 @@ router.post("/sync", requireSyncSecret, async (req, res) => {
       return;
     }
 
+    // A ticket whose change is still queued must not be dragged backwards.
+    //
+    // The web sets the state here and queues a PendingChange; bridge/pusher.js
+    // applies it to the shop perhaps fifteen seconds later, and only then does
+    // the shop start pushing the new state back. In between, every push still
+    // says OPEN - and applying it would flip the card back to "Goods ready"
+    // under the hands of the person who just pressed it.
+    //
+    // So while a change for a ticket is still pending, its state columns are
+    // left alone and everything else about the row is kept fresh. A change that
+    // FAILS is deliberately not covered: that ticket should revert, because the
+    // shop genuinely never got the press.
+    const queued = await prisma.pendingChange.findMany({
+      where: { type: { in: ["ticket_ready", "ticket_collected"] }, status: "pending" },
+      select: { payload: true }
+    });
+    const held = new Set(
+      queued
+        .map(c => c.payload as any)
+        .filter(p => p?.ticketDay && p?.ticketCode)
+        .map(p => `${String(p.ticketDay).slice(0, 10)}|${p.ticketCode}`)
+    );
+
     let written = 0;
     for (const r of rows) {
       if (!r?.ticketDay || !r?.ticketCode || !r?.receiptno) continue;
@@ -242,12 +265,22 @@ router.post("/sync", requireSyncSecret, async (req, res) => {
         items: r.items ?? undefined
       };
 
+      const key = `${day.toISOString().slice(0, 10)}|${data.ticketCode}`;
+      const update: any = { ...data };
+      if (held.has(key)) {
+        delete update.state;
+        delete update.readyAt;
+        delete update.readyBy;
+        delete update.collectedAt;
+        delete update.collectedBy;
+      }
+
       await prisma.ticket.upsert({
         where: {
           ticketDay_ticketCode: { ticketDay: data.ticketDay, ticketCode: data.ticketCode }
         },
         create: data,
-        update: data
+        update
       });
       written++;
     }

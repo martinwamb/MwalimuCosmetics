@@ -50,6 +50,11 @@ export default function ClockPage() {
   const [camera, setCamera] = useState(false);
   const [photo, setPhoto]   = useState<string | null>(null);
 
+  // Adding somebody new, from the tablet.
+  const [adding, setAdding]   = useState(false);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving]   = useState(false);
+
   const videoRef  = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -189,6 +194,32 @@ export default function ClockPage() {
     }
   }
 
+  async function addPerson() {
+    const name = newName.trim();
+    if (name.length < 2 || saving) return;
+    setSaving(true);
+    try {
+      const r = await fetch(`${apiBase}/clockings/staff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name })
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error ?? String(r.status));
+      }
+      setNewName("");
+      setAdding(false);
+      setNote(`${name} added. An admin sets their role and login on the Staff page.`);
+      setError(null);
+      loadRoster();
+    } catch (e: any) {
+      setError(e?.message ?? "Could not add that person.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function closePhoto() {
     setPhoto(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
   }
@@ -197,12 +228,56 @@ export default function ClockPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-      <div>
-        <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Clock In</h2>
-        <p className="muted" style={{ margin: 0 }}>
-          {inNow} of {people.length} in{note ? ` · ${note}` : ""}
-        </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.75rem" }}>
+        <div>
+          <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Clock In</h2>
+          <p className="muted" style={{ margin: 0 }}>
+            {inNow} of {people.length} in{note ? ` · ${note}` : ""}
+          </p>
+        </div>
+        {!chosen && !adding && (
+          <button type="button" onClick={() => { setAdding(true); setNote(null); setError(null); }}
+            className="filter-input" style={{ cursor: "pointer", background: "none" }}>
+            Add someone
+          </button>
+        )}
       </div>
+
+      {/* A name is all the tablet may give. The account it makes cannot be
+          signed into and carries the least-privileged role there is; an admin
+          sets the role, the real email and a password on the Staff page. */}
+      {adding && (
+        <section style={{
+          border: "1px solid #e5e7eb", borderRadius: 10, padding: "1rem", background: "#fff",
+          display: "flex", flexDirection: "column", gap: "0.6rem", maxWidth: 420
+        }}>
+          <strong style={{ fontSize: "1rem" }}>Add someone to the board</strong>
+          <input value={newName} onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") addPerson(); }}
+            placeholder="Full name" autoFocus
+            className="filter-input" style={{ fontSize: "1rem" }} />
+          <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+            They can clock in straight away. An admin sets their role and login later.
+          </p>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button type="button" onClick={() => { setAdding(false); setNewName(""); }}
+              style={{
+                flex: 1, padding: "0.7rem", borderRadius: 8, border: "1px solid #d1d5db",
+                background: "#fff", fontWeight: 600, fontFamily: "inherit", cursor: "pointer"
+              }}>
+              Cancel
+            </button>
+            <button type="button" onClick={addPerson} disabled={saving || newName.trim().length < 2}
+              style={{
+                flex: 2, padding: "0.7rem", borderRadius: 8, border: "1px solid #047857",
+                background: newName.trim().length < 2 ? "#9ca3af" : "#047857", color: "#fff",
+                fontWeight: 700, fontFamily: "inherit", cursor: saving ? "wait" : "pointer"
+              }}>
+              {saving ? "…" : "Add"}
+            </button>
+          </div>
+        </section>
+      )}
 
       {error && (
         <div style={{ padding: "0.75rem 1rem", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontSize: "0.9rem" }}>
@@ -265,7 +340,7 @@ export default function ClockPage() {
 
       {/* The board of names. Big targets: this is used with a finger, often in a
           hurry, by somebody who has just walked in off the street. */}
-      {!chosen && (
+      {!chosen && !adding && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.6rem" }}>
           {people.length === 0 && <p className="muted" style={{ margin: 0 }}>No staff to show.</p>}
           {people.map(p => (
