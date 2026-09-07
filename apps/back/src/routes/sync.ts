@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
-import { requireAuth } from "../lib/authz.js";
+import { requireAuth, requireRoles } from "../lib/authz.js";
 
 export const router = Router();
 
@@ -79,7 +79,13 @@ router.post("/metrics", async (req, res) => {
 });
 
 // Dashboard reads latest snapshot (requires staff login)
-router.get("/metrics/latest", requireAuth, async (_req, res) => {
+// Roles, not just a login. This returns the day's takings, the margin and every
+// seller's figures, and requireAuth alone meant any valid token could read it -
+// a FRONTDESK tablet whose whole job is calling ticket numbers, and a CUSTOMER
+// account as well. Hiding the sidebar link never stopped either of them.
+const MONEY_ROLES = ["ADMIN", "ACCOUNTS", "SALES"];
+
+router.get("/metrics/latest", requireRoles(MONEY_ROLES), async (_req, res) => {
   const snapshot = await prisma.metricsSnapshot.findFirst({
     orderBy: { capturedAt: "desc" },
   });
@@ -90,7 +96,7 @@ router.get("/metrics/latest", requireAuth, async (_req, res) => {
 // Dashboard posts here when user clicks Refresh. The shop PC polls
 // /sync/pending-refresh every few seconds and runs MySQL sync when triggered.
 
-router.post("/request", requireAuth, async (_req, res) => {
+router.post("/request", requireRoles(MONEY_ROLES), async (_req, res) => {
   const record = await prisma.syncRequest.create({ data: {} });
   return res.json({ id: record.id, requestedAt: record.requestedAt });
 });

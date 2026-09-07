@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 // tokenRef keeps the token accessible inside fetchMetrics without re-subscribing
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -31,11 +32,19 @@ export default function DashboardPage() {
   const [refreshMsg, setRefreshMsg] = useState("");
   const [lastFetch, setLastFetch]   = useState<Date | null>(null);
   const tokenRef = useRef("");
+  const router = useRouter();
 
   useEffect(() => {
+    // The front desk does not get the day's money. The API refuses them either
+    // way - that is the guard that counts - but landing here would otherwise
+    // show a page of failed panels rather than saying where they should be.
+    if (localStorage.getItem("mwalimu_role") === "FRONTDESK") {
+      router.replace("/dashboard/tickets");
+      return;
+    }
     const t = localStorage.getItem("mwalimu_token") ?? "";
     setToken(t); tokenRef.current = t;
-  }, []);
+  }, [router]);
 
   // Load cached snapshot once on login (no MySQL hit)
   function loadSnapshot() {

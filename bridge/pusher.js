@@ -1274,6 +1274,32 @@ async function applyPendingChanges(conn, token) {
           arConn.end();
         }
 
+      } else if (change.type === "ticket_ready") {
+        // A collection ticket marked ready from the web board.
+        //
+        // This UPDATE is what calls the customer. The announcer watches this
+        // table for OPEN -> READY and speaks over the shop speakers off the
+        // back of it, so state='OPEN' in the WHERE clause is not tidiness: it
+        // is the thing that stops one customer being announced twice when a
+        // press arrives late, is retried, or races a picker at the till.
+        const { ticketDay, ticketCode, by } = change.payload || {};
+        if (!ticketDay || !ticketCode) {
+          throw new Error("ticket_ready needs ticketDay and ticketCode");
+        }
+
+        const upd = await query(conn,
+          `UPDATE tickets
+              SET state = 'READY', ready_at = NOW(), ready_by = ?
+            WHERE ticket_day = ? AND ticket_code = ? AND state = 'OPEN'`,
+          [String(by || "WEB").slice(0, 50), ticketDay, ticketCode]);
+
+        // Same reasoning as ticket_collected: nothing updated means somebody at
+        // the counter got there first, which is the ordinary race between two
+        // people working one queue.
+        if (upd && upd.affectedRows === 0) {
+          log(`  Ticket ${ticketCode} had already moved on at the counter.`);
+        }
+
       } else if (change.type === "ticket_collected") {
         // A collection ticket closed from the web board.
         //

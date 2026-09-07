@@ -4,7 +4,11 @@ import { useState, useEffect } from "react";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-function staffLanding(_role: string) {
+function staffLanding(role: string) {
+  // The front desk has no business on Overview and cannot load it any more, so
+  // sending them there would land them on a page that redirects. Straight to
+  // the board instead - it is the only screen that account is for.
+  if (role === "FRONTDESK") return "/dashboard/tickets";
   return "/dashboard";
 }
 

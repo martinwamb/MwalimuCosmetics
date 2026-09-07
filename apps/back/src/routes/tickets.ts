@@ -372,6 +372,76 @@ router.post("/collect", requireRoles(["ADMIN", "ACCOUNTS", "SALES", "FRONTDESK"]
 });
 
 /**
+ * Marking a ticket ready, from the web.
+ *
+ * The same queued write-back as /collect, for the same reason: this server
+ * cannot reach the shop's MySQL, so the press becomes a PendingChange and
+ * bridge/pusher.js lands it.
+ *
+ * This one carries further than /collect does. The laptop announcer watches the
+ * shop's tickets table for OPEN -> READY and it is that transition, not this
+ * request, that calls the customer over the shop speakers. So the write-back is
+ * guarded on state='OPEN' at both ends - here, and again in the UPDATE - and a
+ * second press is answered rather than queued. Two changes landing for one
+ * ticket would announce the same customer twice.
+ */
+router.post("/ready", requireRoles(["ADMIN", "ACCOUNTS", "SALES", "FRONTDESK"]), async (req: any, res) => {
+  try {
+    const ticketDay = req.body?.ticketDay;
+    const ticketCode = req.body?.ticketCode;
+    if (!ticketDay || !ticketCode) {
+      res.status(400).json({ error: "ticketDay and ticketCode are required" });
+      return;
+    }
+
+    const raw = new Date(ticketDay);
+    if (Number.isNaN(raw.getTime())) {
+      res.status(400).json({ error: "Bad ticketDay" });
+      return;
+    }
+    const day = new Date(Date.UTC(raw.getFullYear(), raw.getMonth(), raw.getDate()));
+    const code = String(ticketCode);
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { ticketDay_ticketCode: { ticketDay: day, ticketCode: code } }
+    });
+    if (!ticket) {
+      res.status(404).json({ error: "No such ticket" });
+      return;
+    }
+    // Anything that is not OPEN has already moved on - READY, collected, or
+    // cancelled at the till. None of them should be announced again.
+    if (ticket.state !== "OPEN") {
+      res.json({ data: { queued: false, already: true } });
+      return;
+    }
+
+    const who = req.user?.email ?? req.user?.name ?? "WEB";
+
+    await prisma.pendingChange.create({
+      data: {
+        type: "ticket_ready",
+        payload: {
+          ticketDay: day.toISOString().slice(0, 10),
+          ticketCode: code,
+          by: who
+        }
+      }
+    });
+
+    await prisma.ticket.update({
+      where: { ticketDay_ticketCode: { ticketDay: day, ticketCode: code } },
+      data: { state: "READY", readyAt: new Date(), readyBy: "WEB" }
+    });
+
+    res.json({ data: { queued: true } });
+  } catch (err: any) {
+    console.error("[tickets] ready failed", err?.message ?? err);
+    res.status(500).json({ error: "Unable to queue ready" });
+  }
+});
+
+/**
  * A customer opening their own receipt - PUBLIC, no login.
  *
  * Somebody just handed a paper receipt is not going to make an account to see

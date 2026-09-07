@@ -23,7 +23,7 @@ const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : nul
 // The roles a staff account may hold. One list, because when this lived in
 // three places the staff list filtered on a set that did not include the newest
 // role and it simply did not appear on its own management page.
-const STAFF_ROLES = ["ACCOUNTS", "SALES", "ADMIN", "FRONTDESK"] as const;
+export const STAFF_ROLES = ["ACCOUNTS", "SALES", "ADMIN", "FRONTDESK"] as const;
 
 // An hour is long enough to walk to a computer and short enough that a link
 // left in an inbox stops being a way in.

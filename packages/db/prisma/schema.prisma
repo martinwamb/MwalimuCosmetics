@@ -276,6 +276,16 @@ model AiRecommendation {
   productId String?
 }
 
+// One shift, from the tablet at the front desk.
+//
+// A row is opened when somebody clocks in and closed when they clock out, so
+// timeOut being null is what "still here" means - there is no state column to
+// disagree with the times.
+//
+// The photos are the only thing making this honest. Anybody standing at the
+// tablet can tap anybody's name; what they cannot do is put someone else's face
+// in the picture. Short of a fingerprint reader that does real one-to-many
+// identification - which no browser can drive - a photo is the ceiling.
 model Clocking {
   id        String    @id @default(cuid())
   user      User      @relation(fields: [userId], references: [id])
@@ -283,6 +293,14 @@ model Clocking {
   timeIn    DateTime
   timeOut   DateTime?
   deviceRef String?
+  // Bare filenames, not URLs, and NOT under the uploads directory - that whole
+  // folder is served by express.static with no auth, which would make every
+  // staff photo public to anyone who had the name. Read back through
+  // GET /clockings/:id/photo/:which, which is ADMIN only.
+  photoIn   String?
+  photoOut  String?
+
+  @@index([userId, timeIn])
 }
 
 model MailMessage {

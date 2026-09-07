@@ -16,6 +16,9 @@ const navItems = [
   // ACCOUNTS is not a new permission here: /display/media and /uploads have
   // always allowed it, and only this menu pretended otherwise.
   { label: "Shop Screen", href: "/dashboard/screen",   icon: "▶", roles: ["ADMIN","ACCOUNTS","FRONTDESK"] },
+  // The tablet at the front desk runs as FRONTDESK, which is why the clock-in
+  // board lives behind that login rather than behind each person's own.
+  { label: "Clock In",   href: "/dashboard/clock",     icon: "◐", roles: ["ADMIN","FRONTDESK"] },
   { label: "Staff",      href: "/dashboard/admin",     icon: "⚙", roles: ["ADMIN"] },
 ];
 

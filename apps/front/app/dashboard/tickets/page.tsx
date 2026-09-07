@@ -67,6 +67,7 @@ export default function TicketsPage() {
   const [busy, setBusy]       = useState<string | null>(null);
   const [error, setError]     = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
+  const [find, setFind]       = useState("");
   // Only used to re-render the waiting clocks; the value itself is never read.
   const [, setTick]           = useState(0);
 
@@ -98,11 +99,14 @@ export default function TicketsPage() {
     return () => clearInterval(t);
   }, []);
 
-  async function collect(t: Ticket) {
+  // Both buttons do the same three things and differ only in where they post
+  // and what the card should say afterwards, so they share one function rather
+  // than two that drift.
+  async function move(t: Ticket, to: "READY" | "COLLECTED") {
     if (busy) return;
     setBusy(t.ticketCode);
     try {
-      const r = await fetch(`${apiBase}/tickets/collect`, {
+      const r = await fetch(`${apiBase}/tickets/${to === "READY" ? "ready" : "collect"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ ticketDay: t.ticketDay, ticketCode: t.ticketCode })
@@ -113,18 +117,34 @@ export default function TicketsPage() {
       // authority: the next poll overwrites this with whatever MySQL says, so
       // if the write-back fails the ticket comes back rather than silently
       // staying closed.
+      const now = new Date().toISOString();
       setRows(rs => rs.map(x =>
-        x.ticketCode === t.ticketCode ? { ...x, state: "COLLECTED", collectedAt: new Date().toISOString() } : x));
+        x.ticketCode === t.ticketCode
+          ? { ...x, state: to, ...(to === "READY" ? { readyAt: now } : { collectedAt: now }) }
+          : x));
       setError(null);
     } catch {
-      setError(`Could not close ${t.ticketCode}. It is still open.`);
+      setError(to === "READY"
+        ? `Could not mark ${t.ticketCode} ready. The customer has not been called.`
+        : `Could not close ${t.ticketCode}. It is still open.`);
     } finally {
       setBusy(null);
     }
   }
 
-  const open = rows.filter(r => r.state !== "COLLECTED");
-  const done = rows.filter(r => r.state === "COLLECTED");
+  // Ticket number, customer and receipt number - the three ways a ticket gets
+  // referred to at the counter. Applied before the open/collected split so one
+  // search narrows the three columns and the collected list together.
+  const needle = find.trim().toLowerCase();
+  const rowsShown = needle
+    ? rows.filter(r =>
+        r.ticketCode.toLowerCase().includes(needle) ||
+        (r.arname ?? "").toLowerCase().includes(needle) ||
+        (r.receiptno ?? "").toLowerCase().includes(needle))
+    : rows;
+
+  const open = rowsShown.filter(r => r.state !== "COLLECTED");
+  const done = rowsShown.filter(r => r.state === "COLLECTED");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -133,10 +153,14 @@ export default function TicketsPage() {
           <h2 style={{ margin: 0, fontWeight: 800, letterSpacing: "-0.02em" }}>Collection Tickets</h2>
           <p className="muted" style={{ margin: 0 }}>
             {open.length} waiting · {done.length} collected
+            {needle && ` · filtered by "${find.trim()}"`}
             {loading && " · refreshing…"}
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <input type="search" value={find} onChange={e => setFind(e.target.value)}
+            placeholder="Find ticket, name or receipt"
+            className="filter-input" style={{ fontSize: "0.95rem", minWidth: "15rem" }} />
           <button type="button" onClick={load} className="filter-input"
             style={{ cursor: "pointer", background: "none" }}>Refresh</button>
           <input type="date" value={day} onChange={e => setDay(e.target.value)}
@@ -163,7 +187,7 @@ export default function TicketsPage() {
 
               {mine.length === 0 && (
                 <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
-                  {loading ? "…" : "Nothing waiting."}
+                  {loading ? "…" : needle ? "Nothing matches." : "Nothing waiting."}
                 </p>
               )}
 
@@ -199,15 +223,34 @@ export default function TicketsPage() {
                       {t.etaHi > 0 && ` (told ${t.etaLo}–${t.etaHi})`}
                     </div>
 
-                    <button type="button" onClick={() => collect(t)} disabled={busy === t.ticketCode}
-                      style={{
-                        marginTop: "0.2rem", padding: "0.45rem 0.6rem", borderRadius: 6,
-                        border: "1px solid #111827", background: "#111827", color: "#fff",
-                        fontWeight: 600, fontSize: "0.85rem", cursor: busy ? "wait" : "pointer",
-                        fontFamily: "inherit"
-                      }}>
-                      {busy === t.ticketCode ? "Closing…" : "Handed over"}
-                    </button>
+                    {/* Ready only while the ticket is open, because that is the
+                        one press that calls the customer and it must not happen
+                        twice. Handed over stays available from both states: a
+                        customer collecting is the end of the story either way. */}
+                    <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.2rem" }}>
+                      {t.state !== "READY" && (
+                        <button type="button" onClick={() => move(t, "READY")}
+                          disabled={busy === t.ticketCode}
+                          style={{
+                            flex: 1, padding: "0.45rem 0.6rem", borderRadius: 6,
+                            border: "1px solid #047857", background: "#047857", color: "#fff",
+                            fontWeight: 600, fontSize: "0.85rem", cursor: busy ? "wait" : "pointer",
+                            fontFamily: "inherit"
+                          }}>
+                          {busy === t.ticketCode ? "…" : "Goods ready"}
+                        </button>
+                      )}
+                      <button type="button" onClick={() => move(t, "COLLECTED")}
+                        disabled={busy === t.ticketCode}
+                        style={{
+                          flex: 1, padding: "0.45rem 0.6rem", borderRadius: 6,
+                          border: "1px solid #111827", background: "#111827", color: "#fff",
+                          fontWeight: 600, fontSize: "0.85rem", cursor: busy ? "wait" : "pointer",
+                          fontFamily: "inherit"
+                        }}>
+                        {busy === t.ticketCode ? "…" : "Handed over"}
+                      </button>
+                    </div>
                   </article>
                 );
               })}
