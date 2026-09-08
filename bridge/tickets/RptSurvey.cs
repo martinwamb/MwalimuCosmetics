@@ -181,6 +181,60 @@ internal static class RptSurvey
             }
         }
 
+        // -- 2b. Does the layout impose an order of its own? --------------
+        //
+        // The whole "append a row and it prints at the bottom" idea rests on
+        // Crystal rendering detail rows in the order the DataTable holds them.
+        // That is proved for rptPosiflex_reprint.rpt, where the vendor's own
+        // details query is a UNION ALL whose "order by 1" exists purely to keep
+        // returns below sales - pointless if the report re-sorted. It is only
+        // INFERRED for rptPosiflex.rpt, and inferring it on paper in front of a
+        // queue is the expensive way to find out.
+        //
+        // A sort field here means an appended row lands wherever its text sorts
+        // to, not last. A group means it lands inside somebody's group header.
+        Console.WriteLine();
+        Console.WriteLine("-- record sorts and groups (empty means row order is preserved) --");
+
+        int sorts = 0;
+        try
+        {
+            foreach (SortField sf in doc.DataDefinition.SortFields)
+            {
+                string fname;
+                try { fname = sf.Field == null ? "(none)" : sf.Field.Name; }
+                catch (Exception) { fname = "(unreadable)"; }
+                Console.WriteLine("    SORT  " + fname.PadRight(28) + sf.SortDirection);
+                sorts++;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("    (could not read SortFields: " + ex.Message + ")");
+        }
+
+        int groups = 0;
+        try
+        {
+            foreach (Group g in doc.DataDefinition.Groups)
+            {
+                string fname;
+                try { fname = g.ConditionField == null ? "(none)" : g.ConditionField.Name; }
+                catch (Exception) { fname = "(unreadable)"; }
+                Console.WriteLine("    GROUP " + fname);
+                groups++;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("    (could not read Groups: " + ex.Message + ")");
+        }
+
+        if (sorts == 0 && groups == 0)
+            Console.WriteLine("    (none - appended rows will print in the order they are added)");
+        else
+            Console.WriteLine("    ** " + sorts + " sort(s), " + groups + " group(s): appended rows will NOT simply land last **");
+
         // ── 3. The answer ─────────────────────────────────────────────
         //
         // Columns that are in the dataset but appear nowhere on the page.
