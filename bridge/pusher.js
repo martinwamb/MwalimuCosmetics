@@ -26,7 +26,7 @@ const os    = require("os");
 // only downloads when the two differ, so a change shipped without bumping both
 // reaches no PC at all: f458eb9 added ticket_ready without a bump, and the
 // self-update never offered it to anybody.
-const AGENT_VERSION   = "20260912-48";
+const AGENT_VERSION   = "20260912-49";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -91,8 +91,31 @@ try {
   };
 }
 
+// "Now" by the server's clock, not this PC's.
+//
+// On 2026-09-12 the bridge PC (.12) turned out to have its timezone set to US
+// time with the clock wound until the screen looked Kenyan - so its real clock
+// was ten hours fast, and from 14:00 every day this function returned
+// tomorrow. Every daily figure keys off it. The API's Date header is kept in
+// step by NTP, so each response refreshes the gap and "today" follows the
+// server whatever this PC believes. Throttles still use Date.now(): they only
+// ever compare this PC's clock with itself, which a wrong offset cannot upset.
+let serverSkewMs = 0;
+let skewWarned = false;
+function noteServerDate(header) {
+  const t = Date.parse(header || "");
+  if (isNaN(t)) return;
+  serverSkewMs = t - Date.now();
+  if (!skewWarned && Math.abs(serverSkewMs) > 5 * 60 * 1000) {
+    skewWarned = true;
+    log(`This PC's clock is ${Math.round(serverSkewMs / 60000)} min off the server's - dates follow the server.`);
+  }
+}
+function serverNow() {
+  return Date.now() + serverSkewMs;
+}
 function kenyanDate() {
-  return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return new Date(serverNow() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 function addDays(dateStr, n) {
   const d = new Date(dateStr + "T12:00:00Z");
@@ -151,6 +174,7 @@ function apiRequest(method, path, body, secret, token, timeoutMs) {
         ...(token  ? { "Authorization": `Bearer ${token}` } : {}),
       },
     }, r => {
+      noteServerDate(r.headers && r.headers.date);
       const chunks = [];
       r.on("data", c => chunks.push(c));
       r.on("end", () => res({ status: r.statusCode, body: Buffer.concat(chunks).toString() }));
@@ -1531,9 +1555,9 @@ async function pullClockings(conn, days) {
       return;
     }
 
-    // synced_at is this PC's time, never NOW(): the server-pc's clock runs
+    // synced_at is the API's time (serverNow), never NOW(): the server-pc's clock runs
     // about 24 minutes fast.
-    const syncedAt = eat(Date.now());
+    const syncedAt = eat(serverNow());
     const rows = data
       .filter(c => c && c.id && !isNaN(new Date(c.timeIn).getTime()))
       .map(c => [

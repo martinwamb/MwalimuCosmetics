@@ -447,7 +447,7 @@ const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetic
 // embedded constant with whatever this endpoint reports and only updates when
 // they differ — so shipping a new pusher.js without bumping this leaves every
 // PC on the old code with no sign anything is wrong. Bump both together.
-const AGENT_VERSION = "20260912-48";
+const AGENT_VERSION = "20260912-49";
 
 router.get("/agent-version",  (_req, res) => res.json({ version: AGENT_VERSION }));
 router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }));
