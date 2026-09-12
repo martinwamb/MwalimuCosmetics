@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRoles } from "../lib/authz.js";
 import { clockingsDir } from "../lib/uploads.js";
+import { PIN_LOCK_MINUTES, PIN_MAX_FAILS, pinMatches, withFreshPin } from "../lib/clockPin.js";
 import { STAFF_ROLES } from "./auth.js";
 
 /**
@@ -14,16 +15,24 @@ import { STAFF_ROLES } from "./auth.js";
  *
  * The tablet is signed in once, as the tickets account, and stays that way all
  * day. Staff do not sign in and out of it - they tap their own name on a board
- * of names and the camera takes their picture. So the account making the
- * request is almost never the person being clocked, which is why userId is a
- * parameter here rather than being read off the token.
+ * of names. So the account making the request is almost never the person being
+ * clocked, which is why userId is a parameter here rather than being read off
+ * the token.
  *
- * That trade is deliberate and it has a floor: anybody standing at the tablet
- * can tap anybody's name. What they cannot do is put someone else's face in the
- * photo, and the photo is kept. Proving who pressed it would need a fingerprint
- * reader doing real one-to-many identification, which no browser can drive - a
- * tablet's own sensor only ever answers "the device owner is present", and on a
- * shared tablet every enrolled finger is the device owner.
+ * Three things stand behind a press. The tap names who. The PIN proves who:
+ * four digits of their own, unique across the shop, with five wrong in a row
+ * locking that name for a quarter of an hour. And the camera, which the tablet
+ * opens without a preview, takes a picture that is kept as the evidence. The
+ * picture is only saved once the PIN is right, so what is kept is a record of
+ * shifts rather than of every mistyped digit.
+ *
+ * What a PIN cannot do is tell its owner from somebody they gave it to. Two
+ * people sharing one PIN look exactly like one person to this code, and the
+ * only thing that can show it is the wrong face in the photo, which is only as
+ * good as somebody looking. Closing that for good needs a fingerprint or face
+ * terminal doing one-to-many identification, which no browser can drive - a
+ * tablet's own sensor only ever answers "the device owner is present", and on
+ * a shared tablet every enrolled finger is the device owner.
  */
 
 const clockSchema = z.object({
@@ -32,13 +41,26 @@ const clockSchema = z.object({
   selfieData: z.string().optional(),
   deviceRef: z.string().optional(),
   // Absent means "clock me", which is what this endpoint has always done.
-  userId: z.string().optional()
+  userId: z.string().optional(),
+  // Required whenever the press is for somebody else - see the gate below.
+  pin: z.string().max(12).optional()
 });
 
 export const router = Router();
 
 // Who may clock somebody OTHER than themselves. The tablet runs as FRONTDESK.
 const KIOSK_ROLES = ["FRONTDESK", "ADMIN"];
+
+const SYNC_SECRET = process.env.SYNC_SECRET ?? "mwalimu-sync-secret";
+
+// The shop's pusher rather than a person: it has the sync secret and no login.
+function requireSyncSecret(req: any, res: any, next: any) {
+  if (req.headers["x-sync-secret"] !== SYNC_SECRET) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+}
 
 function ensureDir() {
   if (!fs.existsSync(clockingsDir)) {
@@ -77,11 +99,47 @@ function shopDayStart(iso?: string) {
   return new Date(midnight - 3 * 60 * 60 * 1000);
 }
 
+// "14:05" on the shop's clock, for telling somebody when a lock lifts.
+function shopClock(d: Date) {
+  const eat = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+  return `${String(eat.getUTCHours()).padStart(2, "0")}:${String(eat.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+function lockedReply(res: any, until: Date) {
+  return res.status(423).json({
+    code: "LOCKED",
+    error: `Too many wrong PINs. Try again after ${shopClock(until)}.`,
+    until
+  });
+}
+
+/**
+ * Locks the name if every try has been used, and returns the count and the lock
+ * as they now stand. The condition is in the database, so whichever press finds
+ * the tries spent sets the lock. If the press that made the fifth miss died
+ * before locking, the count would otherwise sit at five with no lock to expire,
+ * and nobody - the right PIN included - would ever get another try.
+ */
+async function lockIfSpent(userId: string, now: Date) {
+  const until = new Date(now.getTime() + PIN_LOCK_MINUTES * 60 * 1000);
+  const locked = await prisma.user.updateMany({
+    where: { id: userId, clockPinFails: { gte: PIN_MAX_FAILS } },
+    data: { clockPinFails: 0, clockPinLockedUntil: until }
+  });
+  if (locked.count) {
+    console.warn(`[clockings] PIN locked for ${userId} until ${until.toISOString()}`);
+  }
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: { clockPinFails: true, clockPinLockedUntil: true }
+  });
+}
+
 /**
  * The board of names the tablet draws.
  *
- * Names and clock state, and nothing else. No roles, no figures - this is
- * rendered on a screen facing the shop floor.
+ * Names, clock state and whether the person has a PIN yet, and nothing else.
+ * No roles, no figures - this is rendered on a screen facing the shop floor.
  */
 router.get("/roster", requireAuth, async (req: any, res) => {
   if (!isStaff(req)) {
@@ -90,9 +148,8 @@ router.get("/roster", requireAuth, async (req: any, res) => {
 
   try {
     const staff = await prisma.user.findMany({
-      where: { role: { in: STAFF_ROLES as unknown as any[] }, disabled: false },
-      select: { id: true, name: true, email: true },
-      orderBy: [{ name: "asc" }, { email: "asc" }]
+      where: { role: { in: STAFF_ROLES as unknown as any[] }, disabled: false, clockBoard: true },
+      select: { id: true, name: true, email: true, clockPinHash: true }
     });
 
     // One query rather than one per person: an open clocking is any row with no
@@ -103,14 +160,19 @@ router.get("/roster", requireAuth, async (req: any, res) => {
     });
     const since = new Map(open.map(o => [o.userId, o.timeIn]));
 
-    return res.json({
-      data: staff.map(s => ({
+    // Sorted on the name as shown. Somebody with no name is shown by their
+    // email, and the database would put all of those after everybody else.
+    const data = staff
+      .map(s => ({
         id: s.id,
         name: s.name ?? s.email,
         state: since.has(s.id) ? "IN" : "OUT",
-        since: since.get(s.id) ?? null
+        since: since.get(s.id) ?? null,
+        hasPin: Boolean(s.clockPinHash)
       }))
-    });
+      .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+
+    return res.json({ data });
   } catch (err: any) {
     console.error("[clockings] roster failed", err?.message ?? err);
     return res.status(500).json({ error: "Unable to read the roster" });
@@ -129,6 +191,12 @@ router.get("/roster", requireAuth, async (req: any, res) => {
  * not even the person who typed the name. So it is a row on this board and a
  * placeholder for an admin, not a way in. Setting the real role, the real email
  * and a real password is the Staff page's job, which is ADMIN only.
+ *
+ * It does hand back a PIN, in the same write, because a name on the board with
+ * no PIN cannot be clocked in, and the new person is standing at the tablet.
+ * That is not a way in either: a PIN only works on this page, for this name.
+ * The response is the only time the digits exist; a lost one is replaced from
+ * the Staff page.
  *
  * The generated email is a placeholder on a domain that does not receive mail,
  * so a password reset cannot be sent to it either. An admin corrects it later.
@@ -161,13 +229,16 @@ router.post("/staff", requireRoles(KIOSK_ROLES), async (req: any, res) => {
     // sets a password, which is the point.
     const passwordHash = await bcrypt.hash(crypto.randomUUID() + crypto.randomUUID(), 12);
 
-    const user = await prisma.user.create({
-      data: { name: parsed.data.name, email, role: "FRONTDESK", passwordHash },
-      select: { id: true, name: true, email: true }
-    });
+    const { pin, result: user } = await withFreshPin(clockPinHash =>
+      prisma.user.create({
+        data: { name: parsed.data.name, email, role: "FRONTDESK", passwordHash, clockPinHash },
+        select: { id: true, name: true, email: true }
+      })
+    );
 
     return res.status(201).json({
-      data: { id: user.id, name: user.name ?? user.email, state: "OUT", since: null }
+      data: { id: user.id, name: user.name ?? user.email, state: "OUT", since: null, hasPin: true },
+      pin
     });
   } catch (err: any) {
     console.error("[clockings] register failed", err?.message ?? err);
@@ -188,7 +259,7 @@ router.post("/", requireAuth, async (req: any, res) => {
 
   const parsed = clockSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
+    return res.status(400).json({ error: "That clocking could not be read" });
   }
 
   const targetId = parsed.data.userId ?? req.user.sub;
@@ -200,14 +271,80 @@ router.post("/", requireAuth, async (req: any, res) => {
     if (targetId !== req.user.sub) {
       const target = await prisma.user.findUnique({
         where: { id: targetId },
-        select: { role: true, disabled: true }
+        select: {
+          role: true, disabled: true, clockBoard: true,
+          clockPinHash: true, clockPinFails: true, clockPinLockedUntil: true
+        }
       });
-      // A switched-off account is somebody who no longer works here, and a
-      // customer was never staff. Neither belongs on the board, and asking for
-      // one by id should not get a shift either.
-      if (!target || target.disabled || !(STAFF_ROLES as readonly string[]).includes(target.role)) {
+      // A switched-off account is somebody who no longer works here, a customer
+      // was never staff, and a name taken off the board is not clocked from the
+      // tablet. None of them should get a shift by being asked for by id.
+      if (!target || target.disabled || !target.clockBoard
+          || !(STAFF_ROLES as readonly string[]).includes(target.role)) {
         return res.status(404).json({ error: "No such staff member" });
       }
+      if (!target.clockPinHash) {
+        return res.status(403).json({ code: "NO_PIN", error: "No PIN yet - ask the admin to issue one." });
+      }
+
+      // The lock before the PIN, so the right PIN during a lock is refused too.
+      // Otherwise the lock would only slow a guesser down, never stop one.
+      const now = new Date();
+      if (target.clockPinLockedUntil && target.clockPinLockedUntil > now) {
+        return lockedReply(res, target.clockPinLockedUntil);
+      }
+
+      const pin = parsed.data.pin;
+      // Nothing typed is not a guess, so it does not count towards the lock.
+      // A tablet still running the page from before PINs sends none at all,
+      // and counting those would lock out everybody who pressed their name.
+      if (!pin) {
+        return res.status(403).json({
+          code: "WRONG_PIN",
+          error: "Wrong PIN.",
+          remaining: Math.max(0, PIN_MAX_FAILS - target.clockPinFails)
+        });
+      }
+
+      // A try is claimed in the database before the PIN is compared, rather than
+      // counted after. The lock above was read once, so a burst of guesses sent
+      // together would all pass it and all be answered - the whole keypad in one
+      // go. The claim only succeeds while tries are left and no lock stands, so
+      // however many arrive at once, at most five PINs are compared per lock.
+      const claim = await prisma.user.updateMany({
+        where: {
+          id: targetId,
+          clockPinFails: { lt: PIN_MAX_FAILS },
+          OR: [{ clockPinLockedUntil: null }, { clockPinLockedUntil: { lte: now } }]
+        },
+        data: { clockPinFails: { increment: 1 } }
+      });
+      if (!claim.count) {
+        const after = await lockIfSpent(targetId, now);
+        if (after?.clockPinLockedUntil && after.clockPinLockedUntil > now) {
+          return lockedReply(res, after.clockPinLockedUntil);
+        }
+        // No lock after all: a right PIN cleared the count in between.
+        return res.status(409).json({ error: "That press crossed another - press again." });
+      }
+
+      if (!pinMatches(pin, target.clockPinHash)) {
+        const after = await lockIfSpent(targetId, now);
+        if (after?.clockPinLockedUntil && after.clockPinLockedUntil > now) {
+          return lockedReply(res, after.clockPinLockedUntil);
+        }
+        return res.status(403).json({
+          code: "WRONG_PIN",
+          error: "Wrong PIN.",
+          remaining: Math.max(0, PIN_MAX_FAILS - (after?.clockPinFails ?? PIN_MAX_FAILS))
+        });
+      }
+
+      // The claim counted this try as a miss until the compare said otherwise.
+      await prisma.user.update({
+        where: { id: targetId },
+        data: { clockPinFails: 0, clockPinLockedUntil: null }
+      });
     }
 
     const open = await prisma.clocking.findFirst({
@@ -215,8 +352,9 @@ router.post("/", requireAuth, async (req: any, res) => {
       orderBy: { timeIn: "desc" }
     });
 
-    // Saved before the write, so a failure here fails the whole press rather
-    // than recording a shift whose photo silently went missing.
+    // Only reached once the PIN has passed, and saved before the write, so a
+    // failure here fails the whole press rather than recording a shift whose
+    // photo silently went missing.
     const photo = parsed.data.selfieData ? saveSelfie(parsed.data.selfieData) : null;
     const deviceRef = parsed.data.deviceRef ?? req.user.email ?? null;
 
@@ -291,6 +429,48 @@ router.get("/", requireRoles(["ADMIN"]), async (req, res) => {
   } catch (err: any) {
     console.error("[clockings] list failed", err?.message ?? err);
     return res.status(500).json({ error: "Unable to read clockings" });
+  }
+});
+
+/**
+ * Recent shifts for the shop's own database - the sync secret, not a login.
+ *
+ * bridge/pusher.js copies these into staff_clockings in the shop MySQL, which is
+ * how the till's Staff performance window shows attendance: the tills have no
+ * internet, and the server cannot reach MySQL. `from` goes back with the rows
+ * because the pusher deletes shop rows in the window that the server no longer
+ * has, and it has to use exactly the window this query used.
+ *
+ * Everybody, hidden from the board or switched off: this is history, and
+ * somebody who has since left still worked the days they worked.
+ */
+router.get("/export", requireSyncSecret, async (req, res) => {
+  try {
+    const asked = Math.floor(Number(req.query.days ?? 3));
+    const days = Number.isFinite(asked) ? Math.min(120, Math.max(1, asked)) : 3;
+    const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const rows = await prisma.clocking.findMany({
+      where: { timeIn: { gte: from } },
+      orderBy: { timeIn: "asc" },
+      select: {
+        id: true, timeIn: true, timeOut: true,
+        user: { select: { name: true, email: true } }
+      }
+    });
+
+    return res.json({
+      from,
+      data: rows.map(r => ({
+        id: r.id,
+        name: r.user.name ?? r.user.email,
+        timeIn: r.timeIn,
+        timeOut: r.timeOut
+      }))
+    });
+  } catch (err: any) {
+    console.error("[clockings] export failed", err?.message ?? err);
+    return res.status(500).json({ error: "Unable to export clockings" });
   }
 });
 

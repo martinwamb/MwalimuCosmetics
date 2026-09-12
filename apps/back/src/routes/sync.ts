@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRoles } from "../lib/authz.js";
+import { STAFF_ROLES } from "./auth.js";
 
 export const router = Router();
 
@@ -224,8 +225,53 @@ router.post("/mark-synced", async (req, res) => {
 
 // ── Pending changes (web → MySQL write-back queue) ────────────
 
+// At most one line per key per hour. A poller asks every few seconds, and a line
+// per request would bury the one that matters in the pm2 log.
+const LOG_EVERY_MS = 60 * 60 * 1000;
+const lastLogged = new Map<string, number>();
+
+function firstThisHour(key: string) {
+  const now = Date.now();
+  const last = lastLogged.get(key);
+  if (last !== undefined && now - last < LOG_EVERY_MS) return false;
+  if (lastLogged.size > 1000) {
+    lastLogged.forEach((t, k) => { if (now - t >= LOG_EVERY_MS) lastLogged.delete(k); });
+  }
+  // Still this full after the prune means somebody is changing headers on every
+  // request to mint keys. Going quiet is better than growing without end.
+  if (lastLogged.size > 5000) return false;
+  lastLogged.set(key, now);
+  return true;
+}
+
+// Headers go into a log line, so no line breaks and no essays.
+function loggable(v: unknown) {
+  return String(v ?? "-").replace(/[\r\n\t]+/g, " ").slice(0, 200);
+}
+
+// Who is polling. Every authenticated caller is handed every pending change, so
+// a second, out-of-date agent anywhere can pick up a change it does not know and
+// fail it before the real pusher sees it (see /mark-change-failed). This is how
+// that agent gets found: the current pusher sends X-Agent: <hostname>/<version>,
+// so a poller that sends none is an old one. The account is logged by its
+// email, never by its token.
+function notePoller(req: any) {
+  const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim();
+  const ip = loggable(forwarded || req.socket?.remoteAddress);
+  const ua = loggable(req.headers["user-agent"]);
+  const agent = loggable(req.headers["x-agent"]);
+  if (!firstThisHour(`poll|${ip}|${ua}|${agent}`)) return;
+  console.log(`[sync] pending-changes polled from ${ip} ua="${ua}" x-agent="${agent}" account=${loggable(req.user?.email)}`);
+}
+
+// Staff, not any login. /auth/register hands a token to anybody, and a CUSTOMER
+// had no business reading the write-back queue or adding to it. The pusher
+// signs in as the admin account, so this does not shut it out.
+const QUEUE_ROLES = [...STAFF_ROLES];
+
 // Bridge pulls pending changes to apply to MySQL
-router.get("/pending-changes", requireAuth, async (_req, res) => {
+router.get("/pending-changes", requireRoles(QUEUE_ROLES), async (req, res) => {
+  notePoller(req);
   const changes = await prisma.pendingChange.findMany({
     where:   { status: "pending" },
     orderBy: { createdAt: "asc" },
@@ -235,7 +281,7 @@ router.get("/pending-changes", requireAuth, async (_req, res) => {
 });
 
 // Web dashboard creates a pending change (stock adj, GRN, price update, etc.)
-router.post("/pending-changes", requireAuth, async (req, res) => {
+router.post("/pending-changes", requireRoles(QUEUE_ROLES), async (req, res) => {
   const { type, payload } = req.body as { type: string; payload: object };
   if (!type || !payload) return res.status(400).json({ error: "type and payload required" });
 
@@ -266,11 +312,52 @@ router.post("/mark-change-applied", async (req, res) => {
   return res.json({ ok: true });
 });
 
-// Bridge marks a change as failed
+// Bridge marks a change as failed.
+//
+// Except when all the agent said was that it does not know the change type.
+// GET /pending-changes hands every pending change to any authenticated caller,
+// so one out-of-date sync agent anywhere used to fail every ticket_ready change
+// before the current pusher on 10.10.10.12 could apply it. A failed change stops
+// /tickets/sync holding the ticket, so the next shop push carried OPEN back and
+// the web board reverted the card - and the customer was never called. "Unknown
+// change type" says nothing about the change and everything about the agent,
+// so the change stays pending for one that knows it, with a note of the refusal.
+//
+// But only for a type the current pusher is known to apply. A type no agent
+// knows - a typo, a retired one - would otherwise sit pending for ever in the
+// oldest-50 window GET /pending-changes hands out, and fifty of them would
+// stall every real change queued behind. Those still fail, as they always did.
+//
+// Every `change.type ===` branch in bridge/pusher.js applyPendingChanges. Add a
+// type here when the pusher learns one.
+const AGENT_TYPES = new Set([
+  "stock_adjustment", "fumas_update", "schema_probe", "provision_db_user",
+  "diagnose_slow_pos", "metrics_backfill", "check_drafts", "install_updated_fumas",
+  "print_receipt", "return_sale", "backup_request", "mirror_run",
+  "goods_received", "grn_payment", "ar_payment", "ticket_ready", "ticket_collected",
+]);
+
 router.post("/mark-change-failed", async (req, res) => {
   if (!checkSecret(req, res)) return;
 
   const { id, error } = req.body as { id: string; error: string };
+  const reason = String(error ?? "");
+  const change = reason.startsWith("Unknown change type")
+    ? await prisma.pendingChange.findUnique({ where: { id }, select: { type: true } })
+    : null;
+  if (change && AGENT_TYPES.has(change.type)) {
+    // Once an hour per change: the stale agent refuses it again on every poll
+    // for as long as it stays pending.
+    if (firstThisHour(`stale|${id}`)) {
+      console.warn(`[sync] change ${id} refused by an out-of-date sync agent, left pending: ${reason}`);
+    }
+    await prisma.pendingChange.update({
+      where: { id },
+      data:  { failReason: `Refused by an out-of-date sync agent, left pending: ${reason}` },
+    });
+    return res.json({ ok: true });
+  }
+
   await prisma.pendingChange.update({
     where: { id },
     data:  { status: "failed", failReason: error },
@@ -360,7 +447,7 @@ const AGENT_DIR     = process.env.AGENT_DIR ?? "/home/admin/apps/mwalimucosmetic
 // embedded constant with whatever this endpoint reports and only updates when
 // they differ — so shipping a new pusher.js without bumping this leaves every
 // PC on the old code with no sign anything is wrong. Bump both together.
-const AGENT_VERSION = "20260831-47";
+const AGENT_VERSION = "20260912-48";
 
 router.get("/agent-version",  (_req, res) => res.json({ version: AGENT_VERSION }));
 router.post("/agent-version", (_req, res) => res.json({ version: AGENT_VERSION }));

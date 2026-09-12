@@ -9,6 +9,7 @@ import { sendAppMail } from "../lib/mailer.js";
 import { prisma } from "../lib/prisma.js";
 import { seedAdmin } from "../lib/admin.js";
 import { requireAuth } from "../lib/authz.js";
+import { issuePin, withFreshPin } from "../lib/clockPin.js";
 
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-secret";
 const PASSWORD_RESET_URL = process.env.PASSWORD_RESET_URL ?? "https://mwalimucosmetics.com/reset-password";
@@ -54,10 +55,23 @@ const identifySchema = z.object({
 
 const staffPatchSchema = z.object({
   role: z.enum(STAFF_ROLES).optional(),
-  disabled: z.boolean().optional()
-}).refine(v => v.role !== undefined || v.disabled !== undefined, {
+  disabled: z.boolean().optional(),
+  name: z.string().trim().min(1).max(60).optional(),
+  clockBoard: z.boolean().optional()
+}).refine(v => v.role !== undefined || v.disabled !== undefined
+  || v.name !== undefined || v.clockBoard !== undefined, {
   message: "Nothing to change"
 });
+
+// What the Staff page sees of a person: whether they have a PIN, never its hash.
+const staffSelect = {
+  id: true, email: true, name: true, role: true, disabled: true, createdAt: true,
+  clockBoard: true, clockPinHash: true
+} as const;
+
+function staffRow<T extends { clockPinHash: string | null }>({ clockPinHash, ...rest }: T) {
+  return { ...rest, hasPin: Boolean(clockPinHash) };
+}
 
 const resetSchema = z.object({
   token: z.string().min(20),
@@ -341,17 +355,21 @@ router.post("/reset", async (req, res) => {
 router.get("/staff", requireAdmin, async (_req, res) => {
   const list = await prisma.user.findMany({
     where: { role: { in: [...STAFF_ROLES] } },
-    select: { id: true, email: true, name: true, role: true, disabled: true, createdAt: true },
+    select: staffSelect,
     orderBy: [{ disabled: "asc" }, { email: "asc" }]
   });
-  res.json({ data: list });
+  res.json({ data: list.map(staffRow) });
 });
 
-// Change somebody's role, or take their login away.
+// Change somebody's role, their name, whether they are on the clock board, or
+// take their login away.
 //
-// An admin may not do either to themselves. There is one admin account in this
-// shop most days, and a click that demotes it locks everybody out of the
-// dashboard with no way back except the database.
+// An admin may not change their own role or disable themselves. There is one
+// admin account in this shop most days, and a click that demotes it locks
+// everybody out of the dashboard with no way back except the database. Their
+// own name and board place are fine: neither can lock anybody out. Sending the
+// role or flag they already have is not a change, so a form that posts the
+// whole row back still works on the admin's own row.
 router.patch("/staff/:id", requireAdmin, async (req: any, res) => {
   const parsed = staffPatchSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -363,25 +381,97 @@ router.patch("/staff/:id", requireAdmin, async (req: any, res) => {
   if (!STAFF_ROLES.includes(target.role as any)) {
     return res.status(400).json({ error: "That account is not a staff account" });
   }
-  if (target.id === req.user.sub) {
+
+  const { role, disabled, name, clockBoard } = parsed.data;
+  const locksOut = (role !== undefined && role !== target.role)
+    || (disabled !== undefined && disabled !== target.disabled);
+  if (target.id === req.user.sub && locksOut) {
     return res.status(400).json({ error: "You cannot change your own role or disable yourself" });
   }
 
   const updated = await prisma.user.update({
     where: { id: target.id },
     data: {
-      ...(parsed.data.role !== undefined ? { role: parsed.data.role } : {}),
-      ...(parsed.data.disabled !== undefined ? { disabled: parsed.data.disabled } : {})
+      ...(role !== undefined ? { role } : {}),
+      ...(disabled !== undefined ? { disabled } : {}),
+      ...(name !== undefined ? { name } : {}),
+      ...(clockBoard !== undefined ? { clockBoard } : {})
     },
-    select: { id: true, email: true, name: true, role: true, disabled: true }
+    select: staffSelect
   });
 
   // A login just taken away should not keep a way back in.
-  if (parsed.data.disabled === true) {
+  if (disabled === true) {
     await prisma.passwordReset.deleteMany({ where: { userId: target.id, usedAt: null } });
   }
 
-  return res.json({ data: updated });
+  return res.json({ data: staffRow(updated) });
+});
+
+/**
+ * Clock-in PINs, issued by an admin and shown once.
+ *
+ * The digits go back in the response and nowhere else - only an HMAC of them is
+ * stored (lib/clockPin.ts), so nobody can read a PIN back later, this page
+ * included. A lost PIN is fixed by issuing a new one.
+ *
+ * This one is registered ahead of /staff/:id/pin so its path can never be
+ * taken for an id.
+ */
+router.post("/staff/pins/issue-missing", requireAdmin, async (_req, res) => {
+  try {
+    const missing = await prisma.user.findMany({
+      where: { role: { in: [...STAFF_ROLES] }, disabled: false, clockBoard: true, clockPinHash: null },
+      select: { id: true, name: true, email: true }
+    });
+
+    const issued: { id: string; name: string; pin: string }[] = [];
+    for (const u of missing) {
+      try {
+        // Only onto an empty PIN, so a double press - or a second admin - cannot
+        // quietly replace PINs on a sheet that has already been printed.
+        const { pin, result } = await withFreshPin(clockPinHash =>
+          prisma.user.updateMany({
+            where: { id: u.id, clockPinHash: null },
+            data: { clockPinHash, clockPinFails: 0, clockPinLockedUntil: null }
+          })
+        );
+        if (result.count) issued.push({ id: u.id, name: u.name ?? u.email, pin });
+      } catch (err: any) {
+        // Carry on: the PINs already issued are written, and this response is
+        // the only place they will ever appear. Whoever is left is picked up by
+        // the next press.
+        console.error("[auth] issuing a PIN failed for", u.id, err?.message ?? err);
+      }
+    }
+
+    issued.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+    return res.json({ data: issued });
+  } catch (err: any) {
+    console.error("[auth] issuing PINs failed", err?.message ?? err);
+    return res.status(500).json({ error: "Unable to issue PINs" });
+  }
+});
+
+// Issue or replace one person's PIN. Also how a locked-out person gets back in:
+// a new PIN clears the wrong-try count and the lock.
+router.post("/staff/:id/pin", requireAdmin, async (req: any, res) => {
+  try {
+    const target = await prisma.user.findUnique({
+      where: { id: String(req.params.id) },
+      select: { id: true, name: true, email: true, role: true }
+    });
+    if (!target) return res.status(404).json({ error: "No such user" });
+    if (!STAFF_ROLES.includes(target.role as any)) {
+      return res.status(400).json({ error: "That account is not a staff account" });
+    }
+
+    const pin = await issuePin(target.id);
+    return res.json({ data: { id: target.id, name: target.name ?? target.email }, pin });
+  } catch (err: any) {
+    console.error("[auth] PIN reset failed", err?.message ?? err);
+    return res.status(500).json({ error: "Unable to issue a PIN" });
+  }
 });
 
 router.get("/oauth/google/start", async (req, res) => {

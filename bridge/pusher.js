@@ -20,8 +20,13 @@ const mysql = require("mysql");
 const https = require("https");
 const http  = require("http");
 const fs    = require("fs");
+const os    = require("os");
 
-const AGENT_VERSION   = "20260831-47";
+// MUST match AGENT_VERSION in apps/back/src/routes/sync.ts. checkForUpdate
+// only downloads when the two differ, so a change shipped without bumping both
+// reaches no PC at all: f458eb9 added ticket_ready without a bump, and the
+// self-update never offered it to anybody.
+const AGENT_VERSION   = "20260912-48";
 
 // Credentials resolve from db-config.js (env var or C:\MwalimuSync\db-config.json)
 // so they are not carried in source. The require is guarded because this file
@@ -64,6 +69,14 @@ const LIVE_EVERY_MS   = 20000;
 // rather than never.
 const CATCH_UP_EVERY_MS = 15 * 60 * 1000;
 const CATCH_UP_DAYS     = 3;
+
+// The attendance pull (pullClockings). Five minutes is plenty for a screen
+// somebody opens to see who came in late. The wide window re-reads two months
+// on the catch-up interval above, so a shift corrected or deleted on the web
+// is corrected here as well.
+const CLOCK_PULL_EVERY_MS = 5 * 60 * 1000;
+const CLOCK_DAYS          = 3;
+const CLOCK_CATCH_UP_DAYS = 60;
 
 // Guarded for the same reason as db-config below: a self-updated pusher.js can
 // land on a PC before its sidecars do. A missing module must cost one feature,
@@ -117,6 +130,14 @@ function query(conn, sql, params, timeoutMs) {
   );
 }
 
+// Sent on every request so the server can tell this agent from a stale one.
+// A copy older than this sends no X-Agent at all, which is how a forgotten
+// agent still polling /sync/pending-changes gives itself away in the logs.
+// Printable ASCII only: Node throws on a header character it will not send,
+// and a PC with a Unicode hostname would then fail every request, the
+// self-update included.
+const AGENT_TAG = `${String(os.hostname() || "unknown").replace(/[^\x21-\x7e]/g, "_").slice(0, 64)}/${AGENT_VERSION}`;
+
 function apiRequest(method, path, body, secret, token, timeoutMs) {
   return new Promise((res, rej) => {
     const data = body ? JSON.stringify(body) : null;
@@ -124,6 +145,7 @@ function apiRequest(method, path, body, secret, token, timeoutMs) {
       hostname: "api.mwalimucosmetics.com",
       path, method,
       headers: {
+        "X-Agent": AGENT_TAG,
         ...(data ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } : {}),
         ...(secret ? { "x-sync-secret": secret } : {}),
         ...(token  ? { "Authorization": `Bearer ${token}` } : {}),
@@ -1479,6 +1501,80 @@ function iso(v) {
   return v instanceof Date ? v.toISOString() : String(v);
 }
 
+// ── Attendance, pulled down for the till ─────────────────────
+//
+// People clock in on the web, from the shop tablet, and the Attendance tab in
+// FumasV5's Show more reads the shifts from the shop's MySQL. They have to get
+// there through this agent because nothing else can carry them: the tills have
+// no internet, FumasV5 is .NET 3.5 and cannot be trusted to speak TLS 1.2 to
+// the API, and the server cannot reach MySQL. This agent talks to both.
+//
+// Postgres is the record and staff_clockings is a copy of a window of it.
+// Every shift the server returns is upserted, and every row in the window it
+// did NOT return is deleted - which is how a shift removed on the web
+// disappears here too.
+async function pullClockings(conn, days) {
+  try {
+    const exists = await query(conn, "SHOW TABLES LIKE 'staff_clockings'");
+    if (!exists.length) return;
+
+    // The columns hold EAT like every other datetime in the database, so the
+    // times go down as EAT strings built here. A Date would be written in this
+    // PC's own timezone, which nothing guarantees is EAT.
+    const eat = ms => new Date(ms + 3 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
+
+    const r = await apiRequest("GET", `/clockings/export?days=${days}`, null, SECRET, null, 30000);
+    if (!r || r.status !== 200) { log("Clock pull returned " + (r && r.status)); return; }
+    const { from, data } = JSON.parse(r.body);
+    if (!Array.isArray(data) || isNaN(new Date(from).getTime())) {
+      log("Clock pull: unexpected reply, nothing changed.");
+      return;
+    }
+
+    // synced_at is this PC's time, never NOW(): the server-pc's clock runs
+    // about 24 minutes fast.
+    const syncedAt = eat(Date.now());
+    const rows = data
+      .filter(c => c && c.id && !isNaN(new Date(c.timeIn).getTime()))
+      .map(c => [
+        String(c.id),
+        String(c.name || "").slice(0, 80),
+        eat(new Date(c.timeIn).getTime()),
+        c.timeOut ? eat(new Date(c.timeOut).getTime()) : null,
+        syncedAt
+      ]);
+
+    const BATCH = 200;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      await query(conn,
+        `INSERT INTO staff_clockings (id, staff_name, time_in, time_out, synced_at)
+         VALUES ?
+         ON DUPLICATE KEY UPDATE staff_name = VALUES(staff_name), time_in = VALUES(time_in),
+                                 time_out = VALUES(time_out), synced_at = VALUES(synced_at)`,
+        [rows.slice(i, i + BATCH)]);
+    }
+
+    // Rounded UP to the whole second. MySQL 5.1 keeps no fractions, so a
+    // stored time_in can sit up to a second before the real instant, and a
+    // shift just outside the server's window must not be taken for one that
+    // was deleted inside it.
+    const since = eat(Math.ceil(new Date(from).getTime() / 1000) * 1000);
+    const ids = data.filter(c => c && c.id).map(c => String(c.id));
+    const gone = ids.length
+      ? await query(conn, "DELETE FROM staff_clockings WHERE time_in >= ? AND id NOT IN (?)", [since, ids])
+      : await query(conn, "DELETE FROM staff_clockings WHERE time_in >= ?", [since]);
+
+    // Silent on the ordinary five-minute pull.
+    if (days > CLOCK_DAYS || gone.affectedRows) {
+      log(`Pulled ${rows.length} clocking(s) over ${days} days; removed ${gone.affectedRows}.`);
+    }
+  } catch (e) {
+    // Never fatal, for the same reason as pushTickets: a stale attendance tab
+    // is a nuisance, a sync cycle that dies here stops everything behind it.
+    log("Clock pull skipped: " + e.message);
+  }
+}
+
 // ── 4. Write back web-created sales to MySQL ─────────────────
 async function writeBackSales(conn, token) {
   const r = await apiGet("/sync/unsynced-sales", token);
@@ -1929,6 +2025,22 @@ async function run() {
       await pushTickets(liveConn, catchUpDue ? CATCH_UP_DAYS : 0)
         .catch(e => log("Ticket push error: " + e.message));
       if (catchUpDue) saveCheckpoint({ ...loadCheckpoint(), lastTicketCatchUp: Date.now() });
+
+      // Attendance, on its own throttle. The sixty-day pass keeps its own
+      // catch-up key rather than riding catchUpDue: that is true for a single
+      // cycle, and the two throttles would only rarely land on the same one.
+      const cpClock = loadCheckpoint();
+      if (Date.now() - (cpClock.lastClockPull || 0) >= CLOCK_PULL_EVERY_MS) {
+        const clockCatchUp = Date.now() - (cpClock.lastClockCatchUp || 0) >= CATCH_UP_EVERY_MS;
+        saveCheckpoint({
+          ...cpClock,
+          lastClockPull: Date.now(),
+          ...(clockCatchUp ? { lastClockCatchUp: Date.now() } : {}),
+        });
+        await pullClockings(liveConn, clockCatchUp ? CLOCK_CATCH_UP_DAYS : CLOCK_DAYS)
+          .catch(e => log("Clock pull error: " + e.message));
+      }
+
       if (liveToken) {
         await applyPendingChanges(liveConn, liveToken)
           .catch(e => log("PendingChanges error: " + e.message));

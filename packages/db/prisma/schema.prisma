@@ -8,23 +8,34 @@ datasource db {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
-  name           String?
-  role           Role
-  passwordHash   String
-  biometricRef   String?
+  id                  String          @id @default(cuid())
+  email               String          @unique
+  name                String?
+  role                Role
+  passwordHash        String
+  biometricRef        String?
   // Taking a login away without deleting the person: their sales, clockings and
   // mail all point at this row, so removing it would take the history with it.
   // authenticate() is what makes this mean anything - a flag nothing checks is
   // just a tidier way of leaving the door open.
-  disabled       Boolean         @default(false)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  salesOrders    SalesOrder[]    @relation("SalesUser")
-  clockings      Clocking[]
-  mailMessages   MailMessage[]
-  passwordResets PasswordReset[]
+  disabled            Boolean         @default(false)
+  // The clock-in PIN, as an HMAC keyed by a server secret - never the digits
+  // (see apps/back/src/lib/clockPin.ts). Unique because that index is the one
+  // thing that guarantees no two people share a PIN. Five wrong tries in a row
+  // set the lock, and a right one clears the count.
+  clockPinHash        String?         @unique
+  clockPinFails       Int             @default(0)
+  clockPinLockedUntil DateTime?
+  // Off hides the person from the tablet's board of names without touching
+  // their login: the owner and the kiosk account are staff, but nobody clocks
+  // them in.
+  clockBoard          Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  salesOrders         SalesOrder[]    @relation("SalesUser")
+  clockings           Clocking[]
+  mailMessages        MailMessage[]
+  passwordResets      PasswordReset[]
 }
 
 // One password reset request.

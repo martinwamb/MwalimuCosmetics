@@ -3,7 +3,8 @@ using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
 
-// Renders FDashboard to a PNG so the layout can actually be looked at.
+// Renders a FumasV5 form, FHome by default, to a PNG so the layout can
+// actually be looked at.
 //
 // The leaderboard and the "Show more" button were both reported missing, and
 // neither could be confirmed from the source alone: one was a missing call, the
@@ -24,7 +25,7 @@ internal static class DashboardHarness
 		string db   = args.Length > 0 ? args[0] : "mwalimuinvest_test";
 		string user = args.Length > 1 ? args[1] : "martin";
 		string outp = args.Length > 2 ? args[2] : "dashboard.png";
-		string formName = args.Length > 3 ? args[3] : "FDashboard";
+		string formName = args.Length > 3 ? args[3] : "FHome";
 
 		if (!db.EndsWith("_test", StringComparison.OrdinalIgnoreCase))
 		{
